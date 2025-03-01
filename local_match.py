@@ -684,6 +684,7 @@ def process_local_histogram_matching(
             print(f'-------------------- For band {b + 1}')
             band_in = ds_in.GetRasterBand(b + 1)
             arr_in = band_in.ReadAsArray().astype(calculation_dtype_precision)
+            del band_in; gc.collect()
 
             # Generate a single matrix for block indices directly
             nX, nY = ds_in.RasterXSize, ds_in.RasterYSize
@@ -695,7 +696,9 @@ def process_local_histogram_matching(
 
             # Compute block indices for each pixel
             row_fs = np.clip(((bounding_rect[3] - Ygeo_2d) / (bounding_rect[3] - bounding_rect[1])) * M - 0.5, 0, M - 1)
+            del Ygeo_2d; gc.collect()
             col_fs = np.clip((((Xgeo_2d - bounding_rect[0]) / (bounding_rect[2] - bounding_rect[0])) * N) - 0.5, 0, N - 1)
+            del Xgeo_2d; gc.collect()
 
             arr_out = np.full_like(arr_in, global_nodata_value, dtype=calculation_dtype_precision)
             valid_mask = arr_in != global_nodata_value
@@ -732,12 +735,16 @@ def process_local_histogram_matching(
                 col_fs[valid_rows, valid_cols],
                 row_fs[valid_rows, valid_cols]
             )
+            del ref_band_2d; gc.collect()
             Mins[valid_rows, valid_cols] = weighted_bilinear_interpolation(
                 loc_band_2d,
                 # loc_count_map[:, :, b],
                 col_fs[valid_rows, valid_cols],
                 row_fs[valid_rows, valid_cols]
             )
+
+            del col_fs, row_fs; gc.collect()
+            del loc_band_2d; gc.collect()
 
             download_block_map(
                 block_map=Mrefs,
@@ -770,7 +777,7 @@ def process_local_histogram_matching(
                 arr_out[valid_pixels] = arr_out[valid_pixels] - pixels_positive_offset
             else:
                 arr_out[valid_pixels], gammas = apply_gamma_correction(arr_in[valid_pixels], Mrefs[valid_pixels], Mins[valid_pixels], alpha)
-
+            del Mrefs, Mins; gc.collect()
 
             gammas_array = np.full(arr_in.shape, global_nodata_value, dtype=calculation_dtype_precision)
             gammas_array[valid_rows, valid_cols] = gammas
@@ -787,10 +794,10 @@ def process_local_histogram_matching(
             )
 
             # arr_out[valid_pixels] = arr_in[valid_pixels] * (Mrefs[valid_pixels] / Mins[valid_pixels]) # An alternative way to calculate the corrected raster
-
             out_band = out_ds.GetRasterBand(b + 1)
             out_band.WriteArray(arr_out)
             out_band.SetNoDataValue(global_nodata_value)
+            del out_band, gammas, arr_out; gc.collect()
 
         ds_in = None
         out_ds.FlushCache()
