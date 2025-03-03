@@ -12,7 +12,7 @@ np.set_printoptions(
 )
 gdal.UseExceptions()
 
-def get_image_metadata(input_image_path):
+def _get_image_metadata(input_image_path):
     """
     Get metadata of a TIFF image, including transform, projection, nodata, and bounds.
 
@@ -58,7 +58,9 @@ def get_image_metadata(input_image_path):
         print(f"Error processing {input_image_path}: {e}")
     return None, None, None, None
 
-def find_overlaps(image_bounds_dict):
+def _find_overlaps(
+        image_bounds_dict
+        ):
     overlaps = []
 
     for key1, bounds1 in image_bounds_dict.items():
@@ -73,7 +75,17 @@ def find_overlaps(image_bounds_dict):
                     overlaps.append((key1, key2))
 
     return tuple(overlaps)
-def calculate_image_stats(num_bands, input_image_path_i, input_image_path_j, id_i, id_j, bound_i, bound_j, nodata_i, nodata_j):
+def _calculate_image_stats(
+        num_bands,
+        input_image_path_i,
+        input_image_path_j,
+        id_i,
+        id_j,
+        bound_i,
+        bound_j,
+        nodata_i,
+        nodata_j
+        ):
     """
 Calculate overlap statistics (mean, std, and size) for two overlapping images,
 as well as their individual statistics, while excluding NoData values.
@@ -197,11 +209,7 @@ id_j: {id_i: {band: {'mean': value, 'std': value, 'size': value}}}}
 
     return overlap_stat, whole_stats
 
-import os
-import numpy as np
-from osgeo import gdal
-
-def append_band_to_tif(
+def _append_band_to_tif(
         band_array: np.ndarray,
         transform: tuple,
         projection: str,
@@ -210,7 +218,7 @@ def append_band_to_tif(
         band_index: int,
         total_bands: int,
         dtype=gdal.GDT_Int16
-):
+        ):
     """
 Appends (or writes) a single band to a GeoTIFF file.
 
@@ -284,7 +292,13 @@ dtype         : gdal data type, e.g. gdal.GDT_Float32, gdal.GDT_Int16, etc.
 
     print(f"Appended band {band_index} to {output_path}.")
 
-def save_multiband_as_geotiff(array, geo_transform, projection, path, nodata_values):
+def _save_multiband_as_geotiff(
+        array,
+        geo_transform,
+        projection,
+        path,
+        nodata_values
+        ):
     driver = gdal.GetDriverByName("GTiff")
     num_bands, rows, cols = array.shape
     out_ds = driver.Create(path, cols, rows, num_bands, gdal.GDT_Int16)
@@ -299,7 +313,11 @@ def save_multiband_as_geotiff(array, geo_transform, projection, path, nodata_val
 
     out_ds.FlushCache()
 
-def merge_rasters(input_array, output_image_folder, output_file_name="merge.tif"):
+def _merge_rasters(
+        input_array,
+        output_image_folder,
+        output_file_name="merge.tif"
+        ):
 
     output_path = os.path.join(output_image_folder, output_file_name)
     input_datasets = [gdal.Open(path) for path in input_array if gdal.Open(path)]
@@ -311,7 +329,13 @@ def merge_rasters(input_array, output_image_folder, output_file_name="merge.tif"
 
     print(f"Merged raster saved to: {output_path}")
 
-def process_global_histogram_matching(input_image_paths_array, output_image_folder, output_global_basename, custom_mean_factor, custom_std_factor):
+def global_histogram_match(
+        input_image_paths_array,
+        output_image_folder,
+        output_global_basename,
+        custom_mean_factor,
+        custom_std_factor
+        ):
     # ---------------------------------------- Calculating statistics
     print('-------------------- Calculating statistics')
     num_bands = gdal.Open(input_image_paths_array[0], gdal.GA_ReadOnly).RasterCount
@@ -322,14 +346,14 @@ def process_global_histogram_matching(input_image_paths_array, output_image_fold
     all_nodata = {}
     all_bounds = {}
     for idx, input_image_path in enumerate(input_image_paths_array, start=0):
-        all_transforms[idx], all_projections[idx], all_nodata[idx], all_bounds[idx] = get_image_metadata(input_image_path)
+        all_transforms[idx], all_projections[idx], all_nodata[idx], all_bounds[idx] = _get_image_metadata(input_image_path)
 
-    overlapping_pairs = find_overlaps(all_bounds)
+    overlapping_pairs = _find_overlaps(all_bounds)
 
     all_overlap_stats = {}
     all_whole_stats = {}
     for id_i, id_j in overlapping_pairs:
-        current_overlap_stats, current_whole_stats = calculate_image_stats(num_bands, input_image_paths_array[id_i], input_image_paths_array[id_j], id_i, id_j, all_bounds[id_i], all_bounds[id_j], all_nodata[id_i], all_nodata[id_j])
+        current_overlap_stats, current_whole_stats = _calculate_image_stats(num_bands, input_image_paths_array[id_i], input_image_paths_array[id_j], id_i, id_j, all_bounds[id_i], all_bounds[id_j], all_nodata[id_i], all_nodata[id_j])
 
         all_overlap_stats.update({key_i: {**all_overlap_stats.get(key_i, {}), **{key_j: {**all_overlap_stats.get(key_i, {}).get(key_j, {}), **stats} for key_j, stats in value.items()}} for key_i, value in current_overlap_stats.items()})
 
@@ -529,7 +553,7 @@ def process_global_histogram_matching(input_image_paths_array, output_image_fold
             adjusted_band = np.where(mask, a * band + b, band)
             # adjusted_bands.append(np.where(mask, a * band + b, band))
 
-            append_band_to_tif(
+            _append_band_to_tif(
                 adjusted_band,
                 all_transforms[img_idx],
                 all_projections[img_idx],
@@ -541,7 +565,7 @@ def process_global_histogram_matching(input_image_paths_array, output_image_fold
             )
         dataset = None
 
-        # save_multiband_as_geotiff(
+        # _save_multiband_as_geotiff(
         #     adjusted_bands_array,
         #     all_transforms[img_idx],
         #     all_projections[img_idx],
@@ -552,27 +576,4 @@ def process_global_histogram_matching(input_image_paths_array, output_image_fold
         print(f"Saved file {img_idx} to: {output_path}")
     # ---------------------------------------- Merge rasters
     print('-------------------- Merging rasters and saving result')
-    merge_rasters(output_path_array, output_image_folder, output_file_name=f"Merged{output_global_basename}.tif")
-
-
-# # ---------------------------------------- Call function
-# input_image_paths_array = [
-#     # "/Users/kanoalindiwe/Downloads/resources/worldview/Flaash_OrthoFrom20182019Lidar/17DEC08211758-M1BS-016445319010_01_P003_FLAASH_OrthoFrom20182019Lidar.tif",
-#     # "/Users/kanoalindiwe/Downloads/resources/worldview/Flaash_OrthoFrom20182019Lidar/17DEC08211800-M1BS-016445319010_01_P004_FLAASH_OrthoFrom20182019Lidar.tif",
-#     # "/Users/kanoalindiwe/Downloads/resources/worldview/Flaash_OrthoFrom20182019Lidar/17DEC08211801-M1BS-016445319010_01_P005_FLAASH_PuuSubset_OrthoFrom20182019Lidar.tif",
-#     # '/Users/kanoalindiwe/Downloads/resources/worldview/Flaash_OrthoFrom20182019Lidar/17DEC08211840-M1BS-016445318010_01_P015_FLAASH_OrthoFrom20182019Lidar.tif',
-#     # '/Users/kanoalindiwe/Downloads/resources/worldview/Flaash_OrthoFrom20182019Lidar/17DEC08211841-M1BS-016445318010_01_P016_FLAASH_OrthoFrom20182019Lidar.tif',
-#     # '/Users/kanoalindiwe/Downloads/temp/3subset.tif',
-#     # '/Users/kanoalindiwe/Downloads/temp/4subset.tif',
-#     '/Users/kanoalindiwe/Downloads/temp/ClippedToPuu3.tif',
-#     '/Users/kanoalindiwe/Downloads/temp/ClippedToPuu4.tif',
-#     '/Users/kanoalindiwe/Downloads/temp/ClippedToPuu5.tif',
-#     '/Users/kanoalindiwe/Downloads/temp/ClippedToPuu15.tif',
-#     '/Users/kanoalindiwe/Downloads/temp/ClippedToPuu16.tif',
-#
-# ]
-# output_image_folder = "/Users/kanoalindiwe/Downloads/temp/"
-# output_global_basename = "_GlobalHistMatch_goodWholeMea3nNodata0"
-# custom_mean_factor = 3 # Defualt 1
-# custom_std_factor = 1 # Defualt 1
-# process_global_histogram_matching(input_image_paths_array, output_image_folder, output_global_basename, custom_mean_factor, custom_std_factor)
+    _merge_rasters(output_path_array, output_image_folder, output_file_name=f"Merged{output_global_basename}.tif")

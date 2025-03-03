@@ -1,6 +1,5 @@
 import os
 from doctest import debug
-
 import numpy as np
 import math
 import rasterio
@@ -10,8 +9,11 @@ from osgeo import gdal
 from typing import Tuple, List, Optional
 from scipy.ndimage import map_coordinates, gaussian_filter
 
-
-def merge_rasters(input_array, output_image_folder, output_file_name="merge.tif"):
+def _merge_rasters(
+        input_array,
+        output_image_folder,
+        output_file_name="merge.tif"
+        ):
     output_path = os.path.join(output_image_folder, output_file_name)
     input_datasets = [gdal.Open(path) for path in input_array if gdal.Open(path)]
     gdal.Warp(
@@ -21,7 +23,9 @@ def merge_rasters(input_array, output_image_folder, output_file_name="merge.tif"
     )
     print(f"Merged raster saved to: {output_path}")
 
-def get_image_metadata(input_image_path):
+def _get_image_metadata(
+        input_image_path
+        ):
     """
 Get metadata of a TIFF image, including transform, projection, nodata, and bounds.
     """
@@ -51,7 +55,9 @@ Get metadata of a TIFF image, including transform, projection, nodata, and bound
         print(f"Error processing {input_image_path}: {e}")
     return None, None, None, None
 
-def get_bounding_rectangle(image_paths: List[str]):
+def _get_bounding_rectangle(
+        image_paths: List[str]
+        ):
     """
 Computes the minimum bounding rectangle (x_min, y_min, x_max, y_max)
 that covers all input images.
@@ -59,7 +65,7 @@ that covers all input images.
     x_mins, y_mins, x_maxs, y_maxs = [], [], [], []
 
     for path in image_paths:
-        transform, proj, nodata, bounds = get_image_metadata(path)
+        transform, proj, nodata, bounds = _get_image_metadata(path)
         if bounds is not None:
             x_mins.append(bounds["x_min"])
             y_mins.append(bounds["y_min"])
@@ -68,8 +74,7 @@ that covers all input images.
 
     return (min(x_mins), min(y_mins), max(x_maxs), max(y_maxs))
 
-
-def compute_mosaic_coefficient_of_variation(
+def _compute_mosaic_coefficient_of_variation(
         image_paths: List[str],
         nodata_value: float,
         reference_std: float = 45.0,
@@ -77,7 +82,7 @@ def compute_mosaic_coefficient_of_variation(
         base_block_size: Tuple[int, int] = (10, 10),
         band_index: int = 1,
         calculation_dtype_precision = 'float32'
-) -> Tuple[int, int]:
+        ) -> Tuple[int, int]:
     all_pixels = []
 
     # Collect pixel values from all images
@@ -118,8 +123,7 @@ def compute_mosaic_coefficient_of_variation(
 
     return M, N
 
-
-def compute_distribution_map(
+def _compute_distribution_map(
         image_paths: List[str],
         bounding_rect: Tuple[float, float, float, float],
         M: int,
@@ -128,7 +132,7 @@ def compute_distribution_map(
         nodata_value: float = None,
         valid_pixel_threshold: float = 0.001,
         calculation_dtype_precision = 'float32'
-) -> Tuple[np.ndarray, np.ndarray]:
+        ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Divides the bounding rectangle into (M x N) blocks and performs
     a "mean of the means" across all images (unweighted).
@@ -270,8 +274,11 @@ def compute_distribution_map(
 
     return final_block_map, final_count_map
 
-
-def weighted_bilinear_interpolation(C_B, x_frac, y_frac):
+def _weighted_bilinear_interpolation(
+        C_B,
+        x_frac,
+        y_frac
+        ):
     # 1) Create a mask that is 1 where valid (not NaN), 0 where NaN
     mask = ~np.isnan(C_B)
 
@@ -303,15 +310,14 @@ def weighted_bilinear_interpolation(C_B, x_frac, y_frac):
 
     return interpolated_values
 
-
-def download_block_map(
+def _download_block_map(
         block_map: np.ndarray,
         bounding_rect: Tuple[float, float, float, float],
         output_image_path: str,
         projection: str = "EPSG:4326",  # Default to WGS84
         dtype = 'float32',         # GDAL data type as a string
         nodata_value: Optional[float] = None
-):
+    ):
     """
     Export the block_map as a georeferenced raster image.
 
@@ -377,8 +383,10 @@ def download_block_map(
 
     print(f"Block map saved to: {output_image_path}")
 
-
-def compute_block_size(input_image_array_path, target_blocks_per_image, bounding_rect):
+def _compute_block_size(
+        input_image_array_path,
+        target_blocks_per_image,
+        bounding_rect):
     num_images = len(input_image_array_path)
 
     # Total target blocks scaled by the number of images
@@ -414,12 +422,12 @@ def compute_block_size(input_image_array_path, target_blocks_per_image, bounding
 
     return M, N
 
-def apply_gamma_correction(
+def _apply_gamma_correction(
         arr_in: np.ndarray,
         Mrefs: np.ndarray,
         Mins: np.ndarray,
         alpha: float = 1.0
-) -> Tuple[np.ndarray, np.ndarray]:
+        ) -> Tuple[np.ndarray, np.ndarray]:
     """
 Perform gamma correction using the combined equation for valid pixels.
 
@@ -445,8 +453,9 @@ np.ndarray: Gamma-corrected pixel values (P_res(x, y)).
 
     return arr_out_valid, gammas
 
-
-def get_lowest_pixel_value(raster_path):
+def _get_lowest_pixel_value(
+        raster_path
+        ):
     """
 Get the lowest pixel value in a single raster file.
 
@@ -466,7 +475,11 @@ float: The lowest pixel value in the raster.
         # Get the minimum value, ignoring NaNs
         return np.nanmin(data)
 
-def add_value_to_raster(input_image_path, output_image_path, value):
+def _add_value_to_raster(
+        input_image_path,
+        output_image_path,
+        value
+        ):
     """
 Opens a raster, adds 'value' only to valid pixels (excluding nodata pixels),
 and writes the result to a new raster, preserving the original nodata value.
@@ -500,8 +513,11 @@ and writes the result to a new raster, preserving the original nodata value.
         with rasterio.open(output_image_path, 'w', **out_meta) as dst:
             dst.write(out_data)
 
-
-def smooth_array(input_array: np.ndarray, nodata_value: Optional[float] = None, scale_factor: float = 1.0) -> np.ndarray:
+def _smooth_array(
+        input_array: np.ndarray,
+        nodata_value: Optional[float] = None,
+        scale_factor: float = 1.0
+        ) -> np.ndarray:
     """
 Smooth a NumPy array using Gaussian smoothing while excluding NaN or NoData values.
 
@@ -538,8 +554,7 @@ np.ndarray: Smoothed array with nodata regions preserved.
 
     return smoothed_normalized
 
-
-def process_local_histogram_matching(
+def local_histogram_match(
         input_image_paths: List[str],
         output_image_folder: str,
         output_local_basename: str,
@@ -549,10 +564,10 @@ def process_local_histogram_matching(
         calculation_dtype_precision = 'float32',
         floor_value: Optional[float] = None,
         gamma_bounds: Optional[Tuple[float, float]] = None,
-        output_dtype = 'float16',
+        output_dtype = 'float32',
         projection: str = "EPSG:4326",
         debug_mode: bool = False,
-):
+        ):
 
     # Its better to compute this offset right before gamma correciton, apply, then reverse
     # print('-------------------- Computing offset to make raster pixels > 0')
@@ -562,7 +577,7 @@ def process_local_histogram_matching(
     #
     # # Find the lowest pixel value across all input rasters
     # for raster_path in input_image_paths:
-    #     value = get_lowest_pixel_value(raster_path)
+    #     value = _get_lowest_pixel_value(raster_path)
     #     if lowest_value is None or value < lowest_value:
     #         lowest_value = value
     # print(f'Lowest_value: {lowest_value}')
@@ -575,19 +590,20 @@ def process_local_histogram_matching(
     #
     #         offset_image_paths.append(offset_image_path)
     #
-    #         add_value_to_raster(raster_path, offset_image_path, pixels_positive_offset)
+    #         _add_value_to_raster(raster_path, offset_image_path, pixels_positive_offset)
     #         print(f"Offset of {pixels_positive_offset} saved: {offset_image_path}")
     # input_image_paths = offset_image_paths
 
     print('-------------------- Computing block size')
+    print(f'Found {len(input_image_paths)} images')
     if not os.path.exists(output_image_folder):
         os.makedirs(output_image_folder, exist_ok=True)
 
     # bounding rectangle
-    bounding_rect = get_bounding_rectangle(input_image_paths)
+    bounding_rect = _get_bounding_rectangle(input_image_paths)
     print(f"Bounding rectangle: {bounding_rect}")
 
-    M, N = compute_block_size(input_image_paths, target_blocks_per_image, bounding_rect)
+    M, N = _compute_block_size(input_image_paths, target_blocks_per_image, bounding_rect)
     print(f'Blocks(M,N): {M}, {N} = {M * N}')
 
     # -- Buffer boundary
@@ -608,12 +624,12 @@ def process_local_histogram_matching(
     # bounding_rect = (x_min, y_min, x_max, y_max)
 
     # -- Alternatie aproach from the paper which I dont like
-    # M, N = compute_mosaic_coefficient_of_variation(input_image_paths, global_nodata_value)
+    # M, N = _compute_mosaic_coefficient_of_variation(input_image_paths, global_nodata_value)
 
     print('-------------------- Computing global reference block map')
     num_bands = gdal.Open(input_image_paths[0], gdal.GA_ReadOnly).RasterCount
 
-    ref_map, ref_count_map = compute_distribution_map(
+    ref_map, ref_count_map = _compute_distribution_map(
         input_image_paths,
         bounding_rect,
         M,
@@ -622,10 +638,10 @@ def process_local_histogram_matching(
         nodata_value=global_nodata_value
     )
 
-    # ref_map = smooth_array(ref_map, nodata_value=global_nodata_value)
+    # ref_map = _smooth_array(ref_map, nodata_value=global_nodata_value)
 
     if debug_mode:
-        download_block_map(
+        _download_block_map(
             block_map=np.nan_to_num(ref_map, nan=global_nodata_value),
             bounding_rect=bounding_rect,
             output_image_path=os.path.join(output_image_folder, "RefDistMap.tif"),
@@ -637,7 +653,7 @@ def process_local_histogram_matching(
     for img_path in input_image_paths:
         print(f'-------------------- Processing: {img_path}')
         print(f'-------------------- Computing local block map')
-        loc_map, loc_count_map = compute_distribution_map(
+        loc_map, loc_count_map = _compute_distribution_map(
             [img_path],
             bounding_rect,
             M,
@@ -646,13 +662,13 @@ def process_local_histogram_matching(
             nodata_value=global_nodata_value
         )
 
-        # loc_map = smooth_array(loc_map, nodata_value=global_nodata_value)
+        # loc_map = _smooth_array(loc_map, nodata_value=global_nodata_value)
 
         out_name = os.path.splitext(os.path.basename(img_path))[0] + output_local_basename + ".tif"
         out_path = os.path.join(output_image_folder, out_name)
 
         if debug_mode:
-            download_block_map(
+            _download_block_map(
                 block_map=np.nan_to_num(loc_count_map, nan=global_nodata_value),
                 bounding_rect=bounding_rect,
                 output_image_path=os.path.join(
@@ -664,7 +680,7 @@ def process_local_histogram_matching(
             )
 
         if debug_mode:
-            download_block_map(
+            _download_block_map(
                 block_map=np.nan_to_num(loc_map, nan=global_nodata_value),
                 bounding_rect=bounding_rect,
                 output_image_path=os.path.join(
@@ -678,6 +694,8 @@ def process_local_histogram_matching(
         print(f'-------------------- Computing local correction, applying, and saving')
         ds_in = gdal.Open(img_path, gdal.GA_ReadOnly) or RuntimeError(f"Could not open {img_path}")
         driver = gdal.GetDriverByName("GTiff")
+
+        os.remove(out_path) if os.path.isfile(out_path) else None
         out_ds = driver.Create(out_path, ds_in.RasterXSize, ds_in.RasterYSize, num_bands, gdal.GetDataTypeByName(output_dtype))
 
         gt = ds_in.GetGeoTransform()
@@ -723,7 +741,7 @@ def process_local_histogram_matching(
             valid_rows, valid_cols = np.where(valid_mask)
 
             if debug_mode:
-                download_block_map(
+                _download_block_map(
                     block_map=np.where(valid_mask, 1, global_nodata_value),
                     bounding_rect=this_image_bounds,
                     output_image_path=os.path.join(
@@ -738,14 +756,14 @@ def process_local_histogram_matching(
             Mrefs = np.full_like(arr_in, global_nodata_value, dtype=calculation_dtype_precision)
             Mins = np.full_like(arr_in, global_nodata_value, dtype=calculation_dtype_precision)
 
-            Mrefs[valid_rows, valid_cols] = weighted_bilinear_interpolation(
+            Mrefs[valid_rows, valid_cols] = _weighted_bilinear_interpolation(
                 ref_band_2d,
                 # ref_count_map[:, :, b],
                 col_fs[valid_rows, valid_cols],
                 row_fs[valid_rows, valid_cols]
             )
             del ref_band_2d; gc.collect()
-            Mins[valid_rows, valid_cols] = weighted_bilinear_interpolation(
+            Mins[valid_rows, valid_cols] = _weighted_bilinear_interpolation(
                 loc_band_2d,
                 # loc_count_map[:, :, b],
                 col_fs[valid_rows, valid_cols],
@@ -756,7 +774,7 @@ def process_local_histogram_matching(
             del loc_band_2d; gc.collect()
 
             if debug_mode:
-                download_block_map(
+                _download_block_map(
                     block_map=Mrefs,
                     bounding_rect=this_image_bounds,
                     output_image_path=os.path.join(
@@ -768,7 +786,7 @@ def process_local_histogram_matching(
                 )
 
             if debug_mode:
-                download_block_map(
+                _download_block_map(
                     block_map=Mins,
                     bounding_rect=this_image_bounds,
                     output_image_path=os.path.join(
@@ -784,17 +802,17 @@ def process_local_histogram_matching(
 
             if smallest_value <= 0:
                 pixels_positive_offset = abs(smallest_value) + 1
-                arr_out[valid_pixels], gammas = apply_gamma_correction(arr_in[valid_pixels]+pixels_positive_offset, Mrefs[valid_pixels]+pixels_positive_offset, Mins[valid_pixels]+pixels_positive_offset, alpha)
+                arr_out[valid_pixels], gammas = _apply_gamma_correction(arr_in[valid_pixels]+pixels_positive_offset, Mrefs[valid_pixels]+pixels_positive_offset, Mins[valid_pixels]+pixels_positive_offset, alpha)
                 arr_out[valid_pixels] = arr_out[valid_pixels] - pixels_positive_offset
             else:
-                arr_out[valid_pixels], gammas = apply_gamma_correction(arr_in[valid_pixels], Mrefs[valid_pixels], Mins[valid_pixels], alpha)
+                arr_out[valid_pixels], gammas = _apply_gamma_correction(arr_in[valid_pixels], Mrefs[valid_pixels], Mins[valid_pixels], alpha)
             del Mrefs, Mins; gc.collect()
 
             gammas_array = np.full(arr_in.shape, global_nodata_value, dtype=calculation_dtype_precision)
             gammas_array[valid_rows, valid_cols] = gammas
 
             if debug_mode:
-                download_block_map(
+                _download_block_map(
                     block_map=gammas_array,
                     bounding_rect=this_image_bounds,
                     output_image_path=os.path.join(
@@ -823,6 +841,5 @@ def process_local_histogram_matching(
 
     # 6) Merge final corrected rasters
     print("Merging saved rasters")
-    merge_rasters(corrected_paths, output_image_folder, output_file_name=f"Merged{output_local_basename}.tif")
+    _merge_rasters(corrected_paths, output_image_folder, output_file_name=f"Merged{output_local_basename}.tif")
     print("Local histogram matching done")
-    

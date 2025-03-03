@@ -1,5 +1,5 @@
-from local_match import process_local_histogram_matching
-from global_match import process_global_histogram_matching
+from local_histogram_match import local_histogram_match
+from global_histogram_match import global_histogram_match
 import os
 
 def run_automated_image_mosaicing():
@@ -17,7 +17,7 @@ def run_automated_image_mosaicing():
     custom_std_factor = 1 # Defualt 1
 
     input_image_paths_array = [os.path.join(input_folder, f) for f in os.listdir(input_folder) if f.lower().endswith('.tif')]
-    # process_global_histogram_matching(input_image_paths_array, global_folder, output_global_basename, custom_mean_factor, custom_std_factor)
+    # global_histogram_match(input_image_paths_array, global_folder, output_global_basename, custom_mean_factor, custom_std_factor)
 
 
 
@@ -29,7 +29,7 @@ def run_automated_image_mosaicing():
     local_folder = '/mnt/s/Satellite_Imagery/Big_Island/Unprocessed/PuuWaawaaImages/Mosaic/PuuWaawaa_20171208/LocalMatch'
     output_local_basename = "_LocalMatch"
 
-    process_local_histogram_matching(
+    local_histogram_match(
         input_image_paths_array,
         local_folder,
         output_local_basename,
@@ -40,4 +40,5 @@ def run_automated_image_mosaicing():
     )
 
     print('Done with main match imagery')
+
 run_automated_image_mosaicing()
