@@ -564,7 +564,7 @@ def local_histogram_match(
         calculation_dtype_precision = 'float32',
         floor_value: Optional[float] = None,
         gamma_bounds: Optional[Tuple[float, float]] = None,
-        output_dtype = 'float32',
+        output_dtype = 'float16',
         projection: str = "EPSG:4326",
         debug_mode: bool = False,
         ):
