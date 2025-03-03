@@ -1,4 +1,6 @@
 import os
+from doctest import debug
+
 import numpy as np
 import math
 import rasterio
@@ -546,7 +548,10 @@ def process_local_histogram_matching(
         alpha: float = 1.0,
         calculation_dtype_precision = 'float32',
         floor_value: Optional[float] = None,
-        gamma_bounds: Optional[Tuple[float, float]] = None
+        gamma_bounds: Optional[Tuple[float, float]] = None,
+        output_dtype = 'float16',
+        projection: str = "EPSG:4326",
+        debug_mode: bool = False,
 ):
 
     # Its better to compute this offset right before gamma correciton, apply, then reverse
@@ -619,13 +624,14 @@ def process_local_histogram_matching(
 
     # ref_map = smooth_array(ref_map, nodata_value=global_nodata_value)
 
-    download_block_map(
-        block_map=np.nan_to_num(ref_map, nan=global_nodata_value),
-        bounding_rect=bounding_rect,
-        output_image_path=os.path.join(output_image_folder, "RefDistMap.tif"),
-        nodata_value=global_nodata_value,
-        projection = "EPSG:6635",
-    )
+    if debug_mode:
+        download_block_map(
+            block_map=np.nan_to_num(ref_map, nan=global_nodata_value),
+            bounding_rect=bounding_rect,
+            output_image_path=os.path.join(output_image_folder, "RefDistMap.tif"),
+            nodata_value=global_nodata_value,
+            projection = projection,
+        )
 
     corrected_paths = []
     for img_path in input_image_paths:
@@ -645,32 +651,34 @@ def process_local_histogram_matching(
         out_name = os.path.splitext(os.path.basename(img_path))[0] + output_local_basename + ".tif"
         out_path = os.path.join(output_image_folder, out_name)
 
-        download_block_map(
-            block_map=np.nan_to_num(loc_count_map, nan=global_nodata_value),
-            bounding_rect=bounding_rect,
-            output_image_path=os.path.join(
-                os.path.dirname(out_path),
-                "locCountMaps",
-                os.path.splitext(os.path.basename(out_path))[0] + "_locCountMaps" + os.path.splitext(out_path)[1]),
-            nodata_value=global_nodata_value,
-            projection = "EPSG:6635",
-        )
+        if debug_mode:
+            download_block_map(
+                block_map=np.nan_to_num(loc_count_map, nan=global_nodata_value),
+                bounding_rect=bounding_rect,
+                output_image_path=os.path.join(
+                    os.path.dirname(out_path),
+                    "locCountMaps",
+                    os.path.splitext(os.path.basename(out_path))[0] + "_locCountMaps" + os.path.splitext(out_path)[1]),
+                nodata_value=global_nodata_value,
+                projection = projection,
+            )
 
-        download_block_map(
-            block_map=np.nan_to_num(loc_map, nan=global_nodata_value),
-            bounding_rect=bounding_rect,
-            output_image_path=os.path.join(
-                os.path.dirname(out_path),
-                "LocalDistMaps",
-                os.path.splitext(os.path.basename(out_path))[0] + "_LocalDistMap" + os.path.splitext(out_path)[1]),
-            nodata_value=global_nodata_value,
-            projection = "EPSG:6635",
-        )
+        if debug_mode:
+            download_block_map(
+                block_map=np.nan_to_num(loc_map, nan=global_nodata_value),
+                bounding_rect=bounding_rect,
+                output_image_path=os.path.join(
+                    os.path.dirname(out_path),
+                    "LocalDistMaps",
+                    os.path.splitext(os.path.basename(out_path))[0] + "_LocalDistMap" + os.path.splitext(out_path)[1]),
+                nodata_value=global_nodata_value,
+                projection = projection,
+            )
 
         print(f'-------------------- Computing local correction, applying, and saving')
         ds_in = gdal.Open(img_path, gdal.GA_ReadOnly) or RuntimeError(f"Could not open {img_path}")
         driver = gdal.GetDriverByName("GTiff")
-        out_ds = driver.Create(out_path, ds_in.RasterXSize, ds_in.RasterYSize, num_bands, gdal.GetDataTypeByName(calculation_dtype_precision))
+        out_ds = driver.Create(out_path, ds_in.RasterXSize, ds_in.RasterYSize, num_bands, gdal.GetDataTypeByName(output_dtype))
 
         gt = ds_in.GetGeoTransform()
         out_ds.SetGeoTransform(gt)
@@ -714,16 +722,17 @@ def process_local_histogram_matching(
             # Ensure valid_mask is correctly applied to the input arrays
             valid_rows, valid_cols = np.where(valid_mask)
 
-            download_block_map(
-                block_map=np.where(valid_mask, 1, global_nodata_value),
-                bounding_rect=this_image_bounds,
-                output_image_path=os.path.join(
-                    os.path.dirname(out_path),
-                    "ValidMasks",
-                    os.path.splitext(os.path.basename(out_path))[0] + f"_ValidMask_{b}.tif"),
-                projection="EPSG:6635",
-                nodata_value=global_nodata_value
-            )
+            if debug_mode:
+                download_block_map(
+                    block_map=np.where(valid_mask, 1, global_nodata_value),
+                    bounding_rect=this_image_bounds,
+                    output_image_path=os.path.join(
+                        os.path.dirname(out_path),
+                        "ValidMasks",
+                        os.path.splitext(os.path.basename(out_path))[0] + f"_ValidMask_{b}.tif"),
+                    projection = projection,
+                    nodata_value=global_nodata_value
+                )
 
             # Ensure weighted interpolation handles only valid regions
             Mrefs = np.full_like(arr_in, global_nodata_value, dtype=calculation_dtype_precision)
@@ -746,27 +755,29 @@ def process_local_histogram_matching(
             del col_fs, row_fs; gc.collect()
             del loc_band_2d; gc.collect()
 
-            download_block_map(
-                block_map=Mrefs,
-                bounding_rect=this_image_bounds,
-                output_image_path=os.path.join(
-                    os.path.dirname(out_path),
-                    "Mrefs",
-                    os.path.splitext(os.path.basename(out_path))[0] + f"_Mrefs_{b}.tif"),
-                projection="EPSG:6635",
-                nodata_value=global_nodata_value
-            )
+            if debug_mode:
+                download_block_map(
+                    block_map=Mrefs,
+                    bounding_rect=this_image_bounds,
+                    output_image_path=os.path.join(
+                        os.path.dirname(out_path),
+                        "Mrefs",
+                        os.path.splitext(os.path.basename(out_path))[0] + f"_Mrefs_{b}.tif"),
+                    projection= projection,
+                    nodata_value=global_nodata_value
+                )
 
-            download_block_map(
-                block_map=Mins,
-                bounding_rect=this_image_bounds,
-                output_image_path=os.path.join(
-                    os.path.dirname(out_path),
-                    "Mins",
-                    os.path.splitext(os.path.basename(out_path))[0] + f"_Mins_{b}.tif"),
-                projection="EPSG:6635",
-                nodata_value=global_nodata_value
-            )
+            if debug_mode:
+                download_block_map(
+                    block_map=Mins,
+                    bounding_rect=this_image_bounds,
+                    output_image_path=os.path.join(
+                        os.path.dirname(out_path),
+                        "Mins",
+                        os.path.splitext(os.path.basename(out_path))[0] + f"_Mins_{b}.tif"),
+                    projection= projection,
+                    nodata_value=global_nodata_value
+                )
 
             valid_pixels = valid_mask #& (Mrefs > 0) & (Mins > 0) # Mask if required but better to offset values <= 0
             smallest_value = np.min([arr_in[valid_pixels], Mrefs[valid_pixels], Mins[valid_pixels]])
@@ -781,19 +792,23 @@ def process_local_histogram_matching(
 
             gammas_array = np.full(arr_in.shape, global_nodata_value, dtype=calculation_dtype_precision)
             gammas_array[valid_rows, valid_cols] = gammas
-            download_block_map(
-                block_map=gammas_array,
-                bounding_rect=this_image_bounds,
-                output_image_path=os.path.join(
-                    os.path.dirname(out_path),
-                    "Gammas",
-                    os.path.splitext(os.path.basename(out_path))[0] + f"_Gamma_{b}.tif"
-                ),
-                projection="EPSG:6635",
-                nodata_value=global_nodata_value
-            )
+
+            if debug_mode:
+                download_block_map(
+                    block_map=gammas_array,
+                    bounding_rect=this_image_bounds,
+                    output_image_path=os.path.join(
+                        os.path.dirname(out_path),
+                        "Gammas",
+                        os.path.splitext(os.path.basename(out_path))[0] + f"_Gamma_{b}.tif"
+                    ),
+                    projection= projection,
+                    nodata_value=global_nodata_value
+                )
 
             # arr_out[valid_pixels] = arr_in[valid_pixels] * (Mrefs[valid_pixels] / Mins[valid_pixels]) # An alternative way to calculate the corrected raster
+
+            arr_out = arr_out.astype(output_dtype)
             out_band = out_ds.GetRasterBand(b + 1)
             out_band.WriteArray(arr_out)
             out_band.SetNoDataValue(global_nodata_value)

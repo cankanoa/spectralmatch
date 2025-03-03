@@ -35,6 +35,8 @@ def run_automated_image_mosaicing():
         output_local_basename,
         target_blocks_per_image = 100,
         global_nodata_value=-9999,
+        projection="EPSG:6635",
+        debug_mode=True,
     )
 
     print('Done with main match imagery')
