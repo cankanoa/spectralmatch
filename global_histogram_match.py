@@ -336,6 +336,9 @@ def global_histogram_match(
         custom_mean_factor,
         custom_std_factor
         ):
+
+    print('----------Starting Global Matching')
+
     # ---------------------------------------- Calculating statistics
     print('-------------------- Calculating statistics')
     num_bands = gdal.Open(input_image_paths_array[0], gdal.GA_ReadOnly).RasterCount

@@ -564,11 +564,23 @@ def local_histogram_match(
         calculation_dtype_precision = 'float32',
         floor_value: Optional[float] = None,
         gamma_bounds: Optional[Tuple[float, float]] = None,
-        output_dtype = 'float16',
+        output_dtype = 'float32', # One of Byte, Int8, UInt16, Int16, UInt32, Int32, UInt64, Int64, Float32, Float64 as np strings
         projection: str = "EPSG:4326",
         debug_mode: bool = False,
         ):
 
+    print('----------Starting Local Matching')
+
+    print(f'Found {len(input_image_paths)} images')
+
+    if global_nodata_value is None:
+        try:
+            global_nodata_value = gdal.Open(input_image_paths[0], gdal.GA_ReadOnly).GetRasterBand(1).GetNoDataValue()
+        except:
+            raise ValueError("global_nodata_value not set and could not get one from the first band of the first image.")
+    print(f"Global nodata value: {global_nodata_value}")
+
+    print('-------------------- Computing block size')
     # Its better to compute this offset right before gamma correciton, apply, then reverse
     # print('-------------------- Computing offset to make raster pixels > 0')
     # lowest_value: float = None
@@ -594,8 +606,6 @@ def local_histogram_match(
     #         print(f"Offset of {pixels_positive_offset} saved: {offset_image_path}")
     # input_image_paths = offset_image_paths
 
-    print('-------------------- Computing block size')
-    print(f'Found {len(input_image_paths)} images')
     if not os.path.exists(output_image_folder):
         os.makedirs(output_image_folder, exist_ok=True)
 
@@ -695,7 +705,6 @@ def local_histogram_match(
         ds_in = gdal.Open(img_path, gdal.GA_ReadOnly) or RuntimeError(f"Could not open {img_path}")
         driver = gdal.GetDriverByName("GTiff")
 
-        os.remove(out_path) if os.path.isfile(out_path) else None
         out_ds = driver.Create(out_path, ds_in.RasterXSize, ds_in.RasterYSize, num_bands, gdal.GetDataTypeByName(output_dtype))
 
         gt = ds_in.GetGeoTransform()
@@ -708,6 +717,11 @@ def local_histogram_match(
 
         for b in range(num_bands):
             print(f'-------------------- For band {b + 1}')
+
+            # Test only the first three bands
+            # if b >= 2:
+            #     continue
+
             band_in = ds_in.GetRasterBand(b + 1)
             arr_in = band_in.ReadAsArray().astype(calculation_dtype_precision)
             del band_in; gc.collect()
