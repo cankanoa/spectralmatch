@@ -4,63 +4,19 @@ import numpy as np
 from osgeo import gdal
 from scipy.optimize import least_squares
 import os
+
+from spectralmatch.utils import _merge_rasters, _get_image_metadata
+
 np.set_printoptions(
     suppress=True,
     precision=3,
     linewidth=300,
-    formatter={'float_kind':lambda x: f"{x: .3f}"}
+    formatter={"float_kind": lambda x: f"{x: .3f}"},
 )
 gdal.UseExceptions()
 
-def _get_image_metadata(input_image_path):
-    """
-    Get metadata of a TIFF image, including transform, projection, nodata, and bounds.
 
-    Args:
-    input_image_path (str): Path to the input image file.
-
-    Returns:
-    tuple: A tuple containing (transform, projection, nodata, bounds).
-    """
-    try:
-        dataset = gdal.Open(input_image_path, gdal.GA_ReadOnly)
-        if dataset is not None:
-            # Get GeoTransform
-            transform = dataset.GetGeoTransform()
-
-            # Get Projection
-            projection = dataset.GetProjection()
-
-            # Get NoData value (assuming from the first band)
-            nodata = dataset.GetRasterBand(1).GetNoDataValue() if dataset.RasterCount > 0 else None
-
-            # Calculate bounds
-            if transform:
-                x_min = transform[0]
-                y_max = transform[3]
-                x_max = x_min + (dataset.RasterXSize * transform[1])
-                y_min = y_max + (dataset.RasterYSize * transform[5])
-                bounds = {
-                    "x_min": x_min,
-                    "y_min": y_min,
-                    "x_max": x_max,
-                    "y_max": y_max,
-                }
-            else:
-                bounds = None
-
-            dataset = None  # Close the dataset
-
-            return transform, projection, nodata, bounds
-        else:
-            print(f"Could not open the file: {input_image_path}")
-    except Exception as e:
-        print(f"Error processing {input_image_path}: {e}")
-    return None, None, None, None
-
-def _find_overlaps(
-        image_bounds_dict
-        ):
+def _find_overlaps(image_bounds_dict):
     overlaps = []
 
     for key1, bounds1 in image_bounds_dict.items():
@@ -75,39 +31,41 @@ def _find_overlaps(
                     overlaps.append((key1, key2))
 
     return tuple(overlaps)
+
+
 def _calculate_image_stats(
-        num_bands,
-        input_image_path_i,
-        input_image_path_j,
-        id_i,
-        id_j,
-        bound_i,
-        bound_j,
-        nodata_i,
-        nodata_j
-        ):
+    num_bands,
+    input_image_path_i,
+    input_image_path_j,
+    id_i,
+    id_j,
+    bound_i,
+    bound_j,
+    nodata_i,
+    nodata_j,
+):
     """
-Calculate overlap statistics (mean, std, and size) for two overlapping images,
-as well as their individual statistics, while excluding NoData values.
+    Calculate overlap statistics (mean, std, and size) for two overlapping images,
+    as well as their individual statistics, while excluding NoData values.
 
-Args:
-num_bands (int): Number of bands in the images.
-input_image_path_i (str): Path to the first image.
-input_image_path_j (str): Path to the second image.
-id_i (int): ID of the first image.
-id_j (int): ID of the second image.
-bound_i (dict): Bounds of the first image in the format {"x_min", "x_max", "y_min", "y_max"}.
-bound_j (dict): Bounds of the second image in the format {"x_min", "x_max", "y_min", "y_max"}.
-nodata_i (float): The NoData value for the first image.
-nodata_j (float): The NoData value for the second image.
+    Args:
+    num_bands (int): Number of bands in the images.
+    input_image_path_i (str): Path to the first image.
+    input_image_path_j (str): Path to the second image.
+    id_i (int): ID of the first image.
+    id_j (int): ID of the second image.
+    bound_i (dict): Bounds of the first image in the format {"x_min", "x_max", "y_min", "y_max"}.
+    bound_j (dict): Bounds of the second image in the format {"x_min", "x_max", "y_min", "y_max"}.
+    nodata_i (float): The NoData value for the first image.
+    nodata_j (float): The NoData value for the second image.
 
-Returns:
-tuple: A tuple containing:
-- overlap_stat: Dictionary of overlap statistics in the format:
-{id_i: {id_j: {band: {'mean': value, 'std': value, 'size': value}}},
-id_j: {id_i: {band: {'mean': value, 'std': value, 'size': value}}}}
-- whole_stats: Dictionary of whole image statistics in the format:
-{id_i: {band: {'mean': value, 'std': value, 'size': value}}}
+    Returns:
+    tuple: A tuple containing:
+    - overlap_stat: Dictionary of overlap statistics in the format:
+    {id_i: {id_j: {band: {'mean': value, 'std': value, 'size': value}}},
+    id_j: {id_i: {band: {'mean': value, 'std': value, 'size': value}}}}
+    - whole_stats: Dictionary of whole image statistics in the format:
+    {id_i: {band: {'mean': value, 'std': value, 'size': value}}}
     """
     from osgeo import gdal
     import numpy as np
@@ -187,10 +145,18 @@ id_j: {id_i: {band: {'mean': value, 'std': value, 'size': value}}}}
         overlap_data_combined_j = overlap_data_j[overlap_mask]
 
         # Calculate overlap statistics
-        mean1 = np.mean(overlap_data_combined_i) if overlap_data_combined_i.size > 0 else 0
-        std1 = np.std(overlap_data_combined_i) if overlap_data_combined_i.size > 0 else 0
-        mean2 = np.mean(overlap_data_combined_j) if overlap_data_combined_j.size > 0 else 0
-        std2 = np.std(overlap_data_combined_j) if overlap_data_combined_j.size > 0 else 0
+        mean1 = (
+            np.mean(overlap_data_combined_i) if overlap_data_combined_i.size > 0 else 0
+        )
+        std1 = (
+            np.std(overlap_data_combined_i) if overlap_data_combined_i.size > 0 else 0
+        )
+        mean2 = (
+            np.mean(overlap_data_combined_j) if overlap_data_combined_j.size > 0 else 0
+        )
+        std2 = (
+            np.std(overlap_data_combined_j) if overlap_data_combined_j.size > 0 else 0
+        )
         overlap_size = overlap_mask.sum()
 
         overlap_stat[id_i][id_j][band_idx] = {
@@ -209,54 +175,49 @@ id_j: {id_i: {band: {'mean': value, 'std': value, 'size': value}}}}
 
     return overlap_stat, whole_stats
 
+
 def _append_band_to_tif(
-        band_array: np.ndarray,
-        transform: tuple,
-        projection: str,
-        output_path: str,
-        nodata_value: float,
-        band_index: int,
-        total_bands: int,
-        dtype=gdal.GDT_Int16
-        ):
+    band_array: np.ndarray,
+    transform: tuple,
+    projection: str,
+    output_path: str,
+    nodata_value: float,
+    band_index: int,
+    total_bands: int,
+    dtype=gdal.GDT_Int16,
+):
     """
-Appends (or writes) a single band to a GeoTIFF file.
+    Appends (or writes) a single band to a GeoTIFF file.
 
-1) If the TIFF file does not exist, create it with 'total_bands' bands.
-- Then write the band_array into band_index.
-2) If the TIFF file exists, open in update mode and write the band_array
-into band_index (1-based).
+    1) If the TIFF file does not exist, create it with 'total_bands' bands.
+    - Then write the band_array into band_index.
+    2) If the TIFF file exists, open in update mode and write the band_array
+    into band_index (1-based).
 
-No reading of existing pixel data is done.
+    No reading of existing pixel data is done.
 
-Args:
-band_array    : 2D NumPy array with shape (rows, cols).
-transform     : (gt0, gt1, gt2, gt3, gt4, gt5) – same as GDAL GeoTransform.
-projection    : WKT string describing projection (same as ds.GetProjection()).
-output_path   : Path to the output GeoTIFF.
-nodata_value  : Value to set as NoData.
-band_index    : 1-based index of the band to write (1 <= band_index <= total_bands).
-total_bands   : How many bands in the final dataset (must be >= band_index).
-dtype         : gdal data type, e.g. gdal.GDT_Float32, gdal.GDT_Int16, etc.
+    Args:
+    band_array    : 2D NumPy array with shape (rows, cols).
+    transform     : (gt0, gt1, gt2, gt3, gt4, gt5) – same as GDAL GeoTransform.
+    projection    : WKT string describing projection (same as ds.GetProjection()).
+    output_path   : Path to the output GeoTIFF.
+    nodata_value  : Value to set as NoData.
+    band_index    : 1-based index of the band to write (1 <= band_index <= total_bands).
+    total_bands   : How many bands in the final dataset (must be >= band_index).
+    dtype         : gdal data type, e.g. gdal.GDT_Float32, gdal.GDT_Int16, etc.
     """
     rows, cols = band_array.shape
 
     # 1. If file does not exist, create it
     if not os.path.exists(output_path):
         driver = gdal.GetDriverByName("GTiff")
-        out_ds = driver.Create(
-            output_path,
-            cols,
-            rows,
-            total_bands,
-            dtype
-        )
+        out_ds = driver.Create(output_path, cols, rows, total_bands, dtype)
         # Set georeferencing only once (on creation)
         out_ds.SetGeoTransform(transform)
         out_ds.SetProjection(projection)
 
         # Initialize all bands to the nodata (optional, if you want them pre-filled)
-        for b_i in range(1, total_bands+1):
+        for b_i in range(1, total_bands + 1):
             band_tmp = out_ds.GetRasterBand(b_i)
             band_tmp.Fill(nodata_value)
             band_tmp.SetNoDataValue(nodata_value)
@@ -292,13 +253,8 @@ dtype         : gdal data type, e.g. gdal.GDT_Float32, gdal.GDT_Int16, etc.
 
     print(f"Appended band {band_index} to {output_path}.")
 
-def _save_multiband_as_geotiff(
-        array,
-        geo_transform,
-        projection,
-        path,
-        nodata_values
-        ):
+
+def _save_multiband_as_geotiff(array, geo_transform, projection, path, nodata_values):
     driver = gdal.GetDriverByName("GTiff")
     num_bands, rows, cols = array.shape
     out_ds = driver.Create(path, cols, rows, num_bands, gdal.GDT_Int16)
@@ -313,34 +269,19 @@ def _save_multiband_as_geotiff(
 
     out_ds.FlushCache()
 
-def _merge_rasters(
-        input_array,
-        output_image_folder,
-        output_file_name="merge.tif"
-        ):
-
-    output_path = os.path.join(output_image_folder, output_file_name)
-    input_datasets = [gdal.Open(path) for path in input_array if gdal.Open(path)]
-    gdal.Warp(
-        output_path,
-        input_datasets,
-        format='GTiff',
-    )
-
-    print(f"Merged raster saved to: {output_path}")
 
 def global_histogram_match(
-        input_image_paths_array,
-        output_image_folder,
-        output_global_basename,
-        custom_mean_factor,
-        custom_std_factor
-        ):
+    input_image_paths_array,
+    output_image_folder,
+    output_global_basename,
+    custom_mean_factor,
+    custom_std_factor,
+):
 
-    print('----------Starting Global Matching')
+    print("----------Starting Global Matching")
 
     # ---------------------------------------- Calculating statistics
-    print('-------------------- Calculating statistics')
+    print("-------------------- Calculating statistics")
     num_bands = gdal.Open(input_image_paths_array[0], gdal.GA_ReadOnly).RasterCount
     num_images = len(input_image_paths_array)
 
@@ -349,21 +290,47 @@ def global_histogram_match(
     all_nodata = {}
     all_bounds = {}
     for idx, input_image_path in enumerate(input_image_paths_array, start=0):
-        all_transforms[idx], all_projections[idx], all_nodata[idx], all_bounds[idx] = _get_image_metadata(input_image_path)
+        all_transforms[idx], all_projections[idx], all_nodata[idx], all_bounds[idx] = (
+            _get_image_metadata(input_image_path)
+        )
 
     overlapping_pairs = _find_overlaps(all_bounds)
 
     all_overlap_stats = {}
     all_whole_stats = {}
     for id_i, id_j in overlapping_pairs:
-        current_overlap_stats, current_whole_stats = _calculate_image_stats(num_bands, input_image_paths_array[id_i], input_image_paths_array[id_j], id_i, id_j, all_bounds[id_i], all_bounds[id_j], all_nodata[id_i], all_nodata[id_j])
+        current_overlap_stats, current_whole_stats = _calculate_image_stats(
+            num_bands,
+            input_image_paths_array[id_i],
+            input_image_paths_array[id_j],
+            id_i,
+            id_j,
+            all_bounds[id_i],
+            all_bounds[id_j],
+            all_nodata[id_i],
+            all_nodata[id_j],
+        )
 
-        all_overlap_stats.update({key_i: {**all_overlap_stats.get(key_i, {}), **{key_j: {**all_overlap_stats.get(key_i, {}).get(key_j, {}), **stats} for key_j, stats in value.items()}} for key_i, value in current_overlap_stats.items()})
+        all_overlap_stats.update(
+            {
+                key_i: {
+                    **all_overlap_stats.get(key_i, {}),
+                    **{
+                        key_j: {
+                            **all_overlap_stats.get(key_i, {}).get(key_j, {}),
+                            **stats,
+                        }
+                        for key_j, stats in value.items()
+                    },
+                }
+                for key_i, value in current_overlap_stats.items()
+            }
+        )
 
         all_whole_stats.update(current_whole_stats)
 
     # ---------------------------------------- Model building and adjustment
-    print('-------------------- Building Model and Applying Adjustments')
+    print("-------------------- Building Model and Applying Adjustments")
 
     # Prepare a 3D array to hold the final a/b parameters per band:
     #   shape: (num_bands, 2*num_images, 1)
@@ -387,12 +354,15 @@ def global_histogram_match(
 
                     # We'll gather the global (whole) stats for images i and j:
                     mean_1 = all_overlap_stats[i][j][band_idx]["mean"]
-                    std_1  = all_overlap_stats[i][j][band_idx]["std"]
+                    std_1 = all_overlap_stats[i][j][band_idx]["std"]
                     mean_2 = all_overlap_stats[j][i][band_idx]["mean"]
-                    std_2  = all_overlap_stats[j][i][band_idx]["std"]
+                    std_2 = all_overlap_stats[j][i][band_idx]["std"]
 
-                    print( f"\tOverlap({i}-{j}):", end="")
-                    print('\t', f'size: {overlap_size}px, mean:{mean_1:.2f} vs {mean_2:.2f}, std:{std_1:.2f} vs {std_2:.2f}')
+                    print(f"\tOverlap({i}-{j}):", end="")
+                    print(
+                        "\t",
+                        f"size: {overlap_size}px, mean:{mean_1:.2f} vs {mean_2:.2f}, std:{std_1:.2f} vs {std_2:.2f}",
+                    )
                     overlap_pairs.append((i, j))
                     total_overlap_pixels += overlap_size
 
@@ -401,20 +371,24 @@ def global_histogram_match(
                     num_params = 2 * num_images
 
                     # mean difference row
-                    mean_row = [0]*num_params
-                    mean_row[2*i] = mean_1
-                    mean_row[2*i+1] = 1
-                    mean_row[2*j] = -mean_2
-                    mean_row[2*j+1] = -1
+                    mean_row = [0] * num_params
+                    mean_row[2 * i] = mean_1
+                    mean_row[2 * i + 1] = 1
+                    mean_row[2 * j] = -mean_2
+                    mean_row[2 * j + 1] = -1
 
                     # std difference row
-                    std_row = [0]*num_params
-                    std_row[2*i] = std_1
-                    std_row[2*j] = -std_2
+                    std_row = [0] * num_params
+                    std_row[2 * i] = std_1
+                    std_row[2 * j] = -std_2
 
                     # Apply overlap weight (p_ij = s_ij)
-                    mean_row = [val * overlap_size * custom_mean_factor for val in mean_row]
-                    std_row = [val * overlap_size * custom_std_factor for val in std_row]
+                    mean_row = [
+                        val * overlap_size * custom_mean_factor for val in mean_row
+                    ]
+                    std_row = [
+                        val * overlap_size * custom_std_factor for val in std_row
+                    ]
 
                     # Observed values (targets) are 0 for these constraints
                     observed_values_vector.append(0)  # mean diff
@@ -436,15 +410,15 @@ def global_histogram_match(
             Vj = all_whole_stats[img_idx][band_idx]["std"]
 
             # mean constraint row
-            mean_row = [0]*(2*num_images)
-            mean_row[2*img_idx] = Mj
-            mean_row[2*img_idx+1] = 1.0
+            mean_row = [0] * (2 * num_images)
+            mean_row[2 * img_idx] = Mj
+            mean_row[2 * img_idx + 1] = 1.0
             # we want: a_j*M_j + b_j - M_j = 0 => observed = M_j
             mean_obs = Mj
 
             # std constraint row
-            std_row = [0]*(2*num_images)
-            std_row[2*img_idx] = Vj
+            std_row = [0] * (2 * num_images)
+            std_row[2 * img_idx] = Vj
             # we want: a_j*V_j - V_j = 0 => observed = V_j
             std_obs = Vj
 
@@ -479,7 +453,9 @@ def global_histogram_match(
         all_adjustment_params[band_idx] = adjustment_params
 
         # ---------------------------------------- Print info
-        print(f"Shape: constraint_matrix: {constraint_matrix.shape}, adjustment_params: {adjustment_params.shape}, observed_values_vector: {observed_values_vector.shape}")
+        print(
+            f"Shape: constraint_matrix: {constraint_matrix.shape}, adjustment_params: {adjustment_params.shape}, observed_values_vector: {observed_values_vector.shape}"
+        )
         print("constraint_matrix with labels:")
         # np.savetxt(sys.stdout, constraint_matrix, fmt="%16.3f")
 
@@ -487,7 +463,7 @@ def global_histogram_match(
         overlap_count = len(overlap_pairs)  # You must have recorded overlaps somewhere
 
         # Add two labels per overlap pair
-        for (i, j) in overlap_pairs:
+        for i, j in overlap_pairs:
             row_labels.append(f"Overlap({i}-{j}) Mean Diff")
             row_labels.append(f"Overlap({i}-{j}) Std Diff")
 
@@ -517,28 +493,29 @@ def global_histogram_match(
                 line += f"{val:18.3f}"
             print(line)
 
-        print('adjustment_params:')
+        print("adjustment_params:")
         np.savetxt(sys.stdout, adjustment_params, fmt="%18.3f")
-        print('observed_values_vector:')
+        print("observed_values_vector:")
         np.savetxt(sys.stdout, observed_values_vector, fmt="%18.3f")
 
-
-    print('-------------------- Apply adjustments and saving results')
+    print("-------------------- Apply adjustments and saving results")
     output_path_array = []
     for img_idx in range(num_images):
         # for img_idx in [2]:
         adjusted_bands = []
         dataset = gdal.Open(input_image_paths_array[img_idx], gdal.GA_ReadOnly)
-        print('open raster')
+        print("open raster")
         if not dataset:
             print(f"Error: Could not open file {input_image_paths_array[img_idx]}")
             continue
 
         # adjusted_bands_array = np.stack(adjusted_bands, axis=0)
         input_filename = os.path.basename(input_image_paths_array[img_idx])
-        output_filename = os.path.splitext(input_filename)[0] + output_global_basename + ".tif"
-        os.makedirs(os.path.join(output_image_folder, 'images'), exist_ok=True)
-        output_path = os.path.join(output_image_folder, 'images', output_filename)
+        output_filename = (
+            os.path.splitext(input_filename)[0] + output_global_basename + ".tif"
+        )
+        os.makedirs(os.path.join(output_image_folder, "images"), exist_ok=True)
+        output_path = os.path.join(output_image_folder, "images", output_filename)
         output_path_array.append(output_path)
 
         for band_idx in range(num_bands):
@@ -547,7 +524,9 @@ def global_histogram_match(
             input_dtype = raw_band.DataType
 
             if band is None:
-                print(f"Error: Could not access band {band_idx + 1} in file {input_image_paths_array[img_idx]}")
+                print(
+                    f"Error: Could not access band {band_idx + 1} in file {input_image_paths_array[img_idx]}"
+                )
                 continue
             mask = band != all_nodata[img_idx]
             a = all_adjustment_params[band_idx, 2 * img_idx, 0]
@@ -578,5 +557,9 @@ def global_histogram_match(
 
         print(f"Saved file {img_idx} to: {output_path}")
     # ---------------------------------------- Merge rasters
-    print('-------------------- Merging rasters and saving result')
-    _merge_rasters(output_path_array, output_image_folder, output_file_name=f"Merged{output_global_basename}.tif")
+    print("-------------------- Merging rasters and saving result")
+    _merge_rasters(
+        output_path_array,
+        output_image_folder,
+        output_file_name=f"Merged{output_global_basename}.tif",
+    )
