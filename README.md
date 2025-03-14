@@ -2,6 +2,9 @@
 
 [![Your-License-Badge](https://img.shields.io/badge/License-MIT-green)](#)
 
+> [!IMPORTANT]
+> This library is experimental and still under heavy development.
+ 
 **Perform global and local histogram matching for multiple overlapping images to achieve seamless color consistency in mosaicked outputs.**
 
 ---
