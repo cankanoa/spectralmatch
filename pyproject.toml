@@ -1,0 +1,55 @@
+[build-system]
+requires = [
+    "setuptools>=61.0",
+    "wheel"
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spectralmatch"
+version = "0.0.1"
+description = "Global and local spectral matching of 2 or more overlapping rasters"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Kanoa Lindiwe", email = "cankanoa@gmail.com"},
+    {name = "Joseph Emile Honour Percival"}
+]
+keywords = ["gis", "geospatial", "histogram matching", "remote sensing"]
+homepage = "https://github.com/cankanoa/spectralmatch"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent"
+]
+
+dependencies = [
+    "numpy==2.2.3",
+    "rasterio==1.4.3",
+    "gdal==3.10.2",
+    "scipy==1.15.2"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "flake8>=6.0.0",
+    "black>=23.0.0",
+    "pre-commit>=4.1.0"
+]
+
+docs = [
+    "mkdocs>=1.4.0",
+    "mkdocs-material>=9.0.0",
+    "mkdocs-jupyter>=0.24.0",
+    "mkdocstrings>=0.21.0",
+    "mkdocstrings-python>=0.10.0",
+    "mkdocs-git-revision-date-plugin>=0.3.3",
+    "pymdown-extensions>=9.10"
+]
+
+[project.urls]
+"Bug Tracker" = "https://github.com/cankanoa/spectralmatch"
+"Source" = "https://github.com/cankanoa/spectralmatch"
