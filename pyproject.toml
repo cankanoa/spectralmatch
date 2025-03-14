@@ -10,13 +10,15 @@ packages = ["spectralmatch"]
 
 [project]
 name = "spectralmatch"
-version = "0.0.1"
+version = "0.0.2"
 description = "Global and local spectral matching of 2 or more overlapping rasters"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "Kanoa Lindiwe", email = "cankanoa@gmail.com"},
-    {name = "Joseph Emile Honour Percival"}
+    {name = "Kanoa Lindiwe", email = "cankanoa@gmail.com"}
+]
+maintainers = [
+    {name = "Joseph Emile Honour Percival", email = "ipercival@gmail.com"}
 ]
 keywords = ["gis", "geospatial", "histogram matching", "remote sensing"]
 requires-python = ">=3.9"
