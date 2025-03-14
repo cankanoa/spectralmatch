@@ -14,8 +14,21 @@ from spectralmatch.utils import _merge_rasters, _get_image_metadata
 
 def _get_bounding_rectangle(image_paths: List[str]):
     """
-    Computes the minimum bounding rectangle (x_min, y_min, x_max, y_max)
-    that covers all input images.
+    Gets the bounding rectangle that encompasses the bounds of all specified images.
+
+    This function calculates a bounding rectangle by analyzing the metadata of each
+    image provided in the input list. It extracts the minimum and maximum
+    coordinates from the metadata and computes the smallest rectangle that
+    encloses all the input images.
+
+    Args:
+        image_paths (List[str]): A list of file paths to the images for which the
+            bounding rectangle is to be calculated.
+
+    Returns:
+        Tuple[float, float, float, float]: A tuple containing the minimum x
+            coordinate, the minimum y coordinate, the maximum x coordinate, and
+            the maximum y coordinate defining the bounding rectangle.
     """
     x_mins, y_mins, x_maxs, y_maxs = [], [], [], []
 
@@ -39,6 +52,39 @@ def _compute_mosaic_coefficient_of_variation(
     band_index: int = 1,
     calculation_dtype_precision="float32",
 ) -> Tuple[int, int]:
+    """
+    Computes an adjusted block size for image processing based on the coefficient
+    of variation of pixel values across multiple images.
+
+    This function calculates the coefficient of variation (CAtar) of pixel values
+    from a list of images. It then compares this computed value against a
+    reference coefficient, adjusting the base block size proportionally. The
+    resulting block size can be used for tasks such as spatial data processing.
+
+    Args:
+        image_paths (List[str]): List of file paths to the input images.
+        nodata_value (float): Value that indicates no data in the raster datasets.
+            Pixels with this value will be ignored during calculations.
+        reference_std (float): Reference standard deviation used for the
+            coefficient of variation comparison. Default is 45.0.
+        reference_mean (float): Reference mean used for the coefficient of
+            variation comparison. Default is 125.0.
+        base_block_size (Tuple[int, int]): Initial block size as a tuple
+            (rows, columns). Default is (10, 10).
+        band_index (int): Index of the image band to extract pixel values from.
+            Band indexing is 1-based. Default is 1.
+        calculation_dtype_precision (str): Data type to use for calculations.
+            This is used for converting the raster arrays during processing.
+            Default is 'float32'.
+
+    Returns:
+        Tuple[int, int]: Adjusted block size as a tuple (rows, columns). The
+        block size is computed based on the ratio of computed and reference
+        coefficients of variation.
+
+    Raises:
+        None
+    """
     all_pixels = []
 
     # Collect pixel values from all images
@@ -91,25 +137,42 @@ def _compute_distribution_map(
     calculation_dtype_precision="float32",
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Divides the bounding rectangle into (M x N) blocks and performs
-    a "mean of the means" across all images (unweighted).
+    Computes a distribution map for multi-band imagery over a spatial grid.
 
-    For each image:
-    - Compute per-block sums and counts.
-    - Convert to a block mean for that image.
-    Then combine those image-level block means with a simple average
-    (each image is 'one vote'), ignoring blocks that are invalid (NaN)
-    in a particular image.
+    This function processes a list of geospatial images and computes a per-block
+    mean value map and pixel count map across multiple image bands. It divides
+    the area defined by the bounding rectangle into a grid with M rows and N
+    columns, and aggregates pixel data within each block for each image. The
+    function handles missing data through no-data values and includes logic to
+    manage valid pixel thresholds.
 
-    Returns
-    -------
-    final_block_map : np.ndarray
-    Shape (M, N, num_bands). The unweighted average of each image's
-    block means, per band. If a block is invalid in all images,
-    it remains NaN.
-    final_count_map : np.ndarray
-    Shape (M, N, num_bands). The sum of pixel counts from *all* images
-    for each block/band (not used to weight the mean, purely informational).
+    Args:
+        image_paths (List[str]): A list of file paths to geospatial datasets to
+            be processed.
+        bounding_rect (Tuple[float, float, float, float]): The geographic rectangle
+            bounding region of interest in the form (x_min, y_min, x_max, y_max).
+        M (int): Number of rows in the grid.
+        N (int): Number of columns in the grid.
+        num_bands (int): The number of bands in the images to process.
+        nodata_value (float, optional): The value representing invalid or missing
+            data in the images. Defaults to None, which indicates no explicit
+            no-data value.
+        valid_pixel_threshold (float, optional): A threshold for the proportion of
+            valid pixels required for a grid block to be considered valid. Defaults
+            to 0.001.
+        calculation_dtype_precision (str, optional): Precision of calculation arrays.
+            Defaults to "float32".
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray]: A tuple containing:
+            - final_block_map (np.ndarray): A 3D array of shape (M, N, num_bands)
+              representing the unweighted mean value of each block across all images,
+              ignoring invalid blocks.
+            - final_count_map (np.ndarray): A 3D array of shape (M, N, num_bands)
+              representing the total pixel count for each block across all images.
+
+    Raises:
+        None.
     """
     # Prepare accumulators
     sum_of_means_3d = np.zeros((M, N, num_bands), dtype=calculation_dtype_precision)
@@ -268,6 +331,25 @@ def _compute_distribution_map(
 
 
 def _weighted_bilinear_interpolation(C_B, x_frac, y_frac):
+    """
+    Performs weighted bilinear interpolation on a 2D array with optional handling of NaNs.
+
+    This function applies bilinear interpolation to the input 2D array `C_B` while properly
+    handling NaN values by treating their contributions as missing during the interpolation.
+    The interpolation utilizes fractional indices provided in `x_frac` and `y_frac`.
+
+    Args:
+        C_B (np.ndarray): A 2D array of numerical values, which may include NaN values.
+        x_frac (np.ndarray): Fractional indices along the x-axis where interpolation is to
+            be performed.
+        y_frac (np.ndarray): Fractional indices along the y-axis where interpolation is to
+            be performed.
+
+    Returns:
+        np.ndarray: A 1D array of interpolated values corresponding to the provided
+            fractional indices. Output values are NaN where interpolation is not possible
+            due to invalid neighbors.
+    """
     # 1) Create a mask that is 1 where valid (not NaN), 0 where NaN
     mask = ~np.isnan(C_B)
 
@@ -303,15 +385,29 @@ def _download_block_map(
     nodata_value: Optional[float] = None,
 ):
     """
-    Export the block_map as a georeferenced raster image.
+    Downloads and converts a block map (numpy array) into a georeferenced raster file.
 
-    Parameters:
-    block_map (np.ndarray): Block map (M x N or M x N x num_bands) to export.
-    bounding_rect (tuple): Bounding rectangle (x_min, y_min, x_max, y_max).
-    output_image_path (str): Path to save the output raster image.
-    projection (str): Coordinate system for the raster (e.g., EPSG:4326, EPSG:3857).
-    dtype (str): GDAL-compatible data type (e.g., Float32, Int16).
-    nodata_value (float): Value to assign to NoData pixels.
+    This function creates a GeoTIFF raster file from a block map (numpy array) with
+    georeferencing information based on a bounding rectangle and projection. It
+    handles optional parameters for the data type and a nodata value, ensuring the
+    output directory exists before writing the file.
+
+    Args:
+        block_map (np.ndarray): Numpy array containing the block data. Supports
+            2D inputs (single-band images) and 3D inputs (multi-band images).
+        bounding_rect (Tuple[float, float, float, float]): Tuple specifying the
+            geographic extent of the data in the format (x_min, y_min, x_max, y_max).
+        output_image_path (str): Path where the GeoTIFF raster file will be saved.
+        projection (str): Coordinate reference system (CRS) in EPSG format. Defaults
+            to "EPSG:4326" (WGS84).
+        dtype (str): GDAL-compatible data type as string, such as "float32" or
+            "int16". Defaults to "float32".
+        nodata_value (Optional[float]): Optional value representing NoData in the
+            output raster. If not provided, NoData is not set.
+
+    Raises:
+        RuntimeError: If the output dataset cannot be created.
+        ValueError: If the provided projection is invalid.
     """
     output_dir = os.path.dirname(output_image_path)
     if output_dir and not os.path.exists(output_dir):
@@ -369,6 +465,30 @@ def _download_block_map(
 
 
 def _compute_block_size(input_image_array_path, target_blocks_per_image, bounding_rect):
+    """
+    Calculates the optimal block size (M, N) for dividing a set of input images into
+    blocks, while maintaining the aspect ratio defined by the provided bounding
+    rectangle and ensuring the total number of blocks is approximately equal to the
+    target.
+
+    The function adjusts the number of rows (M) and columns (N) to fit the target
+    number of blocks by scaling to the aspect ratio of the bounding rectangle.
+
+    Args:
+        input_image_array_path (list[str]): List of paths to input image arrays.
+        target_blocks_per_image (int): Desired number of blocks per image.
+        bounding_rect (tuple[int, int, int, int]): Tuple containing the minimum and
+            maximum x and y coordinates of the bounding rectangle in the form
+            (x_min, y_min, x_max, y_max).
+
+    Returns:
+        tuple[int, int]: A tuple containing the number of rows (M) and columns (N)
+        that together divide the images into approximately the desired number of
+        blocks, while maintaining the aspect ratio of the bounding rectangle.
+
+    Raises:
+        ValueError: If the target_blocks_per_image is less than or equal to zero.
+    """
     num_images = len(input_image_array_path)
 
     # Total target blocks scaled by the number of images
@@ -409,16 +529,29 @@ def _apply_gamma_correction(
     arr_in: np.ndarray, Mrefs: np.ndarray, Mins: np.ndarray, alpha: float = 1.0
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Perform gamma correction using the combined equation for valid pixels.
+    Applies gamma correction to an input array based on provided reference and input
+    values, with an optional scaling factor.
 
-    Parameters:
-    arr_in_valid (np.ndarray): Array of valid input pixel values (P_in(x, y)).
-    Mrefs_valid (np.ndarray): Array of reference mean values (M_ref(x, y)).
-    Mins_valid (np.ndarray): Array of input mean values (M_in(x, y)).
-    alpha (float): Scaling constant (default is 1.0).
+    This function calculates gamma values as the ratio of the logarithm of reference values
+    to the logarithm of input values and applies gamma correction to the input array
+    using the formula: `P_res = alpha * P_in^gamma`.
+
+    Args:
+        arr_in (np.ndarray): The input array to be gamma-corrected.
+        Mrefs (np.ndarray): Reference values used for computing gamma values.
+        Mins (np.ndarray): Input values used for computing gamma values, must be greater
+            than zero to avoid invalid logarithmic operations.
+        alpha (float): Optional scaling factor applied during the gamma correction. Default
+            is 1.0.
 
     Returns:
-    np.ndarray: Gamma-corrected pixel values (P_res(x, y)).
+        Tuple[np.ndarray, np.ndarray]: A tuple containing:
+            - Corrected output array (`arr_out_valid`) after applying gamma correction.
+            - Array of gamma values computed from the reference and input values.
+
+    Raises:
+        ValueError: If any element of `Mins` is less than or equal to zero, which would
+            result in invalid logarithmic operations.
     """
     # Ensure no division by zero
     if np.any(Mins <= 0):
@@ -437,13 +570,18 @@ def _apply_gamma_correction(
 
 def _get_lowest_pixel_value(raster_path):
     """
-    Get the lowest pixel value in a single raster file.
+    Retrieves the lowest pixel value from a raster file, ignoring nodata values if they are present. This function
+    reads the raster file, processes the data to handle nodata values by replacing them with NaN, and calculates
+    the minimum pixel value while ignoring NaN values. It ensures compatibility with raster data formats and
+    handles missing data gracefully.
 
-    Parameters:
-    raster_path (str): Path to the raster file.
+    Args:
+        raster_path (str): Path to the raster file to be processed. Should be a readable file compatible with
+            rasterio.
 
     Returns:
-    float: The lowest pixel value in the raster.
+        float: The lowest valid pixel value in the raster, ignoring nodata values. If all pixels are nodata,
+            returns NaN.
     """
     with rasterio.open(raster_path) as src:
         # Read the first band as a NumPy array
@@ -458,8 +596,23 @@ def _get_lowest_pixel_value(raster_path):
 
 def _add_value_to_raster(input_image_path, output_image_path, value):
     """
-    Opens a raster, adds 'value' only to valid pixels (excluding nodata pixels),
-    and writes the result to a new raster, preserving the original nodata value.
+    Adds a specified numeric value to all valid (non-masked) pixels in a raster file
+    and writes the modified raster to a new output file.
+
+    This function reads a raster image from the input file, modifies its data by
+    adding a given value to each valid (non-nodata) pixel, and saves the result
+    with the same metadata as the original raster into a specified output file.
+
+    Args:
+        input_image_path (str): Path to the input raster file.
+        output_image_path (str): Path where the modified raster will be saved.
+        value (float | int): Numeric value to be added to the raster data.
+
+    Raises:
+        FileNotFoundError: If the input raster file does not exist.
+        RasterioIOError: If there is an issue reading or writing the raster file.
+        ValueError: If the data type of the value is incompatible with the raster
+            data's type.
     """
     # Open the source raster
     with rasterio.open(input_image_path) as src:
@@ -497,15 +650,22 @@ def _smooth_array(
     scale_factor: float = 1.0,
 ) -> np.ndarray:
     """
-    Smooth a NumPy array using Gaussian smoothing while excluding NaN or NoData values.
+    Smooths a 2D array using Gaussian filtering while handling nodata values.
 
-    Parameters:
-    input_array (np.ndarray): The input array to smooth.
-    nodata_value (float, optional): The value representing NoData. Regions with this value are excluded from smoothing.
-    scale_factor (float): The standard deviation for Gaussian kernel. Higher values increase smoothing.
+    This function applies Gaussian smoothing to a 2D input array while preserving nodata
+    values. It ensures that nodata regions do not influence the smoothing of valid data
+    and reintroduces the nodata value in the output for consistency with the input.
+
+    Args:
+        input_array (np.ndarray): The 2D array to be smoothed.
+        nodata_value (Optional[float]): The value representing missing data in
+            the array. If provided, these values will be excluded from smoothing.
+            Default is None.
+        scale_factor (float): The smoothing scale factor (sigma) for the Gaussian
+            filter. Default is 1.0.
 
     Returns:
-    np.ndarray: Smoothed array with nodata regions preserved.
+        np.ndarray: The smoothed array, with nodata values reintroduced if specified.
     """
     # Replace nodata_value with NaN for consistency
     if nodata_value is not None:
@@ -549,7 +709,41 @@ def local_histogram_match(
     projection: str = "EPSG:4326",
     debug_mode: bool = False,
 ):
+    """
+    Performs local histogram matching on input raster images to align their intensity distributions
+    to a reference distribution computed globally or locally. This process adjusts image brightness and
+    contrast to make the distributions between the images comparable for consistency.
 
+    Args:
+        input_image_paths (List[str]): Paths to the input raster images to be processed.
+        output_image_folder (str): Directory where the processed images and associated outputs will
+            be saved.
+        output_local_basename (str): Base name to append to the output image filenames.
+        global_nodata_value (float, optional): Value representing no data for input raster images.
+            Defaults to -9999.
+        target_blocks_per_image (int, optional): Number of blocks to divide an image into for local
+            histogram correction. Defaults to 100.
+        alpha (float, optional): Scaling factor for histogram matching adjustments. Higher values
+            lead to more significant adjustments. Defaults to 1.0.
+        calculation_dtype_precision (str, optional): Data type used for calculations during histogram
+            adjustments. Defaults to "float32".
+        floor_value (Optional[float], optional): Minimum floor value applied during calculations.
+            If None, the minimum is determined automatically. Defaults to None.
+        gamma_bounds (Optional[Tuple[float, float]], optional): Lower and upper bounds for gamma
+            correction values during intensity adjustment. Defaults to None.
+        output_dtype (str, optional): Output data type for the processed raster images. One of Byte,
+            Int8, UInt16, Int16, UInt32, Int32, UInt64, Int64, Float32, or Float64 based on numpy
+            conventions. Defaults to "float32".
+        projection (str, optional): Spatial reference system format for the output rasters.
+            Defaults to "EPSG:4326".
+        debug_mode (bool, optional): Enables debug outputs such as intermediate maps to assist
+            troubleshooting. Defaults to False.
+
+    Raises:
+        ValueError: If `global_nodata_value` is not set and cannot be inferred from the first input image.
+        RuntimeError: If an input raster file cannot be loaded correctly.
+
+    """
     print("----------Starting Local Matching")
 
     print(f"Found {len(input_image_paths)} images")

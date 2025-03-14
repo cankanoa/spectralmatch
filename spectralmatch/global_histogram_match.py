@@ -1,9 +1,10 @@
 import sys
-
+import os
 import numpy as np
+
 from osgeo import gdal
 from scipy.optimize import least_squares
-import os
+
 
 from spectralmatch.utils import _merge_rasters, _get_image_metadata
 
@@ -17,6 +18,25 @@ gdal.UseExceptions()
 
 
 def _find_overlaps(image_bounds_dict):
+    """
+    Determines overlaps between rectangular regions defined in a dictionary of image bounds.
+
+    Each rectangular region is defined by the minimum and maximum coordinates in both
+    x and y directions. The function identifies pairs of regions that overlap with each
+    other, based on their bounds. An overlap is determined if one rectangle's area
+    intersects with another.
+
+    Args:
+        image_bounds_dict (dict): A dictionary where keys represent unique identifiers
+                                  for rectangular regions and values are dictionaries
+                                  containing the bounds of each region. The bounds
+                                  dictionary must include the keys 'x_min', 'x_max',
+                                  'y_min', and 'y_max'.
+
+    Returns:
+        tuple: A tuple of tuples, where each nested tuple contains two keys from the
+               input dictionary representing regions that overlap with one another.
+    """
     overlaps = []
 
     for key1, bounds1 in image_bounds_dict.items():
@@ -49,27 +69,24 @@ def _calculate_image_stats(
     as well as their individual statistics, while excluding NoData values.
 
     Args:
-    num_bands (int): Number of bands in the images.
-    input_image_path_i (str): Path to the first image.
-    input_image_path_j (str): Path to the second image.
-    id_i (int): ID of the first image.
-    id_j (int): ID of the second image.
-    bound_i (dict): Bounds of the first image in the format {"x_min", "x_max", "y_min", "y_max"}.
-    bound_j (dict): Bounds of the second image in the format {"x_min", "x_max", "y_min", "y_max"}.
-    nodata_i (float): The NoData value for the first image.
-    nodata_j (float): The NoData value for the second image.
+        num_bands (int): Number of bands in the images.
+        input_image_path_i (str): Path to the first image.
+        input_image_path_j (str): Path to the second image.
+        id_i (int): ID of the first image.
+        id_j (int): ID of the second image.
+        bound_i (dict): Bounds of the first image in the format {"x_min", "x_max", "y_min", "y_max"}.
+        bound_j (dict): Bounds of the second image in the format {"x_min", "x_max", "y_min", "y_max"}.
+        nodata_i (float): The NoData value for the first image.
+        nodata_j (float): The NoData value for the second image.
 
     Returns:
-    tuple: A tuple containing:
-    - overlap_stat: Dictionary of overlap statistics in the format:
-    {id_i: {id_j: {band: {'mean': value, 'std': value, 'size': value}}},
-    id_j: {id_i: {band: {'mean': value, 'std': value, 'size': value}}}}
-    - whole_stats: Dictionary of whole image statistics in the format:
-    {id_i: {band: {'mean': value, 'std': value, 'size': value}}}
+        tuple: A tuple containing:
+        - overlap_stat: Dictionary of overlap statistics in the format:
+        {id_i: {id_j: {band: {'mean': value, 'std': value, 'size': value}}},
+        id_j: {id_i: {band: {'mean': value, 'std': value, 'size': value}}}}
+        - whole_stats: Dictionary of whole image statistics in the format:
+        {id_i: {band: {'mean': value, 'std': value, 'size': value}}}
     """
-    from osgeo import gdal
-    import numpy as np
-
     # Initialize the result dictionaries
     overlap_stat = {id_i: {id_j: {}}, id_j: {id_i: {}}}
     whole_stats = {id_i: {}, id_j: {}}
@@ -187,24 +204,38 @@ def _append_band_to_tif(
     dtype=gdal.GDT_Int16,
 ):
     """
-    Appends (or writes) a single band to a GeoTIFF file.
+    Writes or appends a raster band to a GeoTIFF file.
 
-    1) If the TIFF file does not exist, create it with 'total_bands' bands.
-    - Then write the band_array into band_index.
-    2) If the TIFF file exists, open in update mode and write the band_array
-    into band_index (1-based).
-
-    No reading of existing pixel data is done.
+    This function is designed to either create a new GeoTIFF file with specific
+    georeferencing, projection, and metadata, or to append a band to an
+    existing GeoTIFF file. If the file does not exist, it will be created with
+    the defined number of bands (`total_bands`) where all bands will be
+    initialized with a nodata value and the specified `band_array` will be
+    written to the provided `band_index`. If the file already exists, only the
+    specified band is updated with the data provided in `band_array`.
 
     Args:
-    band_array    : 2D NumPy array with shape (rows, cols).
-    transform     : (gt0, gt1, gt2, gt3, gt4, gt5) – same as GDAL GeoTransform.
-    projection    : WKT string describing projection (same as ds.GetProjection()).
-    output_path   : Path to the output GeoTIFF.
-    nodata_value  : Value to set as NoData.
-    band_index    : 1-based index of the band to write (1 <= band_index <= total_bands).
-    total_bands   : How many bands in the final dataset (must be >= band_index).
-    dtype         : gdal data type, e.g. gdal.GDT_Float32, gdal.GDT_Int16, etc.
+        band_array (np.ndarray): 2D array representing the raster data to
+            write or append as a band in the GeoTIFF.
+        transform (tuple): Affine transformation coefficients to georeference
+            the raster data in the GeoTIFF.
+        projection (str): Spatial reference system (e.g., WKT format) to
+            assign to the output GeoTIFF.
+        output_path (str): File path to create or update the GeoTIFF file.
+        nodata_value (float): Value to represent nodata in the raster bands
+            of the GeoTIFF.
+        band_index (int): One-based index specifying which band to write the
+            raster data.
+        total_bands (int): Total number of bands to allocate when creating the
+            GeoTIFF file (ignored if the file already exists).
+        dtype: GDAL data type (default is `gdal.GDT_Int16`) to define the pixel type
+            of all raster bands in the GeoTIFF. Default is `gdal.GDT_Int16`.
+
+    Raises:
+        RuntimeError: If the function fails to open an existing GeoTIFF in
+            update mode.
+        ValueError: If the specified `band_index` exceeds the total number
+            of bands available in the existing GeoTIFF.
     """
     rows, cols = band_array.shape
 
@@ -255,6 +286,24 @@ def _append_band_to_tif(
 
 
 def _save_multiband_as_geotiff(array, geo_transform, projection, path, nodata_values):
+    """
+    Save a multi-band array as a GeoTIFF file.
+
+    This function takes a 3D NumPy array and saves it as a multi-band GeoTIFF file.
+    The function utilizes GDAL for the creation and writing process. The GeoTIFF file
+    is created according to the specified geospatial metadata, such as geo-transform
+    and projection, and supports the optional assignment of no-data values for the bands.
+
+    Args:
+        array: The 3D NumPy array (dimensions: bands, rows, columns) representing
+            the raster data to be saved.
+        geo_transform: The geo-transform parameters used to map pixel locations
+            to geographic coordinates.
+        projection: The spatial reference system (projection) as a string in WKT format.
+        path: The file path where the GeoTIFF will be saved.
+        nodata_values: Optional; a value to set for no-data pixels in each band.
+            Should be set to None if no no-data values are to be assigned.
+    """
     driver = gdal.GetDriverByName("GTiff")
     num_bands, rows, cols = array.shape
     out_ds = driver.Create(path, cols, rows, num_bands, gdal.GDT_Int16)
@@ -277,7 +326,39 @@ def global_histogram_match(
     custom_mean_factor,
     custom_std_factor,
 ):
+    """
+    Adjusts global histograms of input images for seamless stitching by calculating
+    statistics from overlapping regions and applying adjustments.
 
+    The `global_histogram_match` function is designed to process a list of input
+    images and adjust their histograms such that the statistical properties (mean
+    and standard deviation) across overlapping regions are consistent while
+    preserving global properties of each image. This function uses image metadata,
+    overlap statistics, and optimization techniques to compute adjustment
+    parameters. The output consists of adjusted images written to the specified
+    output folder.
+
+    Args:
+        input_image_paths_array (list[str]): List of file paths to the input images
+            to be processed.
+        output_image_folder (str): Directory where the processed images will be
+            saved.
+        output_global_basename (str): Shared base name to use when saving output
+            images. Outputs will be saved with this base name and additional suffix
+            for each image.
+        custom_mean_factor (float): Weight scaling factor for adjusting the
+            difference in mean statistics across overlapping regions.
+        custom_std_factor (float): Weight scaling factor for adjusting the
+            difference in standard deviation statistics across overlapping regions.
+
+    Raises:
+        ValueError: If input image paths are invalid or processing fails due to
+        inconsistent metadata or missing overlaps.
+        TypeError: If arguments are of incorrect type or contain incompatible
+            data formats.
+        RuntimeError: If an issue occurs during processing, such as failure in
+            optimization or reading image data.
+    """
     print("----------Starting Global Matching")
 
     # ---------------------------------------- Calculating statistics
