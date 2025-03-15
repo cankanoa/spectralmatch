@@ -8,11 +8,12 @@ import gc
 from osgeo import gdal
 from typing import Tuple, List, Optional
 from scipy.ndimage import map_coordinates, gaussian_filter
+from utils_common import _get_image_metadata
 
-from spectralmatch.utils import _merge_rasters, _get_image_metadata
 
-
-def _get_bounding_rectangle(image_paths: List[str]):
+def _get_bounding_rectangle(
+    image_paths: List[str]
+    ):
     """
     Gets the bounding rectangle that encompasses the bounds of all specified images.
 
@@ -51,7 +52,7 @@ def _compute_mosaic_coefficient_of_variation(
     base_block_size: Tuple[int, int] = (10, 10),
     band_index: int = 1,
     calculation_dtype_precision="float32",
-) -> Tuple[int, int]:
+    ) -> Tuple[int, int]:
     """
     Computes an adjusted block size for image processing based on the coefficient
     of variation of pixel values across multiple images.
@@ -135,7 +136,7 @@ def _compute_distribution_map(
     nodata_value: float = None,
     valid_pixel_threshold: float = 0.001,
     calculation_dtype_precision="float32",
-) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Computes a distribution map for multi-band imagery over a spatial grid.
 
@@ -330,7 +331,11 @@ def _compute_distribution_map(
     return final_block_map, final_count_map
 
 
-def _weighted_bilinear_interpolation(C_B, x_frac, y_frac):
+def _weighted_bilinear_interpolation(
+    C_B,
+    x_frac,
+    y_frac
+    ):
     """
     Performs weighted bilinear interpolation on a 2D array with optional handling of NaNs.
 
@@ -383,7 +388,7 @@ def _download_block_map(
     projection: str = "EPSG:4326",  # Default to WGS84
     dtype="float32",  # GDAL data type as a string
     nodata_value: Optional[float] = None,
-):
+    ):
     """
     Downloads and converts a block map (numpy array) into a georeferenced raster file.
 
@@ -464,7 +469,11 @@ def _download_block_map(
     print(f"Block map saved to: {output_image_path}")
 
 
-def _compute_block_size(input_image_array_path, target_blocks_per_image, bounding_rect):
+def _compute_block_size(
+    input_image_array_path,
+    target_blocks_per_image,
+    bounding_rect
+    ):
     """
     Calculates the optimal block size (M, N) for dividing a set of input images into
     blocks, while maintaining the aspect ratio defined by the provided bounding
@@ -526,8 +535,11 @@ def _compute_block_size(input_image_array_path, target_blocks_per_image, boundin
 
 
 def _apply_gamma_correction(
-    arr_in: np.ndarray, Mrefs: np.ndarray, Mins: np.ndarray, alpha: float = 1.0
-) -> Tuple[np.ndarray, np.ndarray]:
+    arr_in: np.ndarray,
+    Mrefs: np.ndarray,
+    Mins: np.ndarray,
+    alpha: float = 1.0
+    ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Applies gamma correction to an input array based on provided reference and input
     values, with an optional scaling factor.
@@ -568,7 +580,9 @@ def _apply_gamma_correction(
     return arr_out_valid, gammas
 
 
-def _get_lowest_pixel_value(raster_path):
+def _get_lowest_pixel_value(
+    raster_path
+    ):
     """
     Retrieves the lowest pixel value from a raster file, ignoring nodata values if they are present. This function
     reads the raster file, processes the data to handle nodata values by replacing them with NaN, and calculates
@@ -594,7 +608,11 @@ def _get_lowest_pixel_value(raster_path):
         return np.nanmin(data)
 
 
-def _add_value_to_raster(input_image_path, output_image_path, value):
+def _add_value_to_raster(
+    input_image_path,
+    output_image_path,
+    value
+    ):
     """
     Adds a specified numeric value to all valid (non-masked) pixels in a raster file
     and writes the modified raster to a new output file.
@@ -648,7 +666,7 @@ def _smooth_array(
     input_array: np.ndarray,
     nodata_value: Optional[float] = None,
     scale_factor: float = 1.0,
-) -> np.ndarray:
+    ) -> np.ndarray:
     """
     Smooths a 2D array using Gaussian filtering while handling nodata values.
 
@@ -693,419 +711,3 @@ def _smooth_array(
         smoothed_normalized = np.where(valid_mask, smoothed_normalized, nodata_value)
 
     return smoothed_normalized
-
-
-def local_histogram_match(
-    input_image_paths: List[str],
-    output_image_folder: str,
-    output_local_basename: str,
-    global_nodata_value: float = -9999,
-    target_blocks_per_image: int = 100,
-    alpha: float = 1.0,
-    calculation_dtype_precision="float32",
-    floor_value: Optional[float] = None,
-    gamma_bounds: Optional[Tuple[float, float]] = None,
-    output_dtype="float32",  # One of Byte, Int8, UInt16, Int16, UInt32, Int32, UInt64, Int64, Float32, Float64 as np strings
-    projection: str = "EPSG:4326",
-    debug_mode: bool = False,
-):
-    """
-    Performs local histogram matching on input raster images to align their intensity distributions
-    to a reference distribution computed globally or locally. This process adjusts image brightness and
-    contrast to make the distributions between the images comparable for consistency.
-
-    Args:
-        input_image_paths (List[str]): Paths to the input raster images to be processed.
-        output_image_folder (str): Directory where the processed images and associated outputs will
-            be saved.
-        output_local_basename (str): Base name to append to the output image filenames.
-        global_nodata_value (float, optional): Value representing no data for input raster images.
-            Defaults to -9999.
-        target_blocks_per_image (int, optional): Number of blocks to divide an image into for local
-            histogram correction. Defaults to 100.
-        alpha (float, optional): Scaling factor for histogram matching adjustments. Higher values
-            lead to more significant adjustments. Defaults to 1.0.
-        calculation_dtype_precision (str, optional): Data type used for calculations during histogram
-            adjustments. Defaults to "float32".
-        floor_value (Optional[float], optional): Minimum floor value applied during calculations.
-            If None, the minimum is determined automatically. Defaults to None.
-        gamma_bounds (Optional[Tuple[float, float]], optional): Lower and upper bounds for gamma
-            correction values during intensity adjustment. Defaults to None.
-        output_dtype (str, optional): Output data type for the processed raster images. One of Byte,
-            Int8, UInt16, Int16, UInt32, Int32, UInt64, Int64, Float32, or Float64 based on numpy
-            conventions. Defaults to "float32".
-        projection (str, optional): Spatial reference system format for the output rasters.
-            Defaults to "EPSG:4326".
-        debug_mode (bool, optional): Enables debug outputs such as intermediate maps to assist
-            troubleshooting. Defaults to False.
-
-    Raises:
-        ValueError: If `global_nodata_value` is not set and cannot be inferred from the first input image.
-        RuntimeError: If an input raster file cannot be loaded correctly.
-
-    """
-    print("----------Starting Local Matching")
-
-    print(f"Found {len(input_image_paths)} images")
-
-    if global_nodata_value is None:
-        try:
-            global_nodata_value = (
-                gdal.Open(input_image_paths[0], gdal.GA_ReadOnly)
-                .GetRasterBand(1)
-                .GetNoDataValue()
-            )
-        except:
-            raise ValueError(
-                "global_nodata_value not set and could not get one from the first band of the first image."
-            )
-    print(f"Global nodata value: {global_nodata_value}")
-
-    print("-------------------- Computing block size")
-    # Its better to compute this offset right before gamma correciton, apply, then reverse
-    # print('-------------------- Computing offset to make raster pixels > 0')
-    # lowest_value: float = None
-    # pixels_positive_offset: int = None
-    # offset_image_paths = []
-    #
-    # # Find the lowest pixel value across all input rasters
-    # for raster_path in input_image_paths:
-    #     value = _get_lowest_pixel_value(raster_path)
-    #     if lowest_value is None or value < lowest_value:
-    #         lowest_value = value
-    # print(f'Lowest_value: {lowest_value}')
-    #
-    # if lowest_value <= 0:
-    #     pixels_positive_offset = int(abs(lowest_value))+1
-    #     for raster_path in input_image_paths:
-    #
-    #         offset_image_path = os.path.join(output_image_folder,"OffsetImages",f"{os.path.splitext(os.path.basename(raster_path))[0]}_OffsetImage{os.path.splitext(raster_path)[1]}")
-    #
-    #         offset_image_paths.append(offset_image_path)
-    #
-    #         _add_value_to_raster(raster_path, offset_image_path, pixels_positive_offset)
-    #         print(f"Offset of {pixels_positive_offset} saved: {offset_image_path}")
-    # input_image_paths = offset_image_paths
-
-    if not os.path.exists(output_image_folder):
-        os.makedirs(output_image_folder, exist_ok=True)
-
-    # bounding rectangle
-    bounding_rect = _get_bounding_rectangle(input_image_paths)
-    print(f"Bounding rectangle: {bounding_rect}")
-
-    M, N = _compute_block_size(
-        input_image_paths, target_blocks_per_image, bounding_rect
-    )
-    print(f"Blocks(M,N): {M}, {N} = {M * N}")
-
-    # -- Buffer boundary
-    # print(f"Adjusted bounding rectangle (with 0.5-block offset): {bounding_rect}")
-    # x_min, y_min, x_max, y_max = bounding_rect
-    #
-    # # compute block_width, block_height *before* expanding
-    # block_width = (x_max - x_min) / N
-    # block_height = (y_max - y_min) / M
-    #
-    # # Expand by half a block on each side
-    # x_min -= block_width * 0.5
-    # x_max += block_width * 0.5
-    # y_min -= block_height * 0.5
-    # y_max += block_height * 0.5
-    #
-    # # Re-assign the adjusted bounding_rect
-    # bounding_rect = (x_min, y_min, x_max, y_max)
-
-    # -- Alternatie aproach from the paper which I dont like
-    # M, N = _compute_mosaic_coefficient_of_variation(input_image_paths, global_nodata_value)
-
-    print("-------------------- Computing global reference block map")
-    num_bands = gdal.Open(input_image_paths[0], gdal.GA_ReadOnly).RasterCount
-
-    ref_map, ref_count_map = _compute_distribution_map(
-        input_image_paths,
-        bounding_rect,
-        M,
-        N,
-        num_bands,
-        nodata_value=global_nodata_value,
-    )
-
-    # ref_map = _smooth_array(ref_map, nodata_value=global_nodata_value)
-
-    if debug_mode:
-        _download_block_map(
-            block_map=np.nan_to_num(ref_map, nan=global_nodata_value),
-            bounding_rect=bounding_rect,
-            output_image_path=os.path.join(output_image_folder, "RefDistMap.tif"),
-            nodata_value=global_nodata_value,
-            projection=projection,
-        )
-
-    corrected_paths = []
-    for img_path in input_image_paths:
-        print(f"-------------------- Processing: {img_path}")
-        print(f"-------------------- Computing local block map")
-        loc_map, loc_count_map = _compute_distribution_map(
-            [img_path], bounding_rect, M, N, num_bands, nodata_value=global_nodata_value
-        )
-
-        # loc_map = _smooth_array(loc_map, nodata_value=global_nodata_value)
-
-        out_name = (
-            os.path.splitext(os.path.basename(img_path))[0]
-            + output_local_basename
-            + ".tif"
-        )
-        out_path = os.path.join(output_image_folder, out_name)
-
-        if debug_mode:
-            _download_block_map(
-                block_map=np.nan_to_num(loc_count_map, nan=global_nodata_value),
-                bounding_rect=bounding_rect,
-                output_image_path=os.path.join(
-                    os.path.dirname(out_path),
-                    "locCountMaps",
-                    os.path.splitext(os.path.basename(out_path))[0]
-                    + "_locCountMaps"
-                    + os.path.splitext(out_path)[1],
-                ),
-                nodata_value=global_nodata_value,
-                projection=projection,
-            )
-
-        if debug_mode:
-            _download_block_map(
-                block_map=np.nan_to_num(loc_map, nan=global_nodata_value),
-                bounding_rect=bounding_rect,
-                output_image_path=os.path.join(
-                    os.path.dirname(out_path),
-                    "LocalDistMaps",
-                    os.path.splitext(os.path.basename(out_path))[0]
-                    + "_LocalDistMap"
-                    + os.path.splitext(out_path)[1],
-                ),
-                nodata_value=global_nodata_value,
-                projection=projection,
-            )
-
-        print(f"-------------------- Computing local correction, applying, and saving")
-        ds_in = gdal.Open(img_path, gdal.GA_ReadOnly) or RuntimeError(
-            f"Could not open {img_path}"
-        )
-        driver = gdal.GetDriverByName("GTiff")
-
-        out_ds = driver.Create(
-            out_path,
-            ds_in.RasterXSize,
-            ds_in.RasterYSize,
-            num_bands,
-            gdal.GetDataTypeByName(output_dtype),
-        )
-
-        gt = ds_in.GetGeoTransform()
-        out_ds.SetGeoTransform(gt)
-        out_ds.SetProjection(ds_in.GetProjection())
-
-        x_min, y_max = gt[0], gt[3]
-        x_max, y_min = (
-            x_min + gt[1] * ds_in.RasterXSize,
-            y_max + gt[5] * ds_in.RasterYSize,
-        )
-        this_image_bounds = (x_min, y_min, x_max, y_max)
-
-        for b in range(num_bands):
-            print(f"-------------------- For band {b + 1}")
-
-            # Test only the first three bands
-            # if b >= 2:
-            #     continue
-
-            band_in = ds_in.GetRasterBand(b + 1)
-            arr_in = band_in.ReadAsArray().astype(calculation_dtype_precision)
-            del band_in
-            gc.collect()
-
-            # Generate a single matrix for block indices directly
-            nX, nY = ds_in.RasterXSize, ds_in.RasterYSize
-            col_index = np.arange(nX)
-            row_index = np.arange(nY)
-            Xgeo = gt[0] + (col_index * gt[1])
-            Ygeo = gt[3] + (row_index * gt[5])
-            Xgeo_2d, Ygeo_2d = np.meshgrid(Xgeo, Ygeo)
-
-            # Compute block indices for each pixel
-            row_fs = np.clip(
-                ((bounding_rect[3] - Ygeo_2d) / (bounding_rect[3] - bounding_rect[1]))
-                * M
-                - 0.5,
-                0,
-                M - 1,
-            )
-            del Ygeo_2d
-            gc.collect()
-            col_fs = np.clip(
-                (
-                    (
-                        (Xgeo_2d - bounding_rect[0])
-                        / (bounding_rect[2] - bounding_rect[0])
-                    )
-                    * N
-                )
-                - 0.5,
-                0,
-                N - 1,
-            )
-            del Xgeo_2d
-            gc.collect()
-
-            arr_out = np.full_like(
-                arr_in, global_nodata_value, dtype=calculation_dtype_precision
-            )
-            valid_mask = arr_in != global_nodata_value
-
-            # Extract the band-specific local and reference maps
-            loc_band_2d = loc_map[:, :, b]
-            ref_band_2d = ref_map[:, :, b]
-
-            # Mask out regions where loc_map or ref_map are NaN (NoData regions)
-            valid_loc_mask = ~np.isnan(loc_band_2d)
-            valid_ref_mask = ~np.isnan(ref_band_2d)
-
-            # Ensure valid_mask is correctly applied to the input arrays
-            valid_rows, valid_cols = np.where(valid_mask)
-
-            if debug_mode:
-                _download_block_map(
-                    block_map=np.where(valid_mask, 1, global_nodata_value),
-                    bounding_rect=this_image_bounds,
-                    output_image_path=os.path.join(
-                        os.path.dirname(out_path),
-                        "ValidMasks",
-                        os.path.splitext(os.path.basename(out_path))[0]
-                        + f"_ValidMask_{b}.tif",
-                    ),
-                    projection=projection,
-                    nodata_value=global_nodata_value,
-                )
-
-            # Ensure weighted interpolation handles only valid regions
-            Mrefs = np.full_like(
-                arr_in, global_nodata_value, dtype=calculation_dtype_precision
-            )
-            Mins = np.full_like(
-                arr_in, global_nodata_value, dtype=calculation_dtype_precision
-            )
-
-            Mrefs[valid_rows, valid_cols] = _weighted_bilinear_interpolation(
-                ref_band_2d,
-                # ref_count_map[:, :, b],
-                col_fs[valid_rows, valid_cols],
-                row_fs[valid_rows, valid_cols],
-            )
-            del ref_band_2d
-            gc.collect()
-            Mins[valid_rows, valid_cols] = _weighted_bilinear_interpolation(
-                loc_band_2d,
-                # loc_count_map[:, :, b],
-                col_fs[valid_rows, valid_cols],
-                row_fs[valid_rows, valid_cols],
-            )
-
-            del col_fs, row_fs
-            gc.collect()
-            del loc_band_2d
-            gc.collect()
-
-            if debug_mode:
-                _download_block_map(
-                    block_map=Mrefs,
-                    bounding_rect=this_image_bounds,
-                    output_image_path=os.path.join(
-                        os.path.dirname(out_path),
-                        "Mrefs",
-                        os.path.splitext(os.path.basename(out_path))[0]
-                        + f"_Mrefs_{b}.tif",
-                    ),
-                    projection=projection,
-                    nodata_value=global_nodata_value,
-                )
-
-            if debug_mode:
-                _download_block_map(
-                    block_map=Mins,
-                    bounding_rect=this_image_bounds,
-                    output_image_path=os.path.join(
-                        os.path.dirname(out_path),
-                        "Mins",
-                        os.path.splitext(os.path.basename(out_path))[0]
-                        + f"_Mins_{b}.tif",
-                    ),
-                    projection=projection,
-                    nodata_value=global_nodata_value,
-                )
-
-            valid_pixels = valid_mask  # & (Mrefs > 0) & (Mins > 0) # Mask if required but better to offset values <= 0
-            smallest_value = np.min(
-                [arr_in[valid_pixels], Mrefs[valid_pixels], Mins[valid_pixels]]
-            )
-
-            if smallest_value <= 0:
-                pixels_positive_offset = abs(smallest_value) + 1
-                arr_out[valid_pixels], gammas = _apply_gamma_correction(
-                    arr_in[valid_pixels] + pixels_positive_offset,
-                    Mrefs[valid_pixels] + pixels_positive_offset,
-                    Mins[valid_pixels] + pixels_positive_offset,
-                    alpha,
-                )
-                arr_out[valid_pixels] = arr_out[valid_pixels] - pixels_positive_offset
-            else:
-                arr_out[valid_pixels], gammas = _apply_gamma_correction(
-                    arr_in[valid_pixels], Mrefs[valid_pixels], Mins[valid_pixels], alpha
-                )
-            del Mrefs, Mins
-            gc.collect()
-
-            gammas_array = np.full(
-                arr_in.shape, global_nodata_value, dtype=calculation_dtype_precision
-            )
-            gammas_array[valid_rows, valid_cols] = gammas
-
-            if debug_mode:
-                _download_block_map(
-                    block_map=gammas_array,
-                    bounding_rect=this_image_bounds,
-                    output_image_path=os.path.join(
-                        os.path.dirname(out_path),
-                        "Gammas",
-                        os.path.splitext(os.path.basename(out_path))[0]
-                        + f"_Gamma_{b}.tif",
-                    ),
-                    projection=projection,
-                    nodata_value=global_nodata_value,
-                )
-
-            # arr_out[valid_pixels] = arr_in[valid_pixels] * (Mrefs[valid_pixels] / Mins[valid_pixels]) # An alternative way to calculate the corrected raster
-
-            arr_out = arr_out.astype(output_dtype)
-            out_band = out_ds.GetRasterBand(b + 1)
-            out_band.WriteArray(arr_out)
-            out_band.SetNoDataValue(global_nodata_value)
-            del out_band, gammas, arr_out
-            gc.collect()
-
-        ds_in = None
-        out_ds.FlushCache()
-        out_ds = None
-
-        corrected_paths.append(out_path)
-        print(f"Saved: {out_path}")
-
-    # 6) Merge final corrected rasters
-    print("Merging saved rasters")
-    _merge_rasters(
-        corrected_paths,
-        output_image_folder,
-        output_file_name=f"Merged{output_local_basename}.tif",
-    )
-    print("Local histogram matching done")
