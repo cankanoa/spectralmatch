@@ -11,7 +11,7 @@
 
 ## Overview
 
-*spectralmatch* uses least squares regression to balance colors across all images in a single global solution, then performs finer local adjustments on overlapping blocks. This two-phase process ensures high-quality color normalization with minimal spectral distortion.
+*spectralmatch* uses least squares regression to balance colors across all images in a single global solution, then performs finer local adjustments on overlapping blocks. This two-phase process ensures high-quality color normalization with minimal spectral distortion. This technique is derived from 'An auto-adapting global-to-local color balancing method for optical imagery mosaic' by Yu et al., 2017 (DOI: 10.1016/j.isprsjprs.2017.08.002).
 
 ![Global and Local Matching](./images/spectralmatch.png)
 
@@ -73,8 +73,8 @@ pip install .
 After installation, you can use *spectralmatch* to perform global and local matching on multiple overlapping images:
 
 ```python
-from spectralmatch.global_histogram_match import global_histogram_match
-from spectralmatch.local_histogram_match import local_histogram_match
+from spectralmatch import global_histogram_match
+from spectralmatch import local_histogram_match
 
 # Example: Basic usage
 
@@ -89,8 +89,8 @@ global_histogram_match(
     input_images=input_image_paths,
     output_folder="data/GlobalMatch",
     output_basename="_global",
-    custom_mean_factor=3,   # adjust as needed
-    custom_std_factor=1     # adjust as needed
+    custom_mean_factor=3,  # adjust as needed
+    custom_std_factor=1  # adjust as needed
 )
 
 # 2. Local Matching
@@ -103,8 +103,8 @@ local_histogram_match(
     output_folder="data/LocalMatch",
     output_basename="_local",
     target_blocks_per_image=100,
-    projection="EPSG:XXXX", # specify your projection
-    debug_mode=True         # optional debugging
+    projection="EPSG:XXXX",  # specify your projection
+    debug_mode=True  # optional debugging
 )
 
 print("Done! Check 'data/GlobalMatch' and 'data/LocalMatch' for results.")

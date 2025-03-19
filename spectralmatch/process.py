@@ -7,27 +7,27 @@ from osgeo import gdal
 from scipy.optimize import least_squares
 from typing import Tuple, List, Optional
 
-from utils.utils_local import _get_bounding_rectangle
-from utils.utils_local import _compute_block_size
-from utils.utils_local import _compute_distribution_map
-from utils.utils_local import _weighted_bilinear_interpolation
-from utils.utils_local import _download_block_map
-from utils.utils_local import _apply_gamma_correction
+from spectralmatch.utils.utils_local import _get_bounding_rectangle
+from spectralmatch.utils.utils_local import _compute_block_size
+from spectralmatch.utils.utils_local import _compute_distribution_map
+from spectralmatch.utils.utils_local import _weighted_bilinear_interpolation
+from spectralmatch.utils.utils_local import _download_block_map
+from spectralmatch.utils.utils_local import _apply_gamma_correction
 
-from utils.utils_common import _merge_rasters
-from utils.utils_common import _get_image_metadata
+from spectralmatch.utils.utils_common import _merge_rasters
+from spectralmatch.utils.utils_common import _get_image_metadata
 
-from utils.utils_global import _find_overlaps
-from utils.utils_global import _calculate_image_stats
-from utils.utils_global import _append_band_to_tif
+from spectralmatch.utils.utils_global import _find_overlaps
+from spectralmatch.utils.utils_global import _calculate_image_stats
+from spectralmatch.utils.utils_global import _append_band_to_tif
 
 
 def global_match(
         input_image_paths_array,
         output_image_folder,
-        output_global_basename,
-        custom_mean_factor,
-        custom_std_factor,
+        custom_mean_factor=1,
+        custom_std_factor=1,
+        output_global_basename='_global',
 ):
     """
 Adjusts global histograms of input images for seamless stitching by calculating
@@ -352,7 +352,7 @@ optimization or reading image data.
 def local_match(
         input_image_paths: List[str],
         output_image_folder: str,
-        output_local_basename: str,
+        output_local_basename: str = "_local",
         global_nodata_value: float = -9999,
         target_blocks_per_image: int = 100,
         alpha: float = 1.0,

@@ -8,7 +8,7 @@ import gc
 from osgeo import gdal
 from typing import Tuple, List, Optional
 from scipy.ndimage import map_coordinates, gaussian_filter
-from utils_common import _get_image_metadata
+from spectralmatch.utils.utils_common import _get_image_metadata
 
 
 def _get_bounding_rectangle(

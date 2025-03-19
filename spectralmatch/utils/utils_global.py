@@ -4,7 +4,6 @@ import numpy as np
 
 from osgeo import gdal
 from scipy.optimize import least_squares
-from utils_common import _merge_rasters, _get_image_metadata
 
 np.set_printoptions(
     suppress=True,
