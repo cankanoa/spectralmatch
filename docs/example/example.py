@@ -5,8 +5,8 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 
 # -------------------- Global params
 input_folder = os.path.join(script_dir, "input")
-global_folder = os.path.join(script_dir, "output/global_match")  # this is output of global match
-custom_mean_factor = 3  # Defualt 1; 3 works well sometimes
+global_folder = os.path.join(script_dir, "output/global_match")  # This is the output of global match
+custom_mean_factor = 3  # Defualt 1; 3 often works better to 'move' the spectral mean of images closer together
 custom_std_factor = 1  # Defualt 1
 
 # -------------------- Local params
