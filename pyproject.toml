@@ -10,7 +10,7 @@ packages = ["spectralmatch"]
 
 [project]
 name = "spectralmatch"
-version = "0.0.2"
+version = "0.0.3"
 description = "Global and local spectral matching of 2 or more overlapping rasters"
 readme = "README.md"
 license = {text = "MIT"}
