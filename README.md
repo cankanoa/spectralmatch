@@ -63,8 +63,8 @@
 The color balancing process shifts the histograms of the images toward a common center, ensuring spectral consistency across the dataset. Each image has its own unique scale and offset applied to bring it closer to this central distribution. This is achieved by constructing a global model based on the overlapping areas of adjacent images, where the spectral relationships are defined. The global correction adjusts each image’s scale and offset so that their histograms align with the central tendency of all images.
 
 However, a global correction alone, based on a single mean, does not fully account for variations within individual images. To refine the adjustment locally, the overlap areas are divided into smaller blocks, and each block’s mean is used to fine-tune the color correction. This ensures that the local differences within images are better preserved, leading to seamless and natural-looking colors.
-![Histogram matching graph](./images/matching_histogram.png)
 
+![Histogram matching graph](./images/matching_histogram.png)
 
 ---
 
