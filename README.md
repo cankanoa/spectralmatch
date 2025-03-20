@@ -45,7 +45,7 @@
 
 ## Assumptions
 
-- **Consistent Spectral Profile:** The true spectral profile of overlapping areas remains the same.
+- **Consistent Spectral Profile:** The true spectral response of overlapping areas remains the same throughout the images.
 
 - **Least Squares Modeling:** A least squares approach can effectively model and fit all images' spectral profiles.
 
@@ -59,7 +59,7 @@
 
 - **Local Adjustments:** Block-level color differences result from the global application of adjustments.
 
-## Whats happening to the image?
+## Whats happening to the images?
 The color balancing process shifts the histograms of the images toward a common center, ensuring spectral consistency across the dataset. Each image has its own unique scale and offset applied to bring it closer to this central distribution. This is achieved by constructing a global model based on the overlapping areas of adjacent images, where the spectral relationships are defined. The global correction adjusts each image’s scale and offset so that their histograms align with the central tendency of all images.
 
 However, a global correction alone, based on a single mean, does not fully account for variations within individual images. To refine the adjustment locally, the overlap areas are divided into smaller blocks, and each block’s mean is used to fine-tune the color correction. This ensures that the local differences within images are better preserved, leading to seamless and natural-looking colors.
