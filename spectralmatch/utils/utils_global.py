@@ -122,7 +122,7 @@ def _calculate_image_stats(
     whole_stats = {id_i: {}, id_j: {}}
 
     # --- Helper function to rasterize a relevant mask from GPKG and apply it ---
-    def apply_vector_mask_if_needed(dataset, image_path):
+    def _create_mask_from_gpkg(dataset, image_path):
         """
         If vector_mask_path is not None, rasterize the polygons from the GPKG where
         the 'image' field contains the base_name of the given image_path (split by ';'),
@@ -140,10 +140,6 @@ def _calculate_image_stats(
         """
         if vector_mask_path is None:
             return None  # No masking needed
-
-        import os
-        import numpy as np
-        from osgeo import gdal, ogr, osr
 
         # Extract base filename (no extension) to match the 'image' field
         base_name = os.path.splitext(os.path.basename(image_path))[0]
@@ -226,10 +222,10 @@ def _calculate_image_stats(
     geo_transform_j = dataset_j.GetGeoTransform()
 
     # Pre-rasterize masks (if any) so we do it once per image, not per band
-    mask_array_i = apply_vector_mask_if_needed(dataset_i, input_image_path_i)
+    mask_array_i = _create_mask_from_gpkg(dataset_i, input_image_path_i)
     if mask_array_i is not None: print(f"Found vector mask for {input_image_path_i}")
 
-    mask_array_j = apply_vector_mask_if_needed(dataset_j, input_image_path_j)
+    mask_array_j = _create_mask_from_gpkg(dataset_j, input_image_path_j)
     if mask_array_j is not None: print(f"Found vector mask for {input_image_path_j}")
 
     # Calculate overlap bounds (do not change existing logic)
