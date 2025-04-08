@@ -28,39 +28,40 @@ def global_match(
         custom_mean_factor=1,
         custom_std_factor=1,
         output_global_basename='_global',
+        vector_mask_path=None
 ):
     """
-Adjusts global histograms of input images for seamless stitching by calculating
-statistics from overlapping regions and applying adjustments.
+    Adjusts global histograms of input images for seamless stitching by calculating
+    statistics from overlapping regions and applying adjustments.
 
-The `global_histogram_match` function is designed to process a list of input
-images and adjust their histograms such that the statistical properties (mean
-and standard deviation) across overlapping regions are consistent while
-preserving global properties of each image. This function uses image metadata,
-overlap statistics, and optimization techniques to compute adjustment
-parameters. The output consists of adjusted images written to the specified
-output folder.
+    The `global_histogram_match` function is designed to process a list of input
+    images and adjust their histograms such that the statistical properties (mean
+    and standard deviation) across overlapping regions are consistent while
+    preserving global properties of each image. This function uses image metadata,
+    overlap statistics, and optimization techniques to compute adjustment
+    parameters. The output consists of adjusted images written to the specified
+    output folder.
 
-Args:
-input_image_paths_array (list[str]): List of file paths to the input images
-to be processed.
-output_image_folder (str): Directory where the processed images will be
-saved.
-output_global_basename (str): Shared base name to use when saving output
-images. Outputs will be saved with this base name and additional suffix
-for each image.
-custom_mean_factor (float): Weight scaling factor for adjusting the
-difference in mean statistics across overlapping regions.
-custom_std_factor (float): Weight scaling factor for adjusting the
-difference in standard deviation statistics across overlapping regions.
+    Args:
+    input_image_paths_array (list[str]): List of file paths to the input images
+    to be processed.
+    output_image_folder (str): Directory where the processed images will be
+    saved.
+    output_global_basename (str): Shared base name to use when saving output
+    images. Outputs will be saved with this base name and additional suffix
+    for each image.
+    custom_mean_factor (float): Weight scaling factor for adjusting the
+    difference in mean statistics across overlapping regions.
+    custom_std_factor (float): Weight scaling factor for adjusting the
+    difference in standard deviation statistics across overlapping regions.
 
-Raises:
-ValueError: If input image paths are invalid or processing fails due to
-inconsistent metadata or missing overlaps.
-TypeError: If arguments are of incorrect type or contain incompatible
-data formats.
-RuntimeError: If an issue occurs during processing, such as failure in
-optimization or reading image data.
+    Raises:
+    ValueError: If input image paths are invalid or processing fails due to
+    inconsistent metadata or missing overlaps.
+    TypeError: If arguments are of incorrect type or contain incompatible
+    data formats.
+    RuntimeError: If an issue occurs during processing, such as failure in
+    optimization or reading image data.
     """
     print("----------Starting Global Matching")
 
@@ -93,6 +94,7 @@ optimization or reading image data.
             all_bounds[id_j],
             all_nodata[id_i],
             all_nodata[id_j],
+            vector_mask_path
         )
 
         all_overlap_stats.update(
