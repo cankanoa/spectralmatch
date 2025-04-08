@@ -1,5 +1,7 @@
 # Example image
 /docs/example/output/
+*.gpkg-shm
+*.gpkg-wal
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
