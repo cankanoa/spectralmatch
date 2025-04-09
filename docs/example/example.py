@@ -40,7 +40,7 @@ local_match(
     target_blocks_per_image=100,
     projection="EPSG:6635",
     debug_mode=True,
-    global_nodata_value=-32768,
+    custom_nodata_value=-9999,
 )
 
 print("Done with global and local histogram matching")

@@ -355,7 +355,7 @@ def local_match(
         input_image_paths: List[str],
         output_image_folder: str,
         output_local_basename: str = "_local",
-        global_nodata_value: float = -9999,
+        custom_nodata_value: float = None,
         target_blocks_per_image: int = 100,
         alpha: float = 1.0,
         calculation_dtype_precision="float32",
@@ -366,55 +366,64 @@ def local_match(
         debug_mode: bool = False,
 ):
     """
-Performs local histogram matching on input raster images to align their intensity distributions
-to a reference distribution computed globally or locally. This process adjusts image brightness and
-contrast to make the distributions between the images comparable for consistency.
+    Performs local histogram matching on input raster images to align their intensity distributions
+    to a reference distribution computed globally or locally. This process adjusts image brightness and
+    contrast to make the distributions between the images comparable for consistency.
 
-Args:
-input_image_paths (List[str]): Paths to the input raster images to be processed.
-output_image_folder (str): Directory where the processed images and associated outputs will
-be saved.
-output_local_basename (str): Base name to append to the output image filenames.
-global_nodata_value (float, optional): Value representing no data for input raster images.
-Defaults to -9999.
-target_blocks_per_image (int, optional): Number of blocks to divide an image into for local
-histogram correction. Defaults to 100.
-alpha (float, optional): Scaling factor for histogram matching adjustments. Higher values
-lead to more significant adjustments. Defaults to 1.0.
-calculation_dtype_precision (str, optional): Data type used for calculations during histogram
-adjustments. Defaults to "float32".
-floor_value (Optional[float], optional): Minimum floor value applied during calculations.
-If None, the minimum is determined automatically. Defaults to None.
-gamma_bounds (Optional[Tuple[float, float]], optional): Lower and upper bounds for gamma
-correction values during intensity adjustment. Defaults to None.
-output_dtype (str, optional): Output data type for the processed raster images. One of Byte,
-Int8, UInt16, Int16, UInt32, Int32, UInt64, Int64, Float32, or Float64 based on numpy
-conventions. Defaults to "float32".
-projection (str, optional): Spatial reference system format for the output rasters.
-Defaults to "EPSG:4326".
-debug_mode (bool, optional): Enables debug outputs such as intermediate maps to assist
-troubleshooting. Defaults to False.
+    Args:
+    input_image_paths (List[str]): Paths to the input raster images to be processed.
+    output_image_folder (str): Directory where the processed images and associated outputs will
+    be saved.
+    output_local_basename (str): Base name to append to the output image filenames.
+    global_nodata_value (float, optional): Value representing no data for input raster images.
+    Defaults to -9999.
+    target_blocks_per_image (int, optional): Number of blocks to divide an image into for local
+    histogram correction. Defaults to 100.
+    alpha (float, optional): Scaling factor for histogram matching adjustments. Higher values
+    lead to more significant adjustments. Defaults to 1.0.
+    calculation_dtype_precision (str, optional): Data type used for calculations during histogram
+    adjustments. Defaults to "float32".
+    floor_value (Optional[float], optional): Minimum floor value applied during calculations.
+    If None, the minimum is determined automatically. Defaults to None.
+    gamma_bounds (Optional[Tuple[float, float]], optional): Lower and upper bounds for gamma
+    correction values during intensity adjustment. Defaults to None.
+    output_dtype (str, optional): Output data type for the processed raster images. One of Byte,
+    Int8, UInt16, Int16, UInt32, Int32, UInt64, Int64, Float32, or Float64 based on numpy
+    conventions. Defaults to "float32".
+    projection (str, optional): Spatial reference system format for the output rasters.
+    Defaults to "EPSG:4326".
+    debug_mode (bool, optional): Enables debug outputs such as intermediate maps to assist
+    troubleshooting. Defaults to False.
 
-Raises:
-ValueError: If `global_nodata_value` is not set and cannot be inferred from the first input image.
-RuntimeError: If an input raster file cannot be loaded correctly.
+    Raises:
+    ValueError: If `global_nodata_value` is not set and cannot be inferred from the first input image.
+    RuntimeError: If an input raster file cannot be loaded correctly.
 
     """
     print("----------Starting Local Matching")
 
     print(f"Found {len(input_image_paths)} images")
 
-    if global_nodata_value is None:
-        try:
-            global_nodata_value = (
-                gdal.Open(input_image_paths[0], gdal.GA_ReadOnly)
-                .GetRasterBand(1)
-                .GetNoDataValue()
-            )
-        except:
-            raise ValueError(
-                "global_nodata_value not set and could not get one from the first band of the first image."
-            )
+    try:
+        ds = gdal.Open(input_image_paths[0], gdal.GA_ReadOnly)
+        image_nodata_value = ds.GetRasterBand(1).GetNoDataValue()
+        ds = None
+    except:
+        image_nodata_value = None
+
+    if custom_nodata_value is None and image_nodata_value is None:
+        print("custom_nodata_value not set and could not get one from the first band of the first image; using -9999")
+        global_nodata_value = -9999
+
+    if custom_nodata_value is None and image_nodata_value is not None:
+        global_nodata_value = image_nodata_value
+
+    if custom_nodata_value is not None:
+        global_nodata_value = custom_nodata_value
+        if image_nodata_value is not None and image_nodata_value != custom_nodata_value:
+            print("Warning: image no data value has been overwritten by custom_nodata_value")
+
+
     print(f"Global nodata value: {global_nodata_value}")
 
     print("-------------------- Computing block size")
@@ -493,7 +502,7 @@ RuntimeError: If an input raster file cannot be loaded correctly.
         _download_block_map(
             block_map=np.nan_to_num(ref_map, nan=global_nodata_value),
             bounding_rect=bounding_rect,
-            output_image_path=os.path.join(output_image_folder, "RefDistMap.tif"),
+            output_image_path=os.path.join(output_image_folder, 'RefDistMap', "RefDistMap.tif"),
             nodata_value=global_nodata_value,
             projection=projection,
         )
@@ -511,20 +520,16 @@ RuntimeError: If an input raster file cannot be loaded correctly.
         out_name = (
             os.path.splitext(os.path.basename(img_path))[0]
             + output_local_basename
-            + ".tif"
         )
-        out_path = os.path.join(output_image_folder, out_name)
 
         if debug_mode:
             _download_block_map(
                 block_map=np.nan_to_num(loc_count_map, nan=global_nodata_value),
                 bounding_rect=bounding_rect,
                 output_image_path=os.path.join(
-                    os.path.dirname(out_path),
+                    output_image_folder,
                     "locCountMaps",
-                    os.path.splitext(os.path.basename(out_path))[0]
-                    + "_locCountMaps"
-                    + os.path.splitext(out_path)[1],
+                    out_name + "_locCountMaps" + '.tif',
                 ),
                 nodata_value=global_nodata_value,
                 projection=projection,
@@ -535,11 +540,9 @@ RuntimeError: If an input raster file cannot be loaded correctly.
                 block_map=np.nan_to_num(loc_map, nan=global_nodata_value),
                 bounding_rect=bounding_rect,
                 output_image_path=os.path.join(
-                    os.path.dirname(out_path),
+                    output_image_folder,
                     "LocalDistMaps",
-                    os.path.splitext(os.path.basename(out_path))[0]
-                    + "_LocalDistMap"
-                    + os.path.splitext(out_path)[1],
+                    out_name + "_LocalDistMap" + '.tif',
                 ),
                 nodata_value=global_nodata_value,
                 projection=projection,
@@ -549,8 +552,11 @@ RuntimeError: If an input raster file cannot be loaded correctly.
         ds_in = gdal.Open(img_path, gdal.GA_ReadOnly) or RuntimeError(
             f"Could not open {img_path}"
         )
-        driver = gdal.GetDriverByName("GTiff")
 
+        out_path = os.path.join(output_image_folder, 'images', (out_name + '.tif'))
+        if not os.path.exists(os.path.dirname(out_path)): os.makedirs(os.path.dirname(out_path), exist_ok=True)
+
+        driver = gdal.GetDriverByName("GTiff")
         out_ds = driver.Create(
             out_path,
             ds_in.RasterXSize,
@@ -636,10 +642,9 @@ RuntimeError: If an input raster file cannot be loaded correctly.
                     block_map=np.where(valid_mask, 1, global_nodata_value),
                     bounding_rect=this_image_bounds,
                     output_image_path=os.path.join(
-                        os.path.dirname(out_path),
+                        output_image_folder,
                         "ValidMasks",
-                        os.path.splitext(os.path.basename(out_path))[0]
-                        + f"_ValidMask_{b}.tif",
+                        out_name + f"_ValidMask_{b}.tif",
                     ),
                     projection=projection,
                     nodata_value=global_nodata_value,
@@ -678,10 +683,9 @@ RuntimeError: If an input raster file cannot be loaded correctly.
                     block_map=Mrefs,
                     bounding_rect=this_image_bounds,
                     output_image_path=os.path.join(
-                        os.path.dirname(out_path),
+                        output_image_folder,
                         "Mrefs",
-                        os.path.splitext(os.path.basename(out_path))[0]
-                        + f"_Mrefs_{b}.tif",
+                        out_name + f"_Mrefs_{b}.tif",
                     ),
                     projection=projection,
                     nodata_value=global_nodata_value,
@@ -692,10 +696,9 @@ RuntimeError: If an input raster file cannot be loaded correctly.
                     block_map=Mins,
                     bounding_rect=this_image_bounds,
                     output_image_path=os.path.join(
-                        os.path.dirname(out_path),
+                        output_image_folder,
                         "Mins",
-                        os.path.splitext(os.path.basename(out_path))[0]
-                        + f"_Mins_{b}.tif",
+                        out_name + f"_Mins_{b}.tif",
                     ),
                     projection=projection,
                     nodata_value=global_nodata_value,
@@ -732,10 +735,9 @@ RuntimeError: If an input raster file cannot be loaded correctly.
                     block_map=gammas_array,
                     bounding_rect=this_image_bounds,
                     output_image_path=os.path.join(
-                        os.path.dirname(out_path),
+                        output_image_folder,
                         "Gammas",
-                        os.path.splitext(os.path.basename(out_path))[0]
-                        + f"_Gamma_{b}.tif",
+                        out_name + f"_Gamma_{b}.tif",
                     ),
                     projection=projection,
                     nodata_value=global_nodata_value,
