@@ -1,16 +1,16 @@
 import os
 from spectralmatch.process import global_match, local_match
-script_dir = os.path.dirname(os.path.abspath(__file__))
+working_directory = os.path.dirname(os.path.abspath(__file__))
 
 # -------------------- Parameters
-vector_mask_path = script_dir + "/input/Masks.gpkg"
+vector_mask_path = working_directory + "/input/Masks.gpkg"
 
-input_folder = os.path.join(script_dir, "input")
-global_folder = os.path.join(script_dir, "output/global_match")  # This is the output of global match
+input_folder = os.path.join(working_directory, "input")
+global_folder = os.path.join(working_directory, "output/global_match")  # This is the output of global match
 custom_mean_factor = 3  # Defualt 1; 3 often works better to 'move' the spectral mean of images closer together
 custom_std_factor = 1  # Defualt 1
 
-local_folder = os.path.join(script_dir, "output/local_match")
+local_folder = os.path.join(working_directory, "output/local_match")
 
 # -------------------- Global Histogram Match Mulispectral Images
 input_image_paths_array = [
