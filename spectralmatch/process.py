@@ -18,9 +18,8 @@ from spectralmatch.utils.utils_common import _merge_rasters
 from spectralmatch.utils.utils_common import _get_image_metadata
 
 from spectralmatch.utils.utils_global import _find_overlaps
-from spectralmatch.utils.utils_global import _calculate_image_stats
-from spectralmatch.utils.utils_global import _append_band_to_tif
-
+from spectralmatch.utils.utils_global import _calculate_overlap_stats, _calculate_whole_stats
+from spectralmatch.utils.utils_io import create_windows
 
 def global_match(
         input_image_paths_array,
@@ -28,7 +27,9 @@ def global_match(
         custom_mean_factor=1,
         custom_std_factor=1,
         output_global_basename='_global',
-        vector_mask_path=None
+        vector_mask_path=None,
+        tile_width_and_height_tuple: tuple = None,
+        debug_mode=False,
 ):
     """
     Adjusts global histograms of input images for seamless stitching by calculating
@@ -84,7 +85,7 @@ def global_match(
     all_overlap_stats = {}
     all_whole_stats = {}
     for id_i, id_j in overlapping_pairs:
-        current_overlap_stats, current_whole_stats = _calculate_image_stats(
+        current_overlap_stats = _calculate_overlap_stats(
             num_bands,
             input_image_paths_array[id_i],
             input_image_paths_array[id_j],
@@ -94,25 +95,27 @@ def global_match(
             all_bounds[id_j],
             all_nodata[id_i],
             all_nodata[id_j],
-            vector_mask_path
+            vector_mask_path=vector_mask_path,
+            tile_width_and_height_tuple=tile_width_and_height_tuple,
+            debug_mode=debug_mode,
         )
-
-        all_overlap_stats.update(
-            {
-                key_i: {
-                    **all_overlap_stats.get(key_i, {}),
-                    **{
-                        key_j: {
-                            **all_overlap_stats.get(key_i, {}).get(key_j, {}),
-                            **stats,
-                        }
-                        for key_j, stats in value.items()
-                    },
+        all_overlap_stats.update({
+            key_i: {
+                **all_overlap_stats.get(key_i, {}),
+                **{key_j: {**all_overlap_stats.get(key_i, {}).get(key_j, {}),**stats}
+                for key_j, stats in value.items()}
                 }
-                for key_i, value in current_overlap_stats.items()
-            }
-        )
+            for key_i, value in current_overlap_stats.items()})
 
+    for idx, input_image_path in enumerate(input_image_paths_array, start=0):
+        current_whole_stats = _calculate_whole_stats(
+            input_image_path=input_image_path,
+            nodata=all_nodata[idx],
+            num_bands=num_bands,
+            image_id=idx,
+            vector_mask_path=vector_mask_path,
+            tile_width_and_height_tuple=tile_width_and_height_tuple
+            )
         all_whole_stats.update(current_whole_stats)
 
     # ---------------------------------------- Model building and adjustment
@@ -294,40 +297,36 @@ def global_match(
         output_filename = (
             os.path.splitext(input_filename)[0] + output_global_basename + ".tif"
         )
-        os.makedirs(os.path.join(output_image_folder, "images"), exist_ok=True)
-        output_path = os.path.join(output_image_folder, "images", output_filename)
+        os.makedirs(os.path.join(output_image_folder, "Images"), exist_ok=True)
+        output_path = os.path.join(output_image_folder, "Images", output_filename)
         output_path_array.append(output_path)
 
         with rasterio.open(input_image_paths_array[img_idx]) as dataset:
-            input_dtype = dataset.dtypes[0]  # assumes all bands have same dtype
+            meta = dataset.meta.copy()
+            meta.update({
+                "driver": "GTiff",
+                "count": num_bands,
+                "nodata": all_nodata[img_idx],
+            })
 
-            for band_idx in range(num_bands):
-                band = dataset.read(band_idx + 1)  # 1-based index in rasterio
+            output_path = os.path.join(output_image_folder, "Images", output_filename)
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-                mask = band != all_nodata[img_idx]
-                a = all_adjustment_params[band_idx, 2 * img_idx, 0]
-                b = all_adjustment_params[band_idx, 2 * img_idx + 1, 0]
+            with rasterio.open(output_path, "w", **meta) as data:
+                for band_idx in range(num_bands):
+                    a = all_adjustment_params[band_idx, 2 * img_idx, 0]
+                    b = all_adjustment_params[band_idx, 2 * img_idx + 1, 0]
 
-                adjusted_band = np.where(mask, a * band + b, band)
+                    if tile_width_and_height_tuple:
+                        windows = create_windows(dataset.width, dataset.height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
+                    else:
+                        windows = (win for _, win in dataset.block_windows(band_idx + 1))
 
-                _append_band_to_tif(
-                    adjusted_band,
-                    all_transforms[img_idx],
-                    all_projections[img_idx],
-                    output_path,
-                    all_nodata[img_idx],
-                    band_idx + 1,
-                    total_bands=num_bands,
-                    # dtype=input_dtype,
-                )
-
-        # _save_multiband_as_geotiff(
-        #     adjusted_bands_array,
-        #     all_transforms[img_idx],
-        #     all_projections[img_idx],
-        #     output_path,
-        #     all_nodata[img_idx],
-        # )
+                    for window in windows:
+                        block = dataset.read(band_idx + 1, window=window)
+                        mask = block != all_nodata[img_idx]
+                        adjusted = np.where(mask, a * block + b, block)
+                        data.write(adjusted, band_idx + 1, window=window)
 
         print(f"Saved file {img_idx} to: {output_path}")
     # ---------------------------------------- Merge rasters
