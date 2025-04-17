@@ -9,7 +9,7 @@ import rasterio
 
 from spectralmatch.utils.utils_local import _get_bounding_rectangle
 from spectralmatch.utils.utils_local import _compute_block_size
-from spectralmatch.utils.utils_local import _compute_distribution_map
+from spectralmatch.utils.utils_local import _compute_blocks
 from spectralmatch.utils.utils_local import _weighted_bilinear_interpolation
 from spectralmatch.utils.utils_local import _download_block_map
 from spectralmatch.utils.utils_local import _apply_gamma_correction
@@ -18,23 +18,20 @@ from spectralmatch.utils.utils_common import _merge_rasters
 from spectralmatch.utils.utils_common import _get_image_metadata
 
 from spectralmatch.utils.utils_global import _find_overlaps
-from spectralmatch.utils.utils_global import (
-    _calculate_overlap_stats,
-    _calculate_whole_stats,
-)
+from spectralmatch.utils.utils_global import _calculate_overlap_stats, _calculate_whole_stats
 from spectralmatch.utils.utils_io import create_windows
-
+from rasterio.windows import Window
 
 def global_match(
     input_image_paths_array,
     output_image_folder,
     custom_mean_factor=1,
     custom_std_factor=1,
-    output_global_basename="_global",
+    output_global_basename='_global',
     vector_mask_path=None,
     tile_width_and_height_tuple: tuple = None,
     debug_mode=False,
-):
+    ):
     """
     Adjusts global histograms of input images for seamless stitching by calculating
     statistics from overlapping regions and applying adjustments.
@@ -72,8 +69,7 @@ def global_match(
 
     # ---------------------------------------- Calculating statistics
     print("-------------------- Calculating statistics")
-    with rasterio.open(input_image_paths_array[0]) as src:
-        num_bands = src.count
+    with rasterio.open(input_image_paths_array[0]) as src: num_bands = src.count
     num_images = len(input_image_paths_array)
 
     all_transforms = {}
@@ -104,21 +100,13 @@ def global_match(
             tile_width_and_height_tuple=tile_width_and_height_tuple,
             debug_mode=debug_mode,
         )
-        all_overlap_stats.update(
-            {
-                key_i: {
-                    **all_overlap_stats.get(key_i, {}),
-                    **{
-                        key_j: {
-                            **all_overlap_stats.get(key_i, {}).get(key_j, {}),
-                            **stats,
-                        }
-                        for key_j, stats in value.items()
-                    },
+        all_overlap_stats.update({
+            key_i: {
+                **all_overlap_stats.get(key_i, {}),
+                **{key_j: {**all_overlap_stats.get(key_i, {}).get(key_j, {}),**stats}
+                for key_j, stats in value.items()}
                 }
-                for key_i, value in current_overlap_stats.items()
-            }
-        )
+            for key_i, value in current_overlap_stats.items()})
 
     for idx, input_image_path in enumerate(input_image_paths_array, start=0):
         current_whole_stats = _calculate_whole_stats(
@@ -127,8 +115,8 @@ def global_match(
             num_bands=num_bands,
             image_id=idx,
             vector_mask_path=vector_mask_path,
-            tile_width_and_height_tuple=tile_width_and_height_tuple,
-        )
+            tile_width_and_height_tuple=tile_width_and_height_tuple
+            )
         all_whole_stats.update(current_whole_stats)
 
     # ---------------------------------------- Model building and adjustment
@@ -314,41 +302,32 @@ def global_match(
         output_path = os.path.join(output_image_folder, "Images", output_filename)
         output_path_array.append(output_path)
 
-        with rasterio.open(input_image_paths_array[img_idx]) as dataset:
-            meta = dataset.meta.copy()
-            meta.update(
-                {
-                    "driver": "GTiff",
-                    "count": num_bands,
-                    "nodata": all_nodata[img_idx],
-                }
-            )
+        with rasterio.open(input_image_paths_array[img_idx]) as data:
+            meta = data.meta.copy()
+            meta.update({
+                "driver": "GTiff",
+                "count": num_bands,
+                "nodata": all_nodata[img_idx],
+            })
 
             output_path = os.path.join(output_image_folder, "Images", output_filename)
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-            with rasterio.open(output_path, "w", **meta) as data:
+            with rasterio.open(output_path, "w", **meta) as data_out:
                 for band_idx in range(num_bands):
                     a = all_adjustment_params[band_idx, 2 * img_idx, 0]
                     b = all_adjustment_params[band_idx, 2 * img_idx + 1, 0]
 
                     if tile_width_and_height_tuple:
-                        windows = create_windows(
-                            dataset.width,
-                            dataset.height,
-                            tile_width_and_height_tuple[0],
-                            tile_width_and_height_tuple[1],
-                        )
+                        windows = create_windows(data.width, data.height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
                     else:
-                        windows = (
-                            win for _, win in dataset.block_windows(band_idx + 1)
-                        )
+                        windows = [Window(0, 0, data.width, data.height)]
 
                     for window in windows:
-                        block = dataset.read(band_idx + 1, window=window)
+                        block = data.read(band_idx + 1, window=window)
                         mask = block != all_nodata[img_idx]
                         adjusted = np.where(mask, a * block + b, block)
-                        data.write(adjusted, band_idx + 1, window=window)
+                        data_out.write(adjusted, band_idx + 1, window=window)
 
         print(f"Saved file {img_idx} to: {output_path}")
     # ---------------------------------------- Merge rasters
@@ -373,7 +352,8 @@ def local_match(
     output_dtype="float32",  # One of Byte, Int8, UInt16, Int16, UInt32, Int32, UInt64, Int64, Float32, Float64 as np strings
     projection: str = "EPSG:4326",
     debug_mode: bool = False,
-):
+    tile_width_and_height_tuple: tuple = None,
+    ):
     """
     Performs local histogram matching on input raster images to align their intensity distributions
     to a reference distribution computed globally or locally. This process adjusts image brightness and
@@ -414,15 +394,12 @@ def local_match(
     print(f"Found {len(input_image_paths)} images")
 
     try:
-        with rasterio.open(input_image_paths[0]) as ds:
-            image_nodata_value = ds.nodata
+        with rasterio.open(input_image_paths[0]) as ds: image_nodata_value = ds.nodata
     except:
         image_nodata_value = None
 
     if custom_nodata_value is None and image_nodata_value is None:
-        print(
-            "custom_nodata_value not set and could not get one from the first band of the first image; using -9999"
-        )
+        print("custom_nodata_value not set and could not get one from the first band of the first image; using -9999")
         global_nodata_value = -9999
 
     if custom_nodata_value is None and image_nodata_value is not None:
@@ -431,9 +408,8 @@ def local_match(
     if custom_nodata_value is not None:
         global_nodata_value = custom_nodata_value
         if image_nodata_value is not None and image_nodata_value != custom_nodata_value:
-            print(
-                "Warning: image no data value has been overwritten by custom_nodata_value"
-            )
+            print("Warning: image no data value has been overwritten by custom_nodata_value")
+
 
     print(f"Global nodata value: {global_nodata_value}")
 
@@ -496,16 +472,16 @@ def local_match(
     # M, N = _compute_mosaic_coefficient_of_variation(input_image_paths, global_nodata_value)
 
     print("-------------------- Computing global reference block map")
-    with rasterio.open(input_image_paths[0]) as ds:
-        num_bands = ds.count
+    with rasterio.open(input_image_paths[0]) as ds: num_bands = ds.count
 
-    block_reference_mean, block_reference_count = _compute_distribution_map(
+    block_reference_mean, block_reference_count = _compute_blocks(
         input_image_paths,
         bounding_rect,
         M,
         N,
         num_bands,
         nodata_value=global_nodata_value,
+        tile_width_and_height_tuple=tile_width_and_height_tuple,
     )
 
     # block_reference_mean = _smooth_array(block_reference_mean, nodata_value=global_nodata_value)
@@ -514,9 +490,7 @@ def local_match(
         _download_block_map(
             block_map=np.nan_to_num(block_reference_mean, nan=global_nodata_value),
             bounding_rect=bounding_rect,
-            output_image_path=os.path.join(
-                output_image_folder, "BlockReferenceMean", "BlockReferenceMean.tif"
-            ),
+            output_image_path=os.path.join(output_image_folder, 'BlockReferenceMean', "BlockReferenceMean.tif"),
             nodata_value=global_nodata_value,
             projection=projection,
         )
@@ -525,31 +499,26 @@ def local_match(
     for img_path in input_image_paths:
         print(f"-------------------- Processing: {img_path}")
         print(f"-------------------- Computing local block map")
-        with rasterio.open(img_path) as ds_in:
-            block_local_mean, block_local_count = _compute_distribution_map(
+        with rasterio.open(img_path) as data_in:
+            block_local_mean, block_local_count = _compute_blocks(
                 [img_path],
                 bounding_rect,
                 M,
                 N,
                 num_bands,
                 nodata_value=global_nodata_value,
+                tile_width_and_height_tuple=tile_width_and_height_tuple,
             )
 
             # block_local_mean = _smooth_array(block_local_mean, nodata_value=global_nodata_value)
 
-            out_name = (
-                os.path.splitext(os.path.basename(img_path))[0] + output_local_basename
-            )
+            out_name = (os.path.splitext(os.path.basename(img_path))[0] + output_local_basename)
 
             if debug_mode:
                 _download_block_map(
                     block_map=np.nan_to_num(block_local_count, nan=global_nodata_value),
                     bounding_rect=bounding_rect,
-                    output_image_path=os.path.join(
-                        output_image_folder,
-                        "BlockLocalCount",
-                        out_name + "_BlockLocalCount" + ".tif",
-                    ),
+                    output_image_path=os.path.join(output_image_folder,"BlockLocalCount", out_name + "_BlockLocalCount" + '.tif'),
                     nodata_value=global_nodata_value,
                     projection=projection,
                 )
@@ -558,31 +527,22 @@ def local_match(
                 _download_block_map(
                     block_map=np.nan_to_num(block_local_mean, nan=global_nodata_value),
                     bounding_rect=bounding_rect,
-                    output_image_path=os.path.join(
-                        output_image_folder,
-                        "BlockLocalMean",
-                        out_name + "_BlockLocalMean" + ".tif",
-                    ),
+                    output_image_path=os.path.join(output_image_folder, "BlockLocalMean", out_name + "_BlockLocalMean" + '.tif'),
                     nodata_value=global_nodata_value,
                     projection=projection,
                 )
 
-            print(
-                f"-------------------- Computing local correction, applying, and saving"
-            )
+            print(f"-------------------- Computing local correction, applying, and saving")
 
-            out_path = os.path.join(output_image_folder, "images", (out_name + ".tif"))
-            if not os.path.exists(os.path.dirname(out_path)):
-                os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            out_path = os.path.join(output_image_folder, 'images', (out_name + '.tif'))
+            if not os.path.exists(os.path.dirname(out_path)): os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
-            out_meta = ds_in.meta.copy()
-            out_meta.update(
-                {
-                    "count": num_bands,
-                    "dtype": output_dtype,
-                    "nodata": global_nodata_value,
-                }
-            )
+            out_meta = data_in.meta.copy()
+            out_meta.update({
+                "count": num_bands,
+                "dtype": output_dtype,
+                "nodata": global_nodata_value
+            })
             with rasterio.open(out_path, "w", **out_meta) as out_ds:
                 for b in range(num_bands):
                     print(f"-------------------- For band {b + 1}")
@@ -591,27 +551,18 @@ def local_match(
                     # if b >= 2:
                     #     continue
 
-                    arr_in = ds_in.read(b + 1).astype(calculation_dtype_precision)
+                    arr_in = data_in.read(b + 1).astype(calculation_dtype_precision)
 
-                    # Generate a single matrix for block indices directly
-                    nX, nY = ds_in.width, ds_in.height
+                    gt = data_in.transform
+                    this_image_bounds = data_in.bounds
 
-                    gt = ds_in.transform
-                    x_min, y_min, x_max, y_max = ds_in.bounds
-                    this_image_bounds = (x_min, y_min, x_max, y_max)
-
-                    col_index = np.arange(ds_in.width)
-                    row_index = np.arange(ds_in.height)
-                    Xgeo = gt[2] + col_index * gt[0]
-                    Ygeo = gt[5] + row_index * gt[4]
-                    Xgeo_2d, Ygeo_2d = np.meshgrid(Xgeo, Ygeo)
+                    pixel_center_coords_x = gt[2] + np.arange(data_in.width) * gt[0]
+                    pixel_center_coords_y = gt[5] + np.arange(data_in.height) * gt[4]
+                    Xgeo_2d, Ygeo_2d = np.meshgrid(pixel_center_coords_x, pixel_center_coords_y)
 
                     # Compute block indices for each pixel
                     row_fs = np.clip(
-                        (
-                            (bounding_rect[3] - Ygeo_2d)
-                            / (bounding_rect[3] - bounding_rect[1])
-                        )
+                        ((bounding_rect[3] - Ygeo_2d) / (bounding_rect[3] - bounding_rect[1]))
                         * M
                         - 0.5,
                         0,
@@ -620,18 +571,10 @@ def local_match(
                     del Ygeo_2d
                     gc.collect()
                     col_fs = np.clip(
-                        (
-                            (
-                                (Xgeo_2d - bounding_rect[0])
-                                / (bounding_rect[2] - bounding_rect[0])
-                            )
-                            * N
-                        )
+                        (((Xgeo_2d - bounding_rect[0])/ (bounding_rect[2] - bounding_rect[0]))* N)
                         - 0.5,
                         0,
-                        N - 1,
-                    )
-                    print(gt[0])
+                        N - 1,)
                     del Xgeo_2d
                     gc.collect()
 
@@ -644,10 +587,6 @@ def local_match(
                     block_local_mean_band = block_local_mean[:, :, b]
                     block_reference_mean_band = block_reference_mean[:, :, b]
 
-                    # Mask out regions where block_local_mean or block_reference_mean are NaN (NoData regions)
-                    valid_loc_mask = ~np.isnan(block_local_mean_band)
-                    valid_ref_mask = ~np.isnan(block_reference_mean_band)
-
                     # Ensure valid_mask is correctly applied to the input arrays
                     valid_rows, valid_cols = np.where(valid_mask)
 
@@ -655,13 +594,11 @@ def local_match(
                         _download_block_map(
                             block_map=np.where(valid_mask, 1, global_nodata_value),
                             bounding_rect=this_image_bounds,
-                            output_image_path=os.path.join(
-                                output_image_folder,
-                                "ValidMasks",
-                                out_name + f"_ValidMask{b}.tif",
-                            ),
+                            output_image_path=os.path.join(output_image_folder, "ValidMasks", out_name + f"_ValidMask.tif"),
                             projection=projection,
                             nodata_value=global_nodata_value,
+                            output_bands_map=(b+1,),
+                            override_band_count=num_bands
                         )
 
                     # Ensure weighted interpolation handles only valid regions
@@ -672,23 +609,19 @@ def local_match(
                         arr_in, global_nodata_value, dtype=calculation_dtype_precision
                     )
 
-                    reference_band[valid_rows, valid_cols] = (
-                        _weighted_bilinear_interpolation(
-                            block_reference_mean_band,
-                            # block_reference_mean[:, :, b],
-                            col_fs[valid_rows, valid_cols],
-                            row_fs[valid_rows, valid_cols],
-                        )
+                    reference_band[valid_rows, valid_cols] = _weighted_bilinear_interpolation(
+                        block_reference_mean_band,
+                        # block_reference_mean[:, :, b],
+                        col_fs[valid_rows, valid_cols],
+                        row_fs[valid_rows, valid_cols],
                     )
                     del block_reference_mean_band
                     gc.collect()
-                    local_band[valid_rows, valid_cols] = (
-                        _weighted_bilinear_interpolation(
-                            block_local_mean_band,
-                            # block_local_count[:, :, b],
-                            col_fs[valid_rows, valid_cols],
-                            row_fs[valid_rows, valid_cols],
-                        )
+                    local_band[valid_rows, valid_cols] = _weighted_bilinear_interpolation(
+                        block_local_mean_band,
+                        # block_local_count[:, :, b],
+                        col_fs[valid_rows, valid_cols],
+                        row_fs[valid_rows, valid_cols],
                     )
 
                     del col_fs, row_fs
@@ -700,35 +633,27 @@ def local_match(
                         _download_block_map(
                             block_map=reference_band,
                             bounding_rect=this_image_bounds,
-                            output_image_path=os.path.join(
-                                output_image_folder,
-                                "ReferenceBand",
-                                out_name + f"_ReferenceBand{b}.tif",
-                            ),
+                            output_image_path=os.path.join(output_image_folder, "ReferenceBand", out_name + f"_ReferenceBand.tif"),
                             projection=projection,
                             nodata_value=global_nodata_value,
+                            output_bands_map=(b+1,),
+                            override_band_count=num_bands,
                         )
 
                     if debug_mode:
                         _download_block_map(
                             block_map=local_band,
                             bounding_rect=this_image_bounds,
-                            output_image_path=os.path.join(
-                                output_image_folder,
-                                "LocalBand",
-                                out_name + f"_LocalBand{b}.tif",
-                            ),
+                            output_image_path=os.path.join(output_image_folder, "LocalBand", out_name + f"_LocalBand.tif"),
                             projection=projection,
                             nodata_value=global_nodata_value,
+                            output_bands_map=(b+1,),
+                            override_band_count=num_bands,
                         )
 
                     valid_pixels = valid_mask  # & (reference_band > 0) & (local_band > 0) # Mask if required but better to offset values <= 0
                     smallest_value = np.min(
-                        [
-                            arr_in[valid_pixels],
-                            reference_band[valid_pixels],
-                            local_band[valid_pixels],
-                        ]
+                        [arr_in[valid_pixels], reference_band[valid_pixels], local_band[valid_pixels]]
                     )
 
                     if smallest_value <= 0:
@@ -739,23 +664,16 @@ def local_match(
                             local_band[valid_pixels] + pixels_positive_offset,
                             alpha,
                         )
-                        arr_out[valid_pixels] = (
-                            arr_out[valid_pixels] - pixels_positive_offset
-                        )
+                        arr_out[valid_pixels] = arr_out[valid_pixels] - pixels_positive_offset
                     else:
                         arr_out[valid_pixels], gammas = _apply_gamma_correction(
-                            arr_in[valid_pixels],
-                            reference_band[valid_pixels],
-                            local_band[valid_pixels],
-                            alpha,
+                            arr_in[valid_pixels], reference_band[valid_pixels], local_band[valid_pixels], alpha
                         )
                     del reference_band, local_band
                     gc.collect()
 
                     gammas_array = np.full(
-                        arr_in.shape,
-                        global_nodata_value,
-                        dtype=calculation_dtype_precision,
+                        arr_in.shape, global_nodata_value, dtype=calculation_dtype_precision
                     )
                     gammas_array[valid_rows, valid_cols] = gammas
 
@@ -763,13 +681,11 @@ def local_match(
                         _download_block_map(
                             block_map=gammas_array,
                             bounding_rect=this_image_bounds,
-                            output_image_path=os.path.join(
-                                output_image_folder,
-                                "Gamma",
-                                out_name + f"_Gamma{b}.tif",
-                            ),
+                            output_image_path=os.path.join(output_image_folder, "Gamma", out_name + f"_Gamma.tif"),
                             projection=projection,
                             nodata_value=global_nodata_value,
+                            output_bands_map=(b+1,),
+                            override_band_count=num_bands,
                         )
 
                     # arr_out[valid_pixels] = arr_in[valid_pixels] * (reference_band[valid_pixels] / local_band[valid_pixels]) # An alternative way to calculate the corrected raster
@@ -779,7 +695,7 @@ def local_match(
                     del gammas, arr_out
                     gc.collect()
 
-                ds_in = None
+                data_in = None
                 out_ds = None
 
                 corrected_paths.append(out_path)
