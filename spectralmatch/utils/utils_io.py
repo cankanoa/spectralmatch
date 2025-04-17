@@ -1,4 +1,5 @@
 import rasterio
+from osgeo import ogr
 from rasterio.windows import Window
 import numpy as np
 from rasterio.windows import Window
@@ -77,3 +78,60 @@ def _align_rasters(
         aligned_paths.append(output_path)
 
     return aligned_paths
+
+def write_vector(
+        mem_ds: ogr.DataSource,
+        output_vector_path: str
+) -> None:
+    """
+Writes an in-memory vector datasource to disk.
+The driver is chosen based on the file extension of output_vector_path.
+All layers, including metadata, schema, and features, are preserved.
+    """
+    # Map file extensions to OGR driver names for common vector formats.
+    driver_mapping = {
+        '.shp': 'ESRI Shapefile',
+        '.geojson': 'GeoJSON',
+        '.gpkg': 'GPKG'
+    }
+    ext = os.path.splitext(output_vector_path)[1].lower()
+    driver_name = driver_mapping.get(ext, 'GeoJSON')  # Fallback to GeoJSON if unknown.
+
+    driver = ogr.GetDriverByName(driver_name)
+    if driver is None:
+        raise RuntimeError(f"No driver found for extension: {ext}")
+
+    # If the output file already exists, delete it.
+    if os.path.exists(output_vector_path):
+        driver.DeleteDataSource(output_vector_path)
+
+    out_ds = driver.CreateDataSource(output_vector_path)
+    if out_ds is None:
+        raise RuntimeError(f"Could not create output vector dataset: {output_vector_path}")
+
+    # Loop over every layer in the in-memory datasource and copy it.
+    for i in range(mem_ds.GetLayerCount()):
+        mem_layer = mem_ds.GetLayerByIndex(i)
+        layer_name = mem_layer.GetName()
+        srs = mem_layer.GetSpatialRef()
+        geom_type = mem_layer.GetGeomType()
+
+        out_layer = out_ds.CreateLayer(layer_name, srs, geom_type)
+
+        # Copy field definitions
+        mem_defn = mem_layer.GetLayerDefn()
+        for j in range(mem_defn.GetFieldCount()):
+            field_defn = mem_defn.GetFieldDefn(j)
+            out_layer.CreateField(field_defn)
+
+        # Copy features (including geometry, fields, and feature-level metadata)
+        mem_layer.ResetReading()
+        for feat in mem_layer:
+            out_feat = ogr.Feature(out_layer.GetLayerDefn())
+            out_feat.SetGeometry(feat.GetGeometryRef().Clone())
+            for j in range(mem_defn.GetFieldCount()):
+                field_name = mem_defn.GetFieldDefn(j).GetNameRef()
+                out_feat.SetField(field_name, feat.GetField(j))
+            out_layer.CreateFeature(out_feat)
+            out_feat = None
+    out_ds.Destroy()
