@@ -159,31 +159,27 @@ def _calculate_overlap_stats(
             if tile_width_and_height_tuple:
                 windows = create_windows(width, height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
             else:
-                # Get the smallest window size
-                windows = [
-                    Window(win_i.col_off, win_i.row_off, min(win_i.width, win_j.width), min(win_i.height, win_j.height))
-                    for (_, win_i), (_, win_j) in zip(src_i.block_windows(band + 1), src_j.block_windows(band + 1))
-                ]
+                windows = [Window(0, 0, width, height)]
             windows = _adjust_size_of_tiles_to_fit_bounds(windows, width, height)
 
             combined_i = []
             combined_j = []
 
             for win in windows:
-                w_i = Window(col_min_i + win.col_off, row_min_i + win.row_off, win.width, win.height)
-                w_j = Window(col_min_j + win.col_off, row_min_j + win.row_off, win.width, win.height)
+                offset_to_window_i = Window(col_min_i + win.col_off, row_min_i + win.row_off, win.width, win.height)
+                offset_to_window_j = Window(col_min_j + win.col_off, row_min_j + win.row_off, win.width, win.height)
 
-                block_i = src_i.read(band + 1, window=w_i)
-                block_j = src_j.read(band + 1, window=w_j)
+                block_i = src_i.read(band + 1, window=offset_to_window_i)
+                block_j = src_j.read(band + 1, window=offset_to_window_j)
 
                 if geoms:
-                    transform_i_win = src_i.window_transform(w_i)
-                    transform_j_win = src_j.window_transform(w_j)
+                    transform_i_win = src_i.window_transform(offset_to_window_i)
+                    transform_j_win = src_j.window_transform(offset_to_window_j)
 
                     mask_i = geometry_mask(geoms, transform=transform_i_win, invert=True,
-                                           out_shape=(int(w_i.height), int(w_i.width)))
+                                           out_shape=(int(offset_to_window_i.height), int(offset_to_window_i.width)))
                     mask_j = geometry_mask(geoms, transform=transform_j_win, invert=True,
-                                           out_shape=(int(w_j.height), int(w_j.width)))
+                                           out_shape=(int(offset_to_window_j.height), int(offset_to_window_j.width)))
 
                     block_i[~mask_i] = nodata_i
                     block_j[~mask_j] = nodata_j
@@ -245,13 +241,9 @@ def _calculate_whole_stats(
             count = 0
 
             if tile_width_and_height_tuple:
-                windows = create_windows(
-                    data.width, data.height,
-                    tile_width_and_height_tuple[0],
-                    tile_width_and_height_tuple[1]
-                )
+                windows = create_windows(data.width, data.height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
             else:
-                windows = (win for _, win in data.block_windows(band_idx + 1))
+                windows = [Window(0, 0, data.width, data.height)]
 
             for win in windows:
                 block = data.read(band_idx + 1, window=win)
