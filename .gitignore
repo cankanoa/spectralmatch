@@ -1,5 +1,5 @@
 # Example image
-/docs/example/output/
+/docs/examples/output/
 *.gpkg-shm
 *.gpkg-wal
 
