@@ -6,6 +6,7 @@ import numpy as np
 from scipy.optimize import least_squares
 from typing import Tuple, List, Optional
 import rasterio
+from typing import Literal
 
 from spectralmatch.utils.utils_local import _get_bounding_rectangle
 from spectralmatch.utils.utils_local import _compute_block_size
@@ -353,6 +354,7 @@ def local_match(
     projection: str = "EPSG:4326",
     debug_mode: bool = False,
     tile_width_and_height_tuple: tuple = None,
+    correction_method: Literal["gamma", "linear"] = "gamma"
     ):
     """
     Performs local histogram matching on input raster images to align their intensity distributions
@@ -664,19 +666,24 @@ def local_match(
                             [arr_in[valid_mask], reference_band[valid_mask], local_band[valid_mask]]
                         )
 
-                        if smallest_value <= 0:
-                            pixels_positive_offset = abs(smallest_value) + 1
-                            arr_out[valid_mask], gammas = _apply_gamma_correction(
-                                arr_in[valid_mask] + pixels_positive_offset,
-                                reference_band[valid_mask] + pixels_positive_offset,
-                                local_band[valid_mask] + pixels_positive_offset,
-                                alpha,
-                            )
-                            arr_out[valid_mask] = arr_out[valid_mask] - pixels_positive_offset
-                        else:
-                            arr_out[valid_mask], gammas = _apply_gamma_correction(
-                                arr_in[valid_mask], reference_band[valid_mask], local_band[valid_mask], alpha
-                            )
+                        if correction_method == "gamma":
+                            if smallest_value <= 0:
+                                pixels_positive_offset = abs(smallest_value) + 1
+                                arr_out[valid_mask], gammas = _apply_gamma_correction(
+                                    arr_in[valid_mask] + pixels_positive_offset,
+                                    reference_band[valid_mask] + pixels_positive_offset,
+                                    local_band[valid_mask] + pixels_positive_offset,
+                                    alpha,
+                                )
+                                arr_out[valid_mask] = arr_out[valid_mask] - pixels_positive_offset
+                            else:
+                                arr_out[valid_mask], gammas = _apply_gamma_correction(
+                                    arr_in[valid_mask], reference_band[valid_mask], local_band[valid_mask], alpha
+                                )
+                            del gammas
+                        elif correction_method == "linear":
+                            arr_out[valid_mask] = arr_in[valid_mask] * (reference_band[valid_mask] / local_band[valid_mask])
+
                         del reference_band, local_band
                         gc.collect()
 
@@ -693,11 +700,10 @@ def local_match(
                         #         override_band_count=num_bands,
                         #     )
 
-                        # arr_out[valid_mask] = arr_in[valid_mask] * (reference_band[valid_mask] / local_band[valid_mask]) # An alternative way to calculate the corrected raster
 
                         data_out.write(arr_out, b + 1, window=window)
                         data_out.update_tags(nodata=global_nodata_value)
-                        del gammas, arr_out
+                        del arr_out
                         gc.collect()
 
                 corrected_paths.append(out_path)
