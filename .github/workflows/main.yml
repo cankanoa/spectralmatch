@@ -30,7 +30,7 @@ jobs:
 
       - name: Create Conda environment with Python and GDAL
         run: |
-          conda create --name spectralmatch_env python=${{ matrix.python-version }} gdal -c conda-forge -v
+          conda create --name spectralmatch_env python=${{ matrix.python-version }} gdal –override-channels -c conda-forge -v
 
       - name: Activate Conda environment and install dependencies
         shell: bash -l {0}
