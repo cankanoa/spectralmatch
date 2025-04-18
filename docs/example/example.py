@@ -27,7 +27,7 @@ matched_global_images_paths = global_match(
     )
 
 merge_rasters(
-    matched_global_images_paths,
+    matched_global_images_paths, # Rasters are layered with the last ones on top
     os.path.join(working_directory, "output/global_match/matched_global_images.tif"),
     )
 
@@ -45,7 +45,7 @@ matched_local_images_paths = local_match(
     )
 
 merge_rasters(
-    matched_local_images_paths,
+    matched_local_images_paths, # Rasters are layered with the last ones on top  
     os.path.join(working_directory, "output/local_match/matched_local_images.tif"),
     )
 
