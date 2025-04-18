@@ -499,204 +499,206 @@ def local_match(
     for img_path in input_image_paths:
         print(f"-------------------- Processing: {img_path}")
         print(f"-------------------- Computing local block map")
-        with rasterio.open(img_path) as data_in:
-            block_local_mean, block_local_count = _compute_blocks(
-                [img_path],
-                bounding_rect,
-                M,
-                N,
-                num_bands,
+
+        block_local_mean, block_local_count = _compute_blocks(
+            [img_path],
+            bounding_rect,
+            M,
+            N,
+            num_bands,
+            nodata_value=global_nodata_value,
+            tile_width_and_height_tuple=tile_width_and_height_tuple,
+        )
+
+        # block_local_mean = _smooth_array(block_local_mean, nodata_value=global_nodata_value)
+
+        out_name = (os.path.splitext(os.path.basename(img_path))[0] + output_local_basename)
+
+        if debug_mode:
+            _download_block_map(
+                block_map=np.nan_to_num(block_local_count, nan=global_nodata_value),
+                bounding_rect=bounding_rect,
+                output_image_path=os.path.join(output_image_folder,"BlockLocalCount", out_name + "_BlockLocalCount" + '.tif'),
                 nodata_value=global_nodata_value,
-                tile_width_and_height_tuple=tile_width_and_height_tuple,
+                projection=projection,
             )
 
-            # block_local_mean = _smooth_array(block_local_mean, nodata_value=global_nodata_value)
+        if debug_mode:
+            _download_block_map(
+                block_map=np.nan_to_num(block_local_mean, nan=global_nodata_value),
+                bounding_rect=bounding_rect,
+                output_image_path=os.path.join(output_image_folder, "BlockLocalMean", out_name + "_BlockLocalMean" + '.tif'),
+                nodata_value=global_nodata_value,
+                projection=projection,
+            )
 
-            out_name = (os.path.splitext(os.path.basename(img_path))[0] + output_local_basename)
+        print(f"-------------------- Computing local correction, applying, and saving")
 
-            if debug_mode:
-                _download_block_map(
-                    block_map=np.nan_to_num(block_local_count, nan=global_nodata_value),
-                    bounding_rect=bounding_rect,
-                    output_image_path=os.path.join(output_image_folder,"BlockLocalCount", out_name + "_BlockLocalCount" + '.tif'),
-                    nodata_value=global_nodata_value,
-                    projection=projection,
-                )
+        out_path = os.path.join(output_image_folder, 'images', (out_name + '.tif'))
+        if not os.path.exists(os.path.dirname(out_path)): os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
-            if debug_mode:
-                _download_block_map(
-                    block_map=np.nan_to_num(block_local_mean, nan=global_nodata_value),
-                    bounding_rect=bounding_rect,
-                    output_image_path=os.path.join(output_image_folder, "BlockLocalMean", out_name + "_BlockLocalMean" + '.tif'),
-                    nodata_value=global_nodata_value,
-                    projection=projection,
-                )
-
-            print(f"-------------------- Computing local correction, applying, and saving")
-
-            out_path = os.path.join(output_image_folder, 'images', (out_name + '.tif'))
-            if not os.path.exists(os.path.dirname(out_path)): os.makedirs(os.path.dirname(out_path), exist_ok=True)
-
+        with rasterio.open(img_path) as data_in:
             out_meta = data_in.meta.copy()
             out_meta.update({
                 "count": num_bands,
                 "dtype": output_dtype,
                 "nodata": global_nodata_value
             })
-            with rasterio.open(out_path, "w", **out_meta) as out_ds:
-                for b in range(num_bands):
-                    print(f"-------------------- For band {b + 1}")
+            with rasterio.open(out_path, "w", **out_meta) as data_out:
+                if tile_width_and_height_tuple:
+                    windows = create_windows(data_in.width, data_in.height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
+                else:
+                    windows = [Window(0, 0, data_in.width, data_in.height)]
 
-                    # Test only the first three bands
-                    # if b >= 2:
-                    #     continue
+                for window in windows:
 
-                    arr_in = data_in.read(b + 1).astype(calculation_dtype_precision)
+                    for b in range(num_bands):
+                        print(f"-------------------- For band {b + 1}")
+                        win_transform = data_in.window_transform(window)
 
-                    gt = data_in.transform
-                    this_image_bounds = data_in.bounds
+                        column_coords = win_transform[2] + np.arange(window.width) * win_transform[0]
+                        row_coords = win_transform[5] + np.arange(window.height) * win_transform[4]
 
-                    pixel_center_coords_x = gt[2] + np.arange(data_in.width) * gt[0]
-                    pixel_center_coords_y = gt[5] + np.arange(data_in.height) * gt[4]
-                    Xgeo_2d, Ygeo_2d = np.meshgrid(pixel_center_coords_x, pixel_center_coords_y)
-
-                    # Compute block indices for each pixel
-                    row_fs = np.clip(
-                        ((bounding_rect[3] - Ygeo_2d) / (bounding_rect[3] - bounding_rect[1]))
-                        * M
-                        - 0.5,
-                        0,
-                        M - 1,
-                    )
-                    del Ygeo_2d
-                    gc.collect()
-                    col_fs = np.clip(
-                        (((Xgeo_2d - bounding_rect[0])/ (bounding_rect[2] - bounding_rect[0]))* N)
-                        - 0.5,
-                        0,
-                        N - 1,)
-                    del Xgeo_2d
-                    gc.collect()
-
-                    arr_out = np.full_like(
-                        arr_in, global_nodata_value, dtype=calculation_dtype_precision
-                    )
-                    valid_mask = arr_in != global_nodata_value
-
-                    # Extract the band-specific local and reference maps
-                    block_local_mean_band = block_local_mean[:, :, b]
-                    block_reference_mean_band = block_reference_mean[:, :, b]
-
-                    # Ensure valid_mask is correctly applied to the input arrays
-                    valid_rows, valid_cols = np.where(valid_mask)
-
-                    if debug_mode:
-                        _download_block_map(
-                            block_map=np.where(valid_mask, 1, global_nodata_value),
-                            bounding_rect=this_image_bounds,
-                            output_image_path=os.path.join(output_image_folder, "ValidMasks", out_name + f"_ValidMask.tif"),
-                            projection=projection,
-                            nodata_value=global_nodata_value,
-                            output_bands_map=(b+1,),
-                            override_band_count=num_bands
+                        row_fractional_indices = np.clip(
+                            ((bounding_rect[3] - row_coords) / (bounding_rect[3] - bounding_rect[1])) * M - 0.5,
+                            0,
+                            M - 1,
+                        )
+                        column_fractional_indices = np.clip(
+                            ((column_coords - bounding_rect[0]) / (bounding_rect[2] - bounding_rect[0])) * N - 0.5,
+                            0,
+                            N - 1,
                         )
 
-                    # Ensure weighted interpolation handles only valid regions
-                    reference_band = np.full_like(
-                        arr_in, global_nodata_value, dtype=calculation_dtype_precision
-                    )
-                    local_band = np.full_like(
-                        arr_in, global_nodata_value, dtype=calculation_dtype_precision
-                    )
+                        # gt = data_in.transform
+                        this_image_bounds = data_in.bounds
 
-                    reference_band[valid_rows, valid_cols] = _weighted_bilinear_interpolation(
-                        block_reference_mean_band,
-                        # block_reference_mean[:, :, b],
-                        col_fs[valid_rows, valid_cols],
-                        row_fs[valid_rows, valid_cols],
-                    )
-                    del block_reference_mean_band
-                    gc.collect()
-                    local_band[valid_rows, valid_cols] = _weighted_bilinear_interpolation(
-                        block_local_mean_band,
-                        # block_local_count[:, :, b],
-                        col_fs[valid_rows, valid_cols],
-                        row_fs[valid_rows, valid_cols],
-                    )
+                        # column_coords = gt[2] + np.arange(data_in.width) * gt[0]   # shape: (W,)
+                        # row_coords = gt[5] + np.arange(data_in.height) * gt[4]  # shape: (H,)
 
-                    del col_fs, row_fs
-                    gc.collect()
-                    del block_local_mean_band
-                    gc.collect()
+                        # Compute block indices for each pixel
+                        # row_fractional_indices = np.clip(
+                        #     ((bounding_rect[3] - row_coords) / (bounding_rect[3] - bounding_rect[1])) * M - 0.5,
+                        #     0,
+                        #     M - 1,
+                        # )  # shape: (H,)
+                        #
+                        # gc.collect()
+                        # column_fractional_indices = np.clip(
+                        #     ((column_coords - bounding_rect[0]) / (bounding_rect[2] - bounding_rect[0])) * N - 0.5,
+                        #     0,
+                        #     N - 1,
+                        # )  # shape: (W,)
+                        gc.collect()
 
-                    if debug_mode:
-                        _download_block_map(
-                            block_map=reference_band,
-                            bounding_rect=this_image_bounds,
-                            output_image_path=os.path.join(output_image_folder, "ReferenceBand", out_name + f"_ReferenceBand.tif"),
-                            projection=projection,
-                            nodata_value=global_nodata_value,
-                            output_bands_map=(b+1,),
-                            override_band_count=num_bands,
+                        # arr_in = data_in.read(b + 1).astype(calculation_dtype_precision)
+                        # arr_out = np.full(arr_in.shape, global_nodata_value, dtype=calculation_dtype_precision)
+                        arr_in = data_in.read(b + 1, window=window).astype(calculation_dtype_precision)
+                        arr_out = np.full(arr_in.shape, global_nodata_value, dtype=calculation_dtype_precision)
+
+
+                        valid_mask = arr_in != global_nodata_value
+                        valid_rows, valid_cols = np.where(valid_mask)
+
+                        # Extract the band-specific local and reference maps
+                        block_local_mean_band = block_local_mean[:, :, b]
+                        block_reference_mean_band = block_reference_mean[:, :, b]
+
+                        # if debug_mode:
+                        #     _download_block_map(
+                        #         block_map=np.where(valid_mask, 1, global_nodata_value),
+                        #         bounding_rect=this_image_bounds,
+                        #         output_image_path=os.path.join(output_image_folder, "ValidMasks", out_name + f"_ValidMask.tif"),
+                        #         projection=projection,
+                        #         nodata_value=global_nodata_value,
+                        #         output_bands_map=(b+1,),
+                        #         override_band_count=num_bands
+                        #     )
+
+                        # Ensure weighted interpolation handles only valid regions
+                        reference_band = np.full(arr_in.shape, global_nodata_value, dtype=calculation_dtype_precision)
+                        local_band = np.full(arr_in.shape, global_nodata_value, dtype=calculation_dtype_precision)
+
+                        reference_band[valid_rows, valid_cols] = _weighted_bilinear_interpolation(
+                            block_reference_mean_band,
+                            # block_reference_mean[:, :, b],
+                            column_fractional_indices[valid_cols],
+                            row_fractional_indices[valid_rows],
+                        )
+                        del block_reference_mean_band
+                        gc.collect()
+                        local_band[valid_rows, valid_cols] = _weighted_bilinear_interpolation(
+                            block_local_mean_band,
+                            # block_local_count[:, :, b],
+                            column_fractional_indices[valid_cols],
+                            row_fractional_indices[valid_rows],
                         )
 
-                    if debug_mode:
-                        _download_block_map(
-                            block_map=local_band,
-                            bounding_rect=this_image_bounds,
-                            output_image_path=os.path.join(output_image_folder, "LocalBand", out_name + f"_LocalBand.tif"),
-                            projection=projection,
-                            nodata_value=global_nodata_value,
-                            output_bands_map=(b+1,),
-                            override_band_count=num_bands,
+                        del column_fractional_indices, row_fractional_indices, block_local_mean_band
+                        gc.collect()
+
+                        # if debug_mode:
+                        #     _download_block_map(
+                        #         block_map=reference_band,
+                        #         bounding_rect=this_image_bounds,
+                        #         output_image_path=os.path.join(output_image_folder, "ReferenceBand", out_name + f"_ReferenceBand.tif"),
+                        #         projection=projection,
+                        #         nodata_value=global_nodata_value,
+                        #         output_bands_map=(b+1,),
+                        #         override_band_count=num_bands,
+                        #     )
+                        #
+                        # if debug_mode:
+                        #     _download_block_map(
+                        #         block_map=local_band,
+                        #         bounding_rect=this_image_bounds,
+                        #         output_image_path=os.path.join(output_image_folder, "LocalBand", out_name + f"_LocalBand.tif"),
+                        #         projection=projection,
+                        #         nodata_value=global_nodata_value,
+                        #         output_bands_map=(b+1,),
+                        #         override_band_count=num_bands,
+                        #     )
+
+                        # valid_mask = valid_mask  # & (reference_band > 0) & (local_band > 0) # Mask if required but better to offset values <= 0
+                        smallest_value = np.min(
+                            [arr_in[valid_mask], reference_band[valid_mask], local_band[valid_mask]]
                         )
 
-                    valid_pixels = valid_mask  # & (reference_band > 0) & (local_band > 0) # Mask if required but better to offset values <= 0
-                    smallest_value = np.min(
-                        [arr_in[valid_pixels], reference_band[valid_pixels], local_band[valid_pixels]]
-                    )
+                        if smallest_value <= 0:
+                            pixels_positive_offset = abs(smallest_value) + 1
+                            arr_out[valid_mask], gammas = _apply_gamma_correction(
+                                arr_in[valid_mask] + pixels_positive_offset,
+                                reference_band[valid_mask] + pixels_positive_offset,
+                                local_band[valid_mask] + pixels_positive_offset,
+                                alpha,
+                            )
+                            arr_out[valid_mask] = arr_out[valid_mask] - pixels_positive_offset
+                        else:
+                            arr_out[valid_mask], gammas = _apply_gamma_correction(
+                                arr_in[valid_mask], reference_band[valid_mask], local_band[valid_mask], alpha
+                            )
+                        del reference_band, local_band
+                        gc.collect()
 
-                    if smallest_value <= 0:
-                        pixels_positive_offset = abs(smallest_value) + 1
-                        arr_out[valid_pixels], gammas = _apply_gamma_correction(
-                            arr_in[valid_pixels] + pixels_positive_offset,
-                            reference_band[valid_pixels] + pixels_positive_offset,
-                            local_band[valid_pixels] + pixels_positive_offset,
-                            alpha,
-                        )
-                        arr_out[valid_pixels] = arr_out[valid_pixels] - pixels_positive_offset
-                    else:
-                        arr_out[valid_pixels], gammas = _apply_gamma_correction(
-                            arr_in[valid_pixels], reference_band[valid_pixels], local_band[valid_pixels], alpha
-                        )
-                    del reference_band, local_band
-                    gc.collect()
+                        # if debug_mode:
+                        #     gammas_array = np.full(arr_in.shape, global_nodata_value, dtype=calculation_dtype_precision)
+                        #     gammas_array[valid_rows, valid_cols] = gammas
+                        #     _download_block_map(
+                        #         block_map=gammas_array,
+                        #         bounding_rect=this_image_bounds,
+                        #         output_image_path=os.path.join(output_image_folder, "Gamma", out_name + f"_Gamma.tif"),
+                        #         projection=projection,
+                        #         nodata_value=global_nodata_value,
+                        #         output_bands_map=(b+1,),
+                        #         override_band_count=num_bands,
+                        #     )
 
-                    gammas_array = np.full(
-                        arr_in.shape, global_nodata_value, dtype=calculation_dtype_precision
-                    )
-                    gammas_array[valid_rows, valid_cols] = gammas
+                        # arr_out[valid_mask] = arr_in[valid_mask] * (reference_band[valid_mask] / local_band[valid_mask]) # An alternative way to calculate the corrected raster
 
-                    if debug_mode:
-                        _download_block_map(
-                            block_map=gammas_array,
-                            bounding_rect=this_image_bounds,
-                            output_image_path=os.path.join(output_image_folder, "Gamma", out_name + f"_Gamma.tif"),
-                            projection=projection,
-                            nodata_value=global_nodata_value,
-                            output_bands_map=(b+1,),
-                            override_band_count=num_bands,
-                        )
-
-                    # arr_out[valid_pixels] = arr_in[valid_pixels] * (reference_band[valid_pixels] / local_band[valid_pixels]) # An alternative way to calculate the corrected raster
-
-                    out_ds.write(arr_out, b + 1)
-                    out_ds.update_tags(nodata=global_nodata_value)
-                    del gammas, arr_out
-                    gc.collect()
-
-                data_in = None
-                out_ds = None
+                        data_out.write(arr_out, b + 1, window=window)
+                        data_out.update_tags(nodata=global_nodata_value)
+                        del gammas, arr_out
+                        gc.collect()
 
                 corrected_paths.append(out_path)
                 print(f"Saved: {out_path}")
