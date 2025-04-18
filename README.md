@@ -1,6 +1,7 @@
 # spectralmatch: Global and Local Spectral Matching for Seamless Image Mosaics
 
 [![Your-License-Badge](https://img.shields.io/badge/License-MIT-green)](#)
+[![codecov](https://codecov.io/gh/cankanoa/spatialmatch/graph/badge.svg?token=OKAM0BUUNS)](https://codecov.io/gh/cankanoa/spatialmatch)
 
 > [!IMPORTANT]
 > This library is experimental and still under heavy development.
