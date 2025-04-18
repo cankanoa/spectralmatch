@@ -1,4 +1,4 @@
-from process import global_match, local_match
+from spectralmatch.process import global_match, local_match
 
 __all__ = [
     "global_match",
