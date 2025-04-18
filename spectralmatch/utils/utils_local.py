@@ -1,14 +1,10 @@
-import os
-from doctest import debug
 import numpy as np
 import math
-import rasterio
 import gc
 
 from osgeo import gdal
 from typing import Tuple, List, Optional
 from scipy.ndimage import map_coordinates, gaussian_filter
-from spectralmatch.utils.utils_common import _get_image_metadata
 from rasterio.windows import Window
 from spectralmatch.utils.utils_io import create_windows
 
@@ -119,6 +115,7 @@ def _compute_blocks(
     calculation_dtype_precision="float32",
     tile_width_and_height_tuple: tuple = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
+
     sum_of_means_3d = np.zeros((M, N, num_bands), dtype=calculation_dtype_precision)
     image_count_3d = np.zeros((M, N, num_bands), dtype=calculation_dtype_precision)
     sum_of_counts_3d = np.zeros((M, N, num_bands), dtype=calculation_dtype_precision)

@@ -1,17 +1,14 @@
-import sys
-import os
-import numpy as np
 
-from osgeo import gdal, ogr, osr
-from scipy.optimize import least_squares
-from spectralmatch.utils.utils_io import create_windows
+import numpy as np
 import rasterio
+import fiona
+
+from spectralmatch.utils.utils_io import create_windows
 from rasterio.features import rasterize
 from rasterio.windows import Window
 from rasterio.transform import rowcol
 from rasterio.features import geometry_mask
-from rasterio.features import geometry_mask
-import fiona
+from osgeo import ogr
 
 np.set_printoptions(
     suppress=True,
@@ -58,7 +55,11 @@ def _find_overlaps(
     return tuple(overlaps)
 
 
-def _rasterize_mask(vector_path, image_name, ref_src):
+def _rasterize_mask(
+    vector_path,
+    image_name,
+    ref_src
+    ):
     if vector_path is None:
         return None
 
