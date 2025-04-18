@@ -175,8 +175,8 @@ Comprehensive documentation is forthcoming. In the meantime:
 
    ```bash
    pip install --upgrade pip
-   pip install -e .[dev]   # for developer dependencies
-   pip install -e .[docs]  # for documentation dependencies
+   pip install -e ".[dev]"   # for developer dependencies
+   pip install -e ".[docs]"  # for documentation dependencies
    ```
 
 3. **Set Up Pre-commit Hooks (Optional)**  	
