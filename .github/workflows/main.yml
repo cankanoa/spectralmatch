@@ -26,6 +26,7 @@ jobs:
           auto-update-conda: true
           python-version: ${{ matrix.python-version }}
           channels: conda-forge
+          conda-remove-defaults: True
 
       - name: Create Conda environment with Python and GDAL
         run: |
