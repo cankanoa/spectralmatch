@@ -2,21 +2,9 @@ import os
 
 from osgeo import gdal
 
-
-def _merge_rasters(input_array, output_image_folder, output_file_name="merge.tif"):
-
-    output_path = os.path.join(output_image_folder, output_file_name)
-    input_datasets = [gdal.Open(path) for path in input_array if gdal.Open(path)]
-    gdal.Warp(
-        output_path,
-        input_datasets,
-        format="GTiff",
-    )
-
-    print(f"Merged raster saved to: {output_path}")
-
-
-def _get_image_metadata(input_image_path):
+def _get_image_metadata(
+    input_image_path
+    ):
     """
     Get metadata of a TIFF image, including transform, projection, nodata, and bounds.
 
