@@ -528,7 +528,7 @@ def local_match(
 
         print(f"-------------------- Computing local correction, applying, and saving")
 
-        out_path = os.path.join(output_image_folder, 'images', (out_name + '.tif'))
+        out_path = os.path.join(output_image_folder, 'Images', (out_name + '.tif'))
         if not os.path.exists(os.path.dirname(out_path)): os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
         with rasterio.open(img_path) as data_in:
