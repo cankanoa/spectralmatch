@@ -539,6 +539,7 @@ def local_match(
                 "nodata": global_nodata_value
             })
             with rasterio.open(out_path, "w", **out_meta) as data_out:
+                data_out.update_tags(nodata=global_nodata_value)
                 if tile_width_and_height_tuple:
                     windows = create_windows(data_in.width, data_in.height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
                 else:
@@ -564,34 +565,23 @@ def local_match(
                             N - 1,
                         )
 
-                        # gt = data_in.transform
                         this_image_bounds = data_in.bounds
-
-                        # column_coords = gt[2] + np.arange(data_in.width) * gt[0]   # shape: (W,)
-                        # row_coords = gt[5] + np.arange(data_in.height) * gt[4]  # shape: (H,)
-
-                        # Compute block indices for each pixel
-                        # row_fractional_indices = np.clip(
-                        #     ((bounding_rect[3] - row_coords) / (bounding_rect[3] - bounding_rect[1])) * M - 0.5,
-                        #     0,
-                        #     M - 1,
-                        # )  # shape: (H,)
-                        #
-                        # gc.collect()
-                        # column_fractional_indices = np.clip(
-                        #     ((column_coords - bounding_rect[0]) / (bounding_rect[2] - bounding_rect[0])) * N - 0.5,
-                        #     0,
-                        #     N - 1,
-                        # )  # shape: (W,)
                         gc.collect()
 
-                        # arr_in = data_in.read(b + 1).astype(calculation_dtype_precision)
-                        # arr_out = np.full(arr_in.shape, global_nodata_value, dtype=calculation_dtype_precision)
                         arr_in = data_in.read(b + 1, window=window).astype(calculation_dtype_precision)
                         arr_out = np.full(arr_in.shape, global_nodata_value, dtype=calculation_dtype_precision)
 
 
                         valid_mask = arr_in != global_nodata_value
+
+                        # if window is all nodata value, write and skip computation that require some data
+                        if not np.any(valid_mask):
+                            # All values are nodata; write the output and skip to next band
+                            data_out.write(arr_out, b + 1, window=window)
+                            del arr_out
+                            gc.collect()
+                            continue
+
                         valid_rows, valid_cols = np.where(valid_mask)
 
                         # Extract the band-specific local and reference maps
@@ -654,11 +644,9 @@ def local_match(
                         #     )
 
                         # valid_mask = valid_mask  # & (reference_band > 0) & (local_band > 0) # Mask if required but better to offset values <= 0
-                        smallest_value = np.min(
-                            [arr_in[valid_mask], reference_band[valid_mask], local_band[valid_mask]]
-                        )
 
                         if correction_method == "gamma":
+                            smallest_value = np.min([arr_in[valid_mask], reference_band[valid_mask], local_band[valid_mask]])
                             if smallest_value <= 0:
                                 pixels_positive_offset = abs(smallest_value) + 1
                                 arr_out[valid_mask], gammas = _apply_gamma_correction(
@@ -694,7 +682,6 @@ def local_match(
 
 
                         data_out.write(arr_out, b + 1, window=window)
-                        data_out.update_tags(nodata=global_nodata_value)
                         del arr_out
                         gc.collect()
 
