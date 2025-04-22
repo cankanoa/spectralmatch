@@ -19,7 +19,7 @@ from spectralmatch.utils.utils_common import _check_raster_requirements, _get_no
 
 from spectralmatch.utils.utils_global import _find_overlaps
 from spectralmatch.utils.utils_global import _calculate_overlap_stats, _calculate_whole_stats
-from spectralmatch.utils.utils_io import create_windows
+from spectralmatch.utils.utils_common import _create_windows
 from rasterio.windows import Window
 
 def global_match(
@@ -318,7 +318,7 @@ def global_match(
                     b = all_adjustment_params[band_idx, 2 * img_idx + 1, 0]
 
                     if tile_width_and_height_tuple:
-                        windows = create_windows(data.width, data.height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
+                        windows = _create_windows(data.width, data.height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
                     else:
                         windows = [Window(0, 0, data.width, data.height)]
 
@@ -526,7 +526,7 @@ def local_match(
             with rasterio.open(out_path, "w", **out_meta) as data_out:
                 data_out.update_tags(nodata=global_nodata_value)
                 if tile_width_and_height_tuple:
-                    windows = create_windows(data_in.width, data_in.height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
+                    windows = _create_windows(data_in.width, data_in.height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
                 else:
                     windows = [Window(0, 0, data_in.width, data_in.height)]
 

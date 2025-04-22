@@ -1,9 +1,8 @@
-import os
-
-from osgeo import gdal
 import rasterio
 import warnings
+
 from typing import List, Union, Optional
+from rasterio.windows import Window
 
 def _check_raster_requirements(
     input_image_paths,
@@ -52,3 +51,10 @@ def _get_nodata_value(
 
     warnings.warn("Custom nodata value not set and could not get one from the first band so no nodata value will be used.")
     return None
+
+def _create_windows(width, height, tile_width, tile_height):
+    for row_off in range(0, height, tile_height):
+        for col_off in range(0, width, tile_width):
+            win_width = min(tile_width, width - col_off)
+            win_height = min(tile_height, height - row_off)
+            yield Window(col_off, row_off, win_width, win_height)
