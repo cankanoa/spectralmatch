@@ -29,6 +29,7 @@ matched_global_images_paths = global_match(
 merge_rasters(
     matched_global_images_paths, # Rasters are layered with the last ones on top
     os.path.join(working_directory, "output/global_match/MatchedGlobalImages.tif"),
+    tile_width_and_height_tuple=(512, 512),
     )
 
 # -------------------- Local histogram matching
@@ -47,6 +48,7 @@ matched_local_images_paths = local_match(
 merge_rasters(
     matched_local_images_paths, # Rasters are layered with the last ones on top  
     os.path.join(working_directory, "output/local_match/MatchedLocalImages.tif"),
+    tile_width_and_height_tuple=(512, 512),
     )
 
 print("Done with global and local histogram matching")

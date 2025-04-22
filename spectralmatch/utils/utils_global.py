@@ -3,7 +3,7 @@ import numpy as np
 import rasterio
 import fiona
 
-from spectralmatch.utils.utils_io import create_windows
+from spectralmatch.utils.utils_common import _create_windows
 from rasterio.features import rasterize
 from rasterio.windows import Window
 from rasterio.transform import rowcol
@@ -158,7 +158,7 @@ def _calculate_overlap_stats(
 
         for band in range(num_bands):
             if tile_width_and_height_tuple:
-                windows = create_windows(width, height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
+                windows = _create_windows(width, height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
             else:
                 windows = [Window(0, 0, width, height)]
             windows = _adjust_size_of_tiles_to_fit_bounds(windows, width, height)
@@ -242,7 +242,7 @@ def _calculate_whole_stats(
             count = 0
 
             if tile_width_and_height_tuple:
-                windows = create_windows(data.width, data.height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
+                windows = _create_windows(data.width, data.height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
             else:
                 windows = [Window(0, 0, data.width, data.height)]
 
