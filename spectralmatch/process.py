@@ -15,7 +15,7 @@ from spectralmatch.utils.utils_local import _weighted_bilinear_interpolation
 from spectralmatch.utils.utils_local import _download_block_map
 from spectralmatch.utils.utils_local import _apply_gamma_correction
 
-from spectralmatch.utils.utils_common import _check_raster_requirements
+from spectralmatch.utils.utils_common import _check_raster_requirements, _get_nodata_value
 
 from spectralmatch.utils.utils_global import _find_overlaps
 from spectralmatch.utils.utils_global import _calculate_overlap_stats, _calculate_whole_stats
@@ -31,6 +31,7 @@ def global_match(
     vector_mask_path=None,
     tile_width_and_height_tuple: tuple = None,
     debug_mode=False,
+    custom_nodata_value: float = None,
     ):
     """
     Adjusts global histograms of input images for seamless stitching by calculating
@@ -69,16 +70,17 @@ def global_match(
 
     _check_raster_requirements(input_image_paths)
 
+    global_nodata_value = _get_nodata_value(input_image_paths, custom_nodata_value)
+    print(f"Global nodata value: {global_nodata_value}")
+
     # ---------------------------------------- Calculating statistics
     print("-------------------- Calculating statistics")
     with rasterio.open(input_image_paths[0]) as src: num_bands = src.count
     num_images = len(input_image_paths)
 
-    all_nodata = {}
     all_bounds = {}
     for idx, input_image_path in enumerate(input_image_paths, start=0):
         with rasterio.open(input_image_path) as data_in:
-            all_nodata[idx] = data_in.nodata
             all_bounds[idx] = data_in.bounds
 
     overlapping_pairs = _find_overlaps(all_bounds)
@@ -94,8 +96,8 @@ def global_match(
             id_j,
             all_bounds[id_i],
             all_bounds[id_j],
-            all_nodata[id_i],
-            all_nodata[id_j],
+            global_nodata_value,
+            global_nodata_value,
             vector_mask_path=vector_mask_path,
             tile_width_and_height_tuple=tile_width_and_height_tuple,
             debug_mode=debug_mode,
@@ -111,7 +113,7 @@ def global_match(
     for idx, input_image_path in enumerate(input_image_paths, start=0):
         current_whole_stats = _calculate_whole_stats(
             input_image_path=input_image_path,
-            nodata=all_nodata[idx],
+            nodata=global_nodata_value,
             num_bands=num_bands,
             image_id=idx,
             vector_mask_path=vector_mask_path,
@@ -307,7 +309,7 @@ def global_match(
             meta.update({
                 "driver": "GTiff",
                 "count": num_bands,
-                "nodata": all_nodata[img_idx],
+                "nodata": global_nodata_value,
             })
 
             with rasterio.open(output_path, "w", **meta) as data_out:
@@ -322,7 +324,7 @@ def global_match(
 
                     for window in windows:
                         block = data.read(band_idx + 1, window=window)
-                        mask = block != all_nodata[img_idx]
+                        mask = block != global_nodata_value
                         adjusted = np.where(mask, a * block + b, block)
                         data_out.write(adjusted, band_idx + 1, window=window)
 
@@ -385,26 +387,9 @@ def local_match(
     """
     print("----------Starting Local Matching")
 
-    print(f"Found {len(input_image_paths)} images")
+    _check_raster_requirements(input_image_paths)
 
-    try:
-        with rasterio.open(input_image_paths[0]) as ds: image_nodata_value = ds.nodata
-    except:
-        image_nodata_value = None
-
-    if custom_nodata_value is None and image_nodata_value is None:
-        print("custom_nodata_value not set and could not get one from the first band of the first image; using -9999")
-        global_nodata_value = -9999
-
-    if custom_nodata_value is None and image_nodata_value is not None:
-        global_nodata_value = image_nodata_value
-
-    if custom_nodata_value is not None:
-        global_nodata_value = custom_nodata_value
-        if image_nodata_value is not None and image_nodata_value != custom_nodata_value:
-            print("Warning: image no data value has been overwritten by custom_nodata_value")
-
-
+    global_nodata_value = _get_nodata_value(input_image_paths, custom_nodata_value)
     print(f"Global nodata value: {global_nodata_value}")
 
     print("-------------------- Computing block size")
