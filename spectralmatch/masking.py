@@ -1,16 +1,14 @@
+import os
+import rasterio
+import geopandas as gpd
+import numpy as np
 
 from rasterio.enums import Resampling
 from rasterio.transform import from_origin
 from omnicloudmask import predict_from_array
-import numpy as np
-import rasterio
 from rasterio.features import shapes
-import geopandas as gpd
-from osgeo import ogr, osr
 from spectralmatch.handlers import write_vector
-import os
-from osgeo import gdal, ogr
-import numpy as np
+from osgeo import gdal, ogr, osr
 
 def create_cloud_mask(
     input_image_path,

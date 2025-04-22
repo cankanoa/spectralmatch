@@ -1,22 +1,18 @@
 import os
 import gc
 import sys
-
+import rasterio
 import numpy as np
+
 from scipy.optimize import least_squares
 from typing import Tuple, List, Optional, Literal
-import rasterio
-from typing import Literal
-
 from spectralmatch.utils.utils_local import _get_bounding_rectangle
 from spectralmatch.utils.utils_local import _compute_block_size
 from spectralmatch.utils.utils_local import _compute_blocks
 from spectralmatch.utils.utils_local import _weighted_bilinear_interpolation
 from spectralmatch.utils.utils_local import _download_block_map
 from spectralmatch.utils.utils_local import _apply_gamma_correction
-
 from spectralmatch.utils.utils_common import _check_raster_requirements, _get_nodata_value
-
 from spectralmatch.utils.utils_global import _find_overlaps
 from spectralmatch.utils.utils_global import _calculate_overlap_stats, _calculate_whole_stats
 from spectralmatch.utils.utils_common import _create_windows
