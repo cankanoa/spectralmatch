@@ -15,7 +15,7 @@ from spectralmatch.utils.utils_local import _weighted_bilinear_interpolation
 from spectralmatch.utils.utils_local import _download_block_map
 from spectralmatch.utils.utils_local import _apply_gamma_correction
 
-from spectralmatch.utils.utils_common import _get_image_metadata
+from spectralmatch.utils.utils_common import _check_raster_requirements
 
 from spectralmatch.utils.utils_global import _find_overlaps
 from spectralmatch.utils.utils_global import _calculate_overlap_stats, _calculate_whole_stats
@@ -23,7 +23,7 @@ from spectralmatch.utils.utils_io import create_windows
 from rasterio.windows import Window
 
 def global_match(
-    input_image_paths_array,
+    input_image_paths,
     output_image_folder,
     custom_mean_factor=1,
     custom_std_factor=1,
@@ -45,7 +45,7 @@ def global_match(
     output folder.
 
     Args:
-    input_image_paths_array (list[str]): List of file paths to the input images
+    input_image_paths (list[str]): List of file paths to the input images
     to be processed.
     output_image_folder (str): Directory where the processed images will be
     saved.
@@ -67,19 +67,19 @@ def global_match(
     """
     print("----------Starting Global Matching")
 
+    _check_raster_requirements(input_image_paths)
+
     # ---------------------------------------- Calculating statistics
     print("-------------------- Calculating statistics")
-    with rasterio.open(input_image_paths_array[0]) as src: num_bands = src.count
-    num_images = len(input_image_paths_array)
+    with rasterio.open(input_image_paths[0]) as src: num_bands = src.count
+    num_images = len(input_image_paths)
 
-    all_transforms = {}
-    all_projections = {}
     all_nodata = {}
     all_bounds = {}
-    for idx, input_image_path in enumerate(input_image_paths_array, start=0):
-        all_transforms[idx], all_projections[idx], all_nodata[idx], all_bounds[idx] = (
-            _get_image_metadata(input_image_path)
-        )
+    for idx, input_image_path in enumerate(input_image_paths, start=0):
+        with rasterio.open(input_image_path) as data_in:
+            all_nodata[idx] = data_in.nodata
+            all_bounds[idx] = data_in.bounds
 
     overlapping_pairs = _find_overlaps(all_bounds)
 
@@ -88,8 +88,8 @@ def global_match(
     for id_i, id_j in overlapping_pairs:
         current_overlap_stats = _calculate_overlap_stats(
             num_bands,
-            input_image_paths_array[id_i],
-            input_image_paths_array[id_j],
+            input_image_paths[id_i],
+            input_image_paths[id_j],
             id_i,
             id_j,
             all_bounds[id_i],
@@ -108,7 +108,7 @@ def global_match(
                 }
             for key_i, value in current_overlap_stats.items()})
 
-    for idx, input_image_path in enumerate(input_image_paths_array, start=0):
+    for idx, input_image_path in enumerate(input_image_paths, start=0):
         current_whole_stats = _calculate_whole_stats(
             input_image_path=input_image_path,
             nodata=all_nodata[idx],
@@ -294,7 +294,7 @@ def global_match(
         # for img_idx in [2]:
         adjusted_bands = []
 
-        input_filename = os.path.basename(input_image_paths_array[img_idx])
+        input_filename = os.path.basename(input_image_paths[img_idx])
         output_filename = (
             os.path.splitext(input_filename)[0] + output_global_basename + ".tif"
         )
@@ -302,7 +302,7 @@ def global_match(
         output_path = os.path.join(output_image_folder, "Images", output_filename)
         out_paths.append(output_path)
 
-        with rasterio.open(input_image_paths_array[img_idx]) as data:
+        with rasterio.open(input_image_paths[img_idx]) as data:
             meta = data.meta.copy()
             meta.update({
                 "driver": "GTiff",
