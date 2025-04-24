@@ -174,6 +174,7 @@ def _compute_tile_local(window: Window, band_idx: int, shared: tuple):
 def global_match(
     input_image_paths: List[str],
     output_image_folder: str,
+    *,
     custom_mean_factor: float = 1.0,
     custom_std_factor: float = 1.0,
     output_global_basename: str = "_global",
@@ -181,7 +182,6 @@ def global_match(
     tile_width_and_height_tuple: Optional[Tuple[int, int]] = None,
     debug_mode: bool = False,
     custom_nodata_value: float | None = None,
-    *,
     parallel: bool = False,
     max_workers: int | None = None,
     calc_dtype: str = "float32",
@@ -372,6 +372,7 @@ def global_match(
 def local_match(
     input_image_paths: List[str],
     output_image_folder: str,
+    *,
     output_local_basename: str = "_local",
     custom_nodata_value: float | None = None,
     target_blocks_per_image: int = 100,
@@ -382,7 +383,6 @@ def local_match(
     debug_mode: bool = False,
     tile_width_and_height_tuple: Optional[Tuple[int, int]] = None,
     correction_method: Literal["gamma", "linear"] = "gamma",
-    *,
     parallel: bool = False,
     max_workers: int | None = None,
 ):
