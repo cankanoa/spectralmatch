@@ -3,7 +3,7 @@ import numpy as np
 import rasterio
 import fiona
 
-from spectralmatch.utils.utils_io import create_windows
+from spectralmatch.utils.utils_common import _create_windows
 from rasterio.features import rasterize
 from rasterio.windows import Window
 from rasterio.transform import rowcol
@@ -45,10 +45,10 @@ def _find_overlaps(
         for key2, bounds2 in image_bounds_dict.items():
             if key1 < key2:  # Avoid duplicate and self-comparison
                 if (
-                    bounds1["x_min"] < bounds2["x_max"]
-                    and bounds1["x_max"] > bounds2["x_min"]
-                    and bounds1["y_min"] < bounds2["y_max"]
-                    and bounds1["y_max"] > bounds2["y_min"]
+                    bounds1.left < bounds2.right
+                    and bounds1.right > bounds2.left
+                    and bounds1.bottom < bounds2.top
+                    and bounds1.top > bounds2.bottom
                 ):
                     overlaps.append((key1, key2))
 
@@ -134,10 +134,10 @@ def _calculate_overlap_stats(
         transform_i = src_i.transform
         transform_j = src_j.transform
 
-        x_min = max(bound_i["x_min"], bound_j["x_min"])
-        x_max = min(bound_i["x_max"], bound_j["x_max"])
-        y_min = max(bound_i["y_min"], bound_j["y_min"])
-        y_max = min(bound_i["y_max"], bound_j["y_max"])
+        x_min = max(bound_i.left, bound_j.left)
+        x_max = min(bound_i.right, bound_j.right)
+        y_min = max(bound_i.bottom, bound_j.bottom)
+        y_max = min(bound_i.top, bound_j.top)
 
         if debug_mode: print(f"Overlap bounds: x: {x_min:.2f} to {x_max:.2f}, y: {y_min:.2f} to {y_max:.2f}")
 
@@ -158,7 +158,7 @@ def _calculate_overlap_stats(
 
         for band in range(num_bands):
             if tile_width_and_height_tuple:
-                windows = create_windows(width, height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
+                windows = _create_windows(width, height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
             else:
                 windows = [Window(0, 0, width, height)]
             windows = _adjust_size_of_tiles_to_fit_bounds(windows, width, height)
@@ -242,7 +242,7 @@ def _calculate_whole_stats(
             count = 0
 
             if tile_width_and_height_tuple:
-                windows = create_windows(data.width, data.height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
+                windows = _create_windows(data.width, data.height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
             else:
                 windows = [Window(0, 0, data.width, data.height)]
 

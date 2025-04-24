@@ -6,7 +6,7 @@ from osgeo import gdal
 from typing import Tuple, List, Optional
 from scipy.ndimage import map_coordinates, gaussian_filter
 from rasterio.windows import Window
-from spectralmatch.utils.utils_io import create_windows
+from spectralmatch.utils.utils_common import _create_windows
 
 def _get_bounding_rectangle(image_paths: List[str]) -> Tuple[float, float, float, float]:
         x_mins, y_mins, x_maxs, y_maxs = [], [], [], []
@@ -136,7 +136,7 @@ def _compute_blocks(
                 count_map_2d = np.zeros((M, N), dtype=calculation_dtype_precision)
 
                 if tile_width_and_height_tuple:
-                    windows = create_windows(data.width, data.height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
+                    windows = _create_windows(data.width, data.height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
                 else:
                     windows = [Window(0, 0, data.width, data.height)]
 

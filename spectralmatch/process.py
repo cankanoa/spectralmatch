@@ -1,29 +1,25 @@
 import os
 import gc
 import sys
-
+import rasterio
 import numpy as np
+
 from scipy.optimize import least_squares
 from typing import Tuple, List, Optional, Literal
-import rasterio
-from typing import Literal
-
 from spectralmatch.utils.utils_local import _get_bounding_rectangle
 from spectralmatch.utils.utils_local import _compute_block_size
 from spectralmatch.utils.utils_local import _compute_blocks
 from spectralmatch.utils.utils_local import _weighted_bilinear_interpolation
 from spectralmatch.utils.utils_local import _download_block_map
 from spectralmatch.utils.utils_local import _apply_gamma_correction
-
-from spectralmatch.utils.utils_common import _get_image_metadata
-
+from spectralmatch.utils.utils_common import _check_raster_requirements, _get_nodata_value
 from spectralmatch.utils.utils_global import _find_overlaps
 from spectralmatch.utils.utils_global import _calculate_overlap_stats, _calculate_whole_stats
-from spectralmatch.utils.utils_io import create_windows
+from spectralmatch.utils.utils_common import _create_windows
 from rasterio.windows import Window
 
 def global_match(
-    input_image_paths_array,
+    input_image_paths,
     output_image_folder,
     custom_mean_factor=1,
     custom_std_factor=1,
@@ -31,6 +27,7 @@ def global_match(
     vector_mask_path=None,
     tile_width_and_height_tuple: tuple = None,
     debug_mode=False,
+    custom_nodata_value: float = None,
     ):
     """
     Adjusts global histograms of input images for seamless stitching by calculating
@@ -45,7 +42,7 @@ def global_match(
     output folder.
 
     Args:
-    input_image_paths_array (list[str]): List of file paths to the input images
+    input_image_paths (list[str]): List of file paths to the input images
     to be processed.
     output_image_folder (str): Directory where the processed images will be
     saved.
@@ -67,19 +64,20 @@ def global_match(
     """
     print("----------Starting Global Matching")
 
+    _check_raster_requirements(input_image_paths)
+
+    global_nodata_value = _get_nodata_value(input_image_paths, custom_nodata_value)
+    print(f"Global nodata value: {global_nodata_value}")
+
     # ---------------------------------------- Calculating statistics
     print("-------------------- Calculating statistics")
-    with rasterio.open(input_image_paths_array[0]) as src: num_bands = src.count
-    num_images = len(input_image_paths_array)
+    with rasterio.open(input_image_paths[0]) as src: num_bands = src.count
+    num_images = len(input_image_paths)
 
-    all_transforms = {}
-    all_projections = {}
-    all_nodata = {}
     all_bounds = {}
-    for idx, input_image_path in enumerate(input_image_paths_array, start=0):
-        all_transforms[idx], all_projections[idx], all_nodata[idx], all_bounds[idx] = (
-            _get_image_metadata(input_image_path)
-        )
+    for idx, input_image_path in enumerate(input_image_paths, start=0):
+        with rasterio.open(input_image_path) as data_in:
+            all_bounds[idx] = data_in.bounds
 
     overlapping_pairs = _find_overlaps(all_bounds)
 
@@ -88,14 +86,14 @@ def global_match(
     for id_i, id_j in overlapping_pairs:
         current_overlap_stats = _calculate_overlap_stats(
             num_bands,
-            input_image_paths_array[id_i],
-            input_image_paths_array[id_j],
+            input_image_paths[id_i],
+            input_image_paths[id_j],
             id_i,
             id_j,
             all_bounds[id_i],
             all_bounds[id_j],
-            all_nodata[id_i],
-            all_nodata[id_j],
+            global_nodata_value,
+            global_nodata_value,
             vector_mask_path=vector_mask_path,
             tile_width_and_height_tuple=tile_width_and_height_tuple,
             debug_mode=debug_mode,
@@ -108,10 +106,10 @@ def global_match(
                 }
             for key_i, value in current_overlap_stats.items()})
 
-    for idx, input_image_path in enumerate(input_image_paths_array, start=0):
+    for idx, input_image_path in enumerate(input_image_paths, start=0):
         current_whole_stats = _calculate_whole_stats(
             input_image_path=input_image_path,
-            nodata=all_nodata[idx],
+            nodata=global_nodata_value,
             num_bands=num_bands,
             image_id=idx,
             vector_mask_path=vector_mask_path,
@@ -294,7 +292,7 @@ def global_match(
         # for img_idx in [2]:
         adjusted_bands = []
 
-        input_filename = os.path.basename(input_image_paths_array[img_idx])
+        input_filename = os.path.basename(input_image_paths[img_idx])
         output_filename = (
             os.path.splitext(input_filename)[0] + output_global_basename + ".tif"
         )
@@ -302,12 +300,12 @@ def global_match(
         output_path = os.path.join(output_image_folder, "Images", output_filename)
         out_paths.append(output_path)
 
-        with rasterio.open(input_image_paths_array[img_idx]) as data:
+        with rasterio.open(input_image_paths[img_idx]) as data:
             meta = data.meta.copy()
             meta.update({
                 "driver": "GTiff",
                 "count": num_bands,
-                "nodata": all_nodata[img_idx],
+                "nodata": global_nodata_value,
             })
 
             with rasterio.open(output_path, "w", **meta) as data_out:
@@ -316,13 +314,13 @@ def global_match(
                     b = all_adjustment_params[band_idx, 2 * img_idx + 1, 0]
 
                     if tile_width_and_height_tuple:
-                        windows = create_windows(data.width, data.height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
+                        windows = _create_windows(data.width, data.height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
                     else:
                         windows = [Window(0, 0, data.width, data.height)]
 
                     for window in windows:
                         block = data.read(band_idx + 1, window=window)
-                        mask = block != all_nodata[img_idx]
+                        mask = block != global_nodata_value
                         adjusted = np.where(mask, a * block + b, block)
                         data_out.write(adjusted, band_idx + 1, window=window)
 
@@ -385,26 +383,9 @@ def local_match(
     """
     print("----------Starting Local Matching")
 
-    print(f"Found {len(input_image_paths)} images")
+    _check_raster_requirements(input_image_paths)
 
-    try:
-        with rasterio.open(input_image_paths[0]) as ds: image_nodata_value = ds.nodata
-    except:
-        image_nodata_value = None
-
-    if custom_nodata_value is None and image_nodata_value is None:
-        print("custom_nodata_value not set and could not get one from the first band of the first image; using -9999")
-        global_nodata_value = -9999
-
-    if custom_nodata_value is None and image_nodata_value is not None:
-        global_nodata_value = image_nodata_value
-
-    if custom_nodata_value is not None:
-        global_nodata_value = custom_nodata_value
-        if image_nodata_value is not None and image_nodata_value != custom_nodata_value:
-            print("Warning: image no data value has been overwritten by custom_nodata_value")
-
-
+    global_nodata_value = _get_nodata_value(input_image_paths, custom_nodata_value)
     print(f"Global nodata value: {global_nodata_value}")
 
     print("-------------------- Computing block size")
@@ -541,7 +522,7 @@ def local_match(
             with rasterio.open(out_path, "w", **out_meta) as data_out:
                 data_out.update_tags(nodata=global_nodata_value)
                 if tile_width_and_height_tuple:
-                    windows = create_windows(data_in.width, data_in.height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
+                    windows = _create_windows(data_in.width, data_in.height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
                 else:
                     windows = [Window(0, 0, data_in.width, data_in.height)]
 
