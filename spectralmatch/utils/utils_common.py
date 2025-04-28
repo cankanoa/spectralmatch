@@ -5,10 +5,11 @@ from typing import List, Union, Optional
 from rasterio.windows import Window
 
 def _check_raster_requirements(
-    input_image_paths,
+        input_image_paths,
+        debug_mode: bool = False,
     ) -> bool:
 
-    print(f"Found {len(input_image_paths)} images")
+    if debug_mode: print(f"Found {len(input_image_paths)} images")
     datasets = []
     for path in input_image_paths:
         data_in = rasterio.open(path)
@@ -28,7 +29,7 @@ def _check_raster_requirements(
         for b in range(ds.count):
             if ds.nodata != ref_nodata[b]:
                 raise ValueError(f"Fail: Image {i}, band {b+1} has different nodata value.")
-    print("Input data checks passed: geotransform match, CRS match, band count match, nodata match")
+    if debug_mode: print("Input data checks passed: geotransform match, CRS match, band count match, nodata match")
     return True
 
 def _get_nodata_value(
@@ -52,7 +53,13 @@ def _get_nodata_value(
     warnings.warn("Custom nodata value not set and could not get one from the first band so no nodata value will be used.")
     return None
 
-def _create_windows(width, height, tile_width, tile_height):
+def _create_windows(
+    width,
+    height,
+    tile_width,
+    tile_height,
+    ):
+    
     for row_off in range(0, height, tile_height):
         for col_off in range(0, width, tile_width):
             win_width = min(tile_width, width - col_off)

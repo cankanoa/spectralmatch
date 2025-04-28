@@ -2,6 +2,9 @@
 import numpy as np
 import rasterio
 import fiona
+import os
+import numpy as np
+import sys
 
 from spectralmatch.utils.utils_common import _create_windows
 from rasterio.features import rasterize
@@ -10,16 +13,73 @@ from rasterio.transform import rowcol
 from rasterio.features import geometry_mask
 from osgeo import ogr
 
-np.set_printoptions(
-    suppress=True,
-    precision=3,
-    linewidth=300,
-    formatter={"float_kind": lambda x: f"{x: .3f}"},
+
+def _print_constraint_system(
+    constraint_matrix,
+    adjustment_params,
+    observed_values_vector,
+    overlap_pairs,
+    num_images
+    ):
+
+    """
+    Prints the constraint matrix, adjustment parameters, and observed values with labels.
+
+    Parameters:
+    constraint_matrix (np.ndarray): The constraint matrix.
+    adjustment_params (np.ndarray): The adjustment parameters vector.
+    observed_values_vector (np.ndarray): The observed values vector.
+    overlap_pairs (list of tuple): List of (i, j) index pairs for overlaps.
+    num_images (int): Number of images involved.
+    """
+    np.set_printoptions(
+        suppress=True,
+        precision=3,
+        linewidth=300,
+        formatter={"float_kind": lambda x: f"{x: .3f}"},
     )
+
+    print("constraint_matrix with labels:")
+
+    # Build row labels
+    row_labels = []
+    for i, j in overlap_pairs:
+        row_labels.append(f"Overlap({i}-{j}) Mean Diff")
+        row_labels.append(f"Overlap({i}-{j}) Std Diff")
+
+    for img_idx in range(num_images):
+        row_labels.append(f"Image {img_idx} Mean Cnstr")
+        row_labels.append(f"Image {img_idx} Std Cnstr")
+
+    # Build column labels
+    col_labels = []
+    for i in range(num_images):
+        col_labels.append(f"a{i}")
+        col_labels.append(f"b{i}")
+
+    # Print column headers
+    header = " " * 24  # extra space for row label
+    for lbl in col_labels:
+        header += f"{lbl:>18}"
+    print(header)
+
+    # Print matrix rows
+    for row_label, row in zip(row_labels, constraint_matrix):
+        line = f"{row_label:>24}"  # adjust the width
+        for val in row:
+            line += f"{val:18.3f}"
+        print(line)
+
+    print("\nadjustment_params:")
+    np.savetxt(sys.stdout, adjustment_params, fmt="%18.3f")
+
+    print("\nobserved_values_vector:")
+    np.savetxt(sys.stdout, observed_values_vector, fmt="%18.3f")
 
 def _find_overlaps(
     image_bounds_dict
     ):
+
     """
     Determines overlaps between rectangular regions defined in a dictionary of image bounds.
 
@@ -94,7 +154,12 @@ def _rasterize_mask(
 
     return mask
 
-def _mask_tile(src, geoms, window):
+def _mask_tile(
+    src,
+    geoms,
+    window
+    ):
+
     transform = src.window_transform(window)
     shape = (window.height, window.width)
 
@@ -153,8 +218,9 @@ def _calculate_overlap_stats(
         width = min(col_max_i - col_min_i, col_max_j - col_min_j)
 
         if debug_mode:
-            print(f"Pixel window (i): cols: {col_min_i} to {col_max_i} ({col_max_i - col_min_i}), rows: {row_min_i} to {row_max_i} ({row_max_i - row_min_i})")
-            print(f"Pixel window (j): cols: {col_min_j} to {col_max_j} ({col_max_j - col_min_j}), rows: {row_min_j} to {row_max_j} ({row_max_j - row_min_j})")
+            print(f"For overlap {os.path.basename(input_image_path_i)} with {os.path.basename(input_image_path_j)}:")
+            print(f" - Pixel window {os.path.basename(input_image_path_i)}: cols: {col_min_i} to {col_max_i} ({col_max_i - col_min_i}), rows: {row_min_i} to {row_max_i} ({row_max_i - row_min_i})")
+            print(f" - Pixel window {os.path.basename(input_image_path_j)}: cols: {col_min_j} to {col_max_j} ({col_max_j - col_min_j}), rows: {row_min_j} to {row_max_j} ({row_max_j - row_min_j})")
 
         for band in range(num_bands):
             if tile_width_and_height_tuple:
@@ -205,7 +271,12 @@ def _calculate_overlap_stats(
             }
     return stats
 
-def _adjust_size_of_tiles_to_fit_bounds(windows, max_width, max_height):
+def _adjust_size_of_tiles_to_fit_bounds(
+    windows,
+    max_width,
+    max_height
+    ):
+
     """Ensure no window extends beyond the target width/height (overlap bounds)."""
     adjusted_windows = []
     for win in windows:
@@ -226,6 +297,7 @@ def _calculate_whole_stats(
     vector_mask_path=None,
     tile_width_and_height_tuple: tuple = None,
     ):
+
     stats = {image_id: {}}
 
     with rasterio.open(input_image_path) as data:
