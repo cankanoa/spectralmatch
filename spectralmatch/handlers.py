@@ -1,5 +1,8 @@
 import os
 import tempfile
+from doctest import debug_script
+from logging import debug
+
 import rasterio
 import numpy as np
 import tempfile
@@ -80,7 +83,8 @@ def merge_rasters(
     resampling_method: Literal["nearest", "bilinear", "cubic"] = "nearest",
     tap: bool = False,
     resolution: Literal["highest", "lowest"] = "highest",
-    tile_width_and_height_tuple: Optional[Tuple[int, int]] = None
+    tile_width_and_height_tuple: Optional[Tuple[int, int]] = None,
+    debug_mode: bool = False,
     ):
 
     srcs = [rasterio.open(path) for path in data_in]
@@ -155,7 +159,7 @@ def merge_rasters(
 
             data_out.write(dst_array, window=window)
 
-    print(f"Merged raster saved to: {data_out}")
+    if debug_mode: print(f"Merged raster saved to: {data_out}")
 
 def align_rasters(
     input_image_paths: list[str],

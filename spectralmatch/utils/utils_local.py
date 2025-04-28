@@ -1,25 +1,33 @@
-import numpy as np
 import math
 import gc
+import os
+import numpy as np
+import rasterio
 
 from osgeo import gdal
-from typing import Tuple, List, Optional
 from scipy.ndimage import map_coordinates, gaussian_filter
 from rasterio.windows import Window
 from spectralmatch.utils.utils_common import _create_windows
+from rasterio.transform import from_origin
+from rasterio.crs import CRS
+from rasterio.errors import RasterioIOError
+from typing import Tuple, Optional, List
 
-def _get_bounding_rectangle(image_paths: List[str]) -> Tuple[float, float, float, float]:
-        x_mins, y_mins, x_maxs, y_maxs = [], [], [], []
+def _get_bounding_rectangle(
+    image_paths: List[str]
+    ) -> Tuple[float, float, float, float]:
 
-        for path in image_paths:
-            with rasterio.open(path) as src:
-                bounds = src.bounds
-                x_mins.append(bounds.left)
-                y_mins.append(bounds.bottom)
-                x_maxs.append(bounds.right)
-                y_maxs.append(bounds.top)
+    x_mins, y_mins, x_maxs, y_maxs = [], [], [], []
 
-        return (min(x_mins), min(y_mins), max(x_maxs), max(y_maxs))
+    for path in image_paths:
+        with rasterio.open(path) as src:
+            bounds = src.bounds
+            x_mins.append(bounds.left)
+            y_mins.append(bounds.bottom)
+            x_maxs.append(bounds.right)
+            y_maxs.append(bounds.top)
+
+    return (min(x_mins), min(y_mins), max(x_maxs), max(y_maxs))
 
 def _compute_mosaic_coefficient_of_variation(
     image_paths: List[str],
@@ -30,6 +38,7 @@ def _compute_mosaic_coefficient_of_variation(
     band_index: int = 1,
     calculation_dtype_precision="float32",
     ) -> Tuple[int, int]:
+
     """
     Computes an adjusted block size for image processing based on the coefficient
     of variation of pixel values across multiple images.
@@ -198,6 +207,7 @@ def _weighted_bilinear_interpolation(
     x_frac,
     y_frac
     ):
+
     """
     Performs weighted bilinear interpolation on a 2D array with optional handling of NaNs.
 
@@ -243,14 +253,6 @@ def _weighted_bilinear_interpolation(
     return interpolated_values
 
 
-import os
-import numpy as np
-import rasterio
-from rasterio.transform import from_origin
-from rasterio.crs import CRS
-from rasterio.errors import RasterioIOError
-from typing import Tuple, Optional
-
 def _download_block_map(
     block_map: np.ndarray,
     bounding_rect: Tuple[float, float, float, float],
@@ -261,7 +263,9 @@ def _download_block_map(
     output_bands_map: Optional[Tuple[int, ...]] = None,
     override_band_count: Optional[int] = None,
     ):
+
     output_dir = os.path.dirname(output_image_path)
+    base = os.path.basename(output_image_path)
     if output_dir and not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
@@ -300,7 +304,7 @@ def _download_block_map(
                 for idx, b in enumerate(band_indices):
                     band_data = block_map if num_bands == 1 else block_map[:, :, idx]
                     dst.write(band_data, b)
-                print(f"Bands added to existing raster at: {output_image_path}")
+                print(f"Bands added to existing raster {base}")
                 return
         except RasterioIOError as e:
             raise RuntimeError(f"Error reading existing file {output_image_path}: {e}")
@@ -336,6 +340,7 @@ def _compute_block_size(
     target_blocks_per_image,
     bounding_rect
     ):
+
     """
     Calculates the optimal block size (M, N) for dividing a set of input images into
     blocks, while maintaining the aspect ratio defined by the provided bounding
@@ -402,6 +407,7 @@ def _apply_gamma_correction(
     Mins: np.ndarray,
     alpha: float = 1.0
     ) -> Tuple[np.ndarray, np.ndarray]:
+
     """
     Applies gamma correction to an input array based on provided reference and input
     values, with an optional scaling factor.
@@ -445,6 +451,7 @@ def _apply_gamma_correction(
 def _get_lowest_pixel_value(
     raster_path
     ):
+
     """
     Retrieves the lowest pixel value from a raster file, ignoring nodata values if they are present. This function
     reads the raster file, processes the data to handle nodata values by replacing them with NaN, and calculates
@@ -475,6 +482,7 @@ def _add_value_to_raster(
     output_image_path,
     value
     ):
+
     """
     Adds a specified numeric value to all valid (non-masked) pixels in a raster file
     and writes the modified raster to a new output file.
@@ -529,6 +537,7 @@ def _smooth_array(
     nodata_value: Optional[float] = None,
     scale_factor: float = 1.0,
     ) -> np.ndarray:
+
     """
     Smooths a 2D array using Gaussian filtering while handling nodata values.
 
