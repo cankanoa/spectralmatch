@@ -29,7 +29,7 @@ def _check_raster_requirements(
         for b in range(ds.count):
             if ds.nodata != ref_nodata[b]:
                 raise ValueError(f"Fail: Image {i}, band {b+1} has different nodata value.")
-    if debug_mode: print("Input data checks passed: geotransform match, CRS match, band count match, nodata match")
+    if debug_mode: print("Input data checks passed: geotransform are present, CRS match, band count match, nodata match")
     return True
 
 def _get_nodata_value(

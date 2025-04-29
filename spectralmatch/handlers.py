@@ -116,7 +116,7 @@ def merge_rasters(
     out_transform = from_bounds(minx, miny, maxx, maxy, width, height)
 
     out_crs = srcs[0].crs
-    nodata = srcs[0].nodata or 0
+    nodata = srcs[0].nodata
     num_bands = srcs[0].count
     dtype = srcs[0].dtypes[0]
 
