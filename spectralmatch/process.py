@@ -4,7 +4,7 @@ import sys
 
 import numpy as np
 from scipy.optimize import least_squares
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Optional, Literal
 import rasterio
 from typing import Literal
 
@@ -15,7 +15,6 @@ from spectralmatch.utils.utils_local import _weighted_bilinear_interpolation
 from spectralmatch.utils.utils_local import _download_block_map
 from spectralmatch.utils.utils_local import _apply_gamma_correction
 
-from spectralmatch.utils.utils_common import _merge_rasters
 from spectralmatch.utils.utils_common import _get_image_metadata
 
 from spectralmatch.utils.utils_global import _find_overlaps
@@ -290,7 +289,7 @@ def global_match(
         np.savetxt(sys.stdout, observed_values_vector, fmt="%18.3f")
 
     print("-------------------- Apply adjustments and saving results")
-    output_path_array = []
+    out_paths = []
     for img_idx in range(num_images):
         # for img_idx in [2]:
         adjusted_bands = []
@@ -301,7 +300,7 @@ def global_match(
         )
         os.makedirs(os.path.join(output_image_folder, "Images"), exist_ok=True)
         output_path = os.path.join(output_image_folder, "Images", output_filename)
-        output_path_array.append(output_path)
+        out_paths.append(output_path)
 
         with rasterio.open(input_image_paths_array[img_idx]) as data:
             meta = data.meta.copy()
@@ -310,9 +309,6 @@ def global_match(
                 "count": num_bands,
                 "nodata": all_nodata[img_idx],
             })
-
-            output_path = os.path.join(output_image_folder, "Images", output_filename)
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
             with rasterio.open(output_path, "w", **meta) as data_out:
                 for band_idx in range(num_bands):
@@ -330,14 +326,10 @@ def global_match(
                         adjusted = np.where(mask, a * block + b, block)
                         data_out.write(adjusted, band_idx + 1, window=window)
 
-        print(f"Saved file {img_idx} to: {output_path}")
-    # ---------------------------------------- Merge rasters
-    print("-------------------- Merging rasters and saving result")
-    _merge_rasters(
-        output_path_array,
-        output_image_folder,
-        output_file_name=f"Merged{output_global_basename}.tif",
-    )
+        print(f"{img_idx} saved to: {output_path}")
+    print("Global histogram matching done")
+    return out_paths
+
 
 
 def local_match(
@@ -497,7 +489,7 @@ def local_match(
             projection=projection,
         )
 
-    corrected_paths = []
+    out_paths = []
     for img_path in input_image_paths:
         print(f"-------------------- Processing: {img_path}")
         print(f"-------------------- Computing local block map")
@@ -706,14 +698,8 @@ def local_match(
                         del arr_out
                         gc.collect()
 
-                corrected_paths.append(out_path)
+                out_paths.append(out_path)
                 print(f"Saved: {out_path}")
 
-    # 6) Merge final corrected rasters
-    print("Merging saved rasters")
-    _merge_rasters(
-        corrected_paths,
-        output_image_folder,
-        output_file_name=f"Merged{output_local_basename}.tif",
-    )
     print("Local histogram matching done")
+    return out_paths
