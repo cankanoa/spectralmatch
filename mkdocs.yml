@@ -1,0 +1,53 @@
+site_name: SpectralMatch
+site_url: https://spectralmatch.github.io/spectralmatch/
+repo_url: https://github.com/spectralmatch/spectralmatch
+
+theme:
+    name: material
+    palette:
+        primary: green
+        accent: deep-orange
+    icon:
+        repo: fontawesome/brands/github
+    features:
+        - navigation.instant
+        - search.highlight
+    custom_dir: overrides
+
+plugins:
+    - search
+    - mkdocstrings
+    - git-revision-date
+    - mkdocs-jupyter:
+        include_source: true
+        execute: false
+        ignore_h1_titles: true
+
+markdown_extensions:
+    - attr_list
+    - pymdownx.superfences
+    - pymdownx.arithmatex:
+          generic: true
+    - pymdownx.highlight:
+          linenums: true
+    - toc:
+          permalink: true
+
+nav:
+    - Home: index.md
+    - Installation: installation.md
+    - Changelog: https://github.com/cankanoa/spectralmatch/releases
+    - Report Issues: https://github.com/cankanoa/spectralmatch/issues
+    - Examples:
+        - examples/getting-started.ipynb
+        - examples/example.py
+    - API Reference:
+        - masking module: api/masking.md
+        - process module: api/process.md
+        - utils module: api/utils_common.md
+
+extra_css:
+    - docs/overrides/custom.css
+
+extra_javascript:
+ - https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.0/es5/tex-mml-chtml.js
