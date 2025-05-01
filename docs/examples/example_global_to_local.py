@@ -1,6 +1,5 @@
 import os
 
-
 from spectralmatch.process import global_match, local_match
 from spectralmatch.handlers import merge_rasters
 
