@@ -1,25 +1,17 @@
 import os
-import tempfile
-from doctest import debug_script
-from logging import debug
-
-import rasterio
 import numpy as np
 import tempfile
-import os
 import rasterio
 
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Literal
 from osgeo import ogr
 from rasterio.windows import Window
 from rasterio.transform import from_bounds
-from rasterio.warp import aligned_target
-from rasterio.warp import reproject
+from rasterio.warp import aligned_target, reproject
 from rasterio.enums import Resampling
-from typing import Literal
-from spectralmatch.utils.utils_common import _create_windows
+from .utils import _create_windows
 
-def write_vector(
+def _write_vector(
     mem_ds: ogr.DataSource,
     output_vector_path: str
     ) -> None:
@@ -86,6 +78,8 @@ def merge_rasters(
     tile_width_and_height_tuple: Optional[Tuple[int, int]] = None,
     debug_mode: bool = False,
     ):
+
+    if not os.path.exists(os.path.dirname(data_out)): os.makedirs(os.path.dirname(data_out))
 
     srcs = [rasterio.open(path) for path in data_in]
     resampling_enum = {"nearest": Resampling.nearest, "bilinear": Resampling.bilinear, "cubic": Resampling.cubic}[resampling_method]
