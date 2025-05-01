@@ -1,4 +1,4 @@
-# spectralmatch: Global and Local Spectral Matching for Seamless Image Mosaics
+# spectralmatch: A toolkit for performing Relative Radiometric Normalization, with utilities for generating seamlines, cloud masks, Pseudo-Invariant Features, and statistics
 
 [![Your-License-Badge](https://img.shields.io/badge/License-MIT-green)](#)
 [![codecov](https://codecov.io/gh/cankanoa/spatialmatch/graph/badge.svg?token=OKAM0BUUNS)](https://codecov.io/gh/cankanoa/spatialmatch)
@@ -6,21 +6,17 @@
 > [!IMPORTANT]
 > This library is experimental and still under heavy development.
  
-**Perform global and local histogram matching for multiple overlapping images to achieve seamless color consistency in mosaicked outputs.**
-
----
-
 ## Overview
 
-*spectralmatch* uses least squares regression to balance colors across all images in a single global solution, then performs finer local adjustments on overlapping blocks. This two-phase process prduces high-quality color normalization with minimal spectral distortion. This technique is derived from 'An auto-adapting global-to-local color balancing method for optical imagery mosaic' by Yu et al., 2017 (DOI: 10.1016/j.isprsjprs.2017.08.002).
+---
 
 ![Global and Local Matching](./images/spectralmatch.png)
 
----
+*spectralmatch* provides a Python library and QGIS plugin with multiple algorythms to perform Relative Radiometric Normalization (RRN). It also includes utilities for generating seamlines, cloud masks, Pseudo-Invariant Features, statistics, preprocessing, and more.
 
-## Features
+### Features
 
-- **Fully Automated:** Works without manual intervention, making it ideal for large-scale applications.
+- **Automated:** Works without manual intervention, making it ideal for large-scale applications.
 
 - **Consistent Multi-Image Analysis:** Ensures uniformity across images by applying systematic corrections with minimal spectral distortion.
 
@@ -32,19 +28,27 @@
 
 - **Minimizes Color Bias:** Avoids excessive color normalization and does not rely on a strict reference image.
 
-- **Global Spectral Matching:** Computes scale and offset across all images to correct large spectral differences.
-
-- **Local Spectral Matching:** Applies fine-tuned, block-by-block adjustments after global corrections.
-
 - **Sensor Agnostic:** Works with all optical sensors. In addition, images from differnt sensors can be combined for multisensor analysis.
 
 - **Parallel Processing:** Optimized for modern CPUs to handle large datasets efficiently.
 
-- **Script Automation & Integration:** Easily incorporated into new or existing remote sensing and GIS workflows.
-
 - **Large-Scale Mosaics:** Designed to process and blend vast image collections effectively.
+- **Time Series**: Normalize images across time with to compare spectral changes.
 
-## Assumptions
+## Current Matching Algorithms
+
+---
+
+### Global to local matching
+This technique is derived from 'An auto-adapting global-to-local color balancing method for optical imagery mosaic' by Yu et al., 2017 (DOI: 10.1016/j.isprsjprs.2017.08.002). It is particularly useful for very high-resolution imagery (satellite or otherwise) and works in a two phase process.
+First, this method applies least squares regression to estimate scale and offset parameters that align the histograms of all images toward a shared spectral center. This is achieved by constructing a global model based on the overlapping areas of adjacent images, where the spectral relationships are defined. This global model ensures that each image conforms to a consistent radiometric baseline while preserving overall color fidelity.
+However, global correction alone cannot capture intra-image variability so a second local adjustment phase is performed. The overlap areas are divided into smaller blocks, and each block’s mean is used to fine-tune the color correction. This block-wise tuning helps maintain local contrast and reduces visible seams, resulting in seamless and spectrally consistent mosaics with minimal distortion.
+
+
+![Histogram matching graph](./images/matching_histogram.png)
+*Shows the average spectral profile of two WorldView 3 images before and after global to local matching.*
+
+#### Assumptions
 
 - **Consistent Spectral Profile:** The true spectral response of overlapping areas remains the same throughout the images.
 
@@ -60,139 +64,104 @@
 
 - **Local Adjustments:** Block-level color differences result from the global application of adjustments.
 
-## Whats happening to the images?
-The color balancing process shifts the histograms of the images toward a common center, ensuring spectral consistency across the dataset. Each image has its own unique scale and offset applied to bring it closer to this central distribution. This is achieved by constructing a global model based on the overlapping areas of adjacent images, where the spectral relationships are defined. The global correction adjusts each image’s scale and offset so that their histograms align with the central tendency of all images.
-
-However, a global correction alone, based on a single mean, does not fully account for variations within individual images. To refine the adjustment locally, the overlap areas are divided into smaller blocks, and each block’s mean is used to fine-tune the color correction. This ensures that the local differences within images are better preserved, leading to seamless and natural-looking colors.
-
-![Histogram matching graph](./images/matching_histogram.png)
+## Installation with Pypi and use as a Python Library
 
 ---
 
-## Installation
-
-### 1. System Requirements
-Before installing *spectralmatch*, ensure you have the following system-level prerequisites:
+### 1. System requirements
+Before installing, ensure you have the following system-level prerequisites:
 
 - **Python ≥ 3.10**  
 - **PROJ ≥ 9.3**  
-- **GDAL ≥ 3.6** (verify using: `gdalinfo --version`)
+- **GDAL ≥ 3.6**
+
+An easy way to install these dependancies is to use [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install#quickstart-install-instructions):
+```bash
+conda create -n spectralmatch python>=3.10 gdal>=3.6 proj>=9.3 -c conda-forge
+conda activate spectralmatch
+```
 
 ### 2. Install spectralmatch (via PyPI or Source)
 
-The recommended way to install *spectralmatch* is via [PyPI](https://pypi.org/):
+The recommended way to install is via [PyPI](https://pypi.org/). (this method installs only the core code as a library):
 
 ```bash
 pip install spectralmatch
 ```
 
-*spectralmatch* includes a `pyproject.toml` which defines its Python dependencies. Installing via pip will automatically handle these. If you need to install from source, clone the repository and run:
+
+Another install method is to clone the repository and confugure the dependancies with `pyproject.toml`. (this method installs the whole repository for development or customization):
 
 ```bash
+git clone https://github.com/spectralmatch/spectralmatch.git
+cd spectralmatch
 pip install .
 ```
 
----
+### 3. Run example code and modify for use (optional)
 
-## Quick Start
+Example scripts are provided to verify a successful installation and help you get started quickly:
 
-After installation, you can use *spectralmatch* to perform global and local matching on multiple overlapping images:
+ - Global to local: [`docs/examples/example_global_to_local.py`](docs/examples/example_global_to_local.py)
 
-```python
-import os
-
-from spectralmatch.process import global_match, local_match
-script_dir = os.path.dirname(os.path.abspath(__file__))
-
-# -------------------- Global params
-input_folder = os.path.join(script_dir, "input")
-global_folder = os.path.join(script_dir, "output/global_match")  # This is the output of global match
-custom_mean_factor = 3  # Defualt 1; 3 often works better to 'move' the spectral mean of images closer together
-custom_std_factor = 1  # Defualt 1
-
-# -------------------- Local params
-local_folder = os.path.join(script_dir, "output/local_match")
-
-
-# -------------------- Global Histogram Match Mulispectral Images
-input_image_paths_array = [
-    os.path.join(input_folder, f)
-    for f in os.listdir(input_folder)
-    if f.lower().endswith(".tif")
-]
-
-global_match(
-    input_image_paths_array,
-    global_folder,
-    custom_mean_factor,
-    custom_std_factor,
-)
-
-# -------------------- Local Histogram Match Mulispectral Images
-global_image_paths_array = [
-    os.path.join(f"{global_folder}/images", f)
-    for f in os.listdir(f"{global_folder}/images")
-    if f.lower().endswith(".tif")
-]
-
-local_match(
-    global_image_paths_array,
-    local_folder,
-    target_blocks_per_image=100,
-    projection="EPSG:6635",
-    debug_mode=True,
-    global_nodata_value=-32768,
-)
-
-print("Done with global and local histogram matching")
-```
-
-Replace mentions of file paths, projection, and parameters as suitable for your data and environment.
+## Install and use as a QGIS Plugin
 
 ---
+
+1. [Download](https://qgis.org/download/) and install QGIS
+2.	Open QGIS
+3.	Go to Plugins → Manage and Install Plugins…
+4.	Find spectralmatch in the list, install, and enable it
+5.	Find the plugin in the Processing Toolbox
+
 
 ## Documentation
 
-Comprehensive documentation is forthcoming. In the meantime:  
-- Refer to function docstrings for usage and parameter details.  
-- Explore example scripts or tutorials within this repository for guidance.  
-- Open an issue or discussion if you need further information.
+---
+
+Documentation is available at [spectralmatch.github.io/spectralmatch/](https://spectralmatch.github.io/spectralmatch/).
+
+## Contributing Guide
 
 ---
 
-## Developer Guides
+We welcome all contributions the project! To get started:
+1. [Create an issue](https://github.com/spectralmatch/spectralmatch/issues/new) with the appropriate label describing the feature or improvement. Provide relevant context, desired timeline, any assistance needed, who will be responsible for the work, anticipated results, and any other details.
+2. [Fork the repository](https://github.com/spectralmatch/spectralmatch/fork) and create a new feature branch.
+3. Make your changes and add any necessary tests.
+4. Open a Pull Request against the main repository.
+
+## Developer Guide
+
+---
 
 1. **Clone the Repository**  
    ```bash
-   git clone https://github.com/yourusername/spectralmatch.git
-   ```
-   Then navigate into the project folder:
-   ```bash
+   git clone https://github.com/spectralmatch/spectralmatch.git
    cd spectralmatch
    ```
 
-2. **Install in Editable Mode with Dev Extras**  
-   *spectralmatch* provides a `[dev]` extra in its `pyproject.toml` for development:
+2. **Install with Dev andor Docs Extras**
+
+   There are additional `[dev]` and `[docs]` dependancies specified in `pyproject.toml`:
 
    ```bash
-   pip install --upgrade pip
    pip install -e ".[dev]"   # for developer dependencies
    pip install -e ".[docs]"  # for documentation dependencies
    ```
 
-3. **Set Up Pre-commit Hooks (Optional)**  	
-   If you want to maintain consistency and code quality before each commit:
+3. **Set Up Pre-commit Hooks**
+
+   To maintain code consistency before each commit install these hooks:
 
    ```bash
    pre-commit install
    pre-commit run --all-files
    ```
 
----
-
 ## Testing
 
-*spectralmatch* uses [pytest](https://docs.pytest.org/) for testing. To run all tests:
+[pytest](https://docs.pytest.org/) is used for testing. Tests will automatically be run when merging into main but they can also be run locally via:
 
 ```bash
 pytest
@@ -201,19 +170,8 @@ pytest
 Run tests for a specific file or function:
 
 ```bash
-pytest tests/test_global_match.py
+pytest folder/file.py
 ```
-
----
-
-## Contributing
-
-We welcome all contributions! To get started:  
-1. Fork the repository and create a new feature branch.  
-2. Make your changes and add any necessary tests.  
-3. Open a Pull Request against the main repository.
-
-We appreciate any feedback, suggestions, or pull requests to improve this project.
 
 ---
 
