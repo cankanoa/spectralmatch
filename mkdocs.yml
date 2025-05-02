@@ -36,15 +36,15 @@ markdown_extensions:
 nav:
     - Home: index.md
     - Installation: installation.md
-    - Changelog: https://github.com/cankanoa/spectralmatch/releases
-    - Report Issues: https://github.com/cankanoa/spectralmatch/issues
+    - Changelog: https://github.com/spectralmatch/spectralmatch/releases
+    - Report Issues: https://github.com/spectralmatch/spectralmatch/issues
     - Examples:
-        - examples/getting-started.ipynb
-        - examples/example.py
+#        - examples/getting-started.ipynb
+        - examples/example_global_to_local.py
     - API Reference:
-        - masking module: api/masking.md
-        - process module: api/process.md
-        - utils module: api/utils_common.md
+        - mask module: api/mask.md
+        - match module: api/match.md
+        - utils module: api/utils.md
 
 extra_css:
     - docs/overrides/custom.css
