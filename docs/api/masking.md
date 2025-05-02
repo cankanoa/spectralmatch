@@ -1,3 +1,0 @@
-# Masking Module
-
-::: spectralmatch.masking

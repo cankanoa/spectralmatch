@@ -1,3 +1,1 @@
-# SpectralMatch Documentation
-
-...
+../README.md
