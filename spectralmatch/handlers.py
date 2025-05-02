@@ -11,7 +11,7 @@ from rasterio.warp import aligned_target, reproject
 from rasterio.enums import Resampling
 from .utils import _create_windows
 
-def _write_vector(
+def write_vector(
     mem_ds: ogr.DataSource,
     output_vector_path: str
     ) -> None:

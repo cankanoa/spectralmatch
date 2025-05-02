@@ -1,4 +1,4 @@
-site_name: SpectralMatch
+site_name: spectralmatch
 site_url: https://spectralmatch.github.io/spectralmatch/
 repo_url: https://github.com/spectralmatch/spectralmatch
 
@@ -7,8 +7,7 @@ theme:
     palette:
         primary: green
         accent: deep-orange
-    icon:
-        repo: fontawesome/brands/github
+    logo: images/icon.png
     features:
         - navigation.instant
         - search.highlight
@@ -32,6 +31,7 @@ markdown_extensions:
           linenums: true
     - toc:
           permalink: true
+          toc_depth: 2
 
 nav:
     - Home: index.md
@@ -39,12 +39,16 @@ nav:
     - Changelog: https://github.com/spectralmatch/spectralmatch/releases
     - Report Issues: https://github.com/spectralmatch/spectralmatch/issues
     - Examples:
-#        - examples/getting-started.ipynb
-        - examples/example_global_to_local.py
+        - Global to Local: examples/example_global_to_local.py
+        - Benchmark Mulithreading: examples/benchmark.py
+        - Calculate Statistics: examples/calculate_statistics.py
+        - Cloud Masking: examples/mask_cloud.py
+        - Vegetation Masking: example/mask_ndvi.py
     - API Reference:
-        - mask module: api/mask.md
-        - match module: api/match.md
-        - utils module: api/utils.md
+        - Matching Algorithms: api/match.md
+        - Masking: api/mask.md
+        - Statistics: api/statistics.md
+        - Handlers: api/handlers.md
 
 extra_css:
     - docs/overrides/custom.css

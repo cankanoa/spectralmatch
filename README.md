@@ -15,7 +15,7 @@
 
 *spectralmatch* provides a Python library and QGIS plugin with multiple algorythms to perform Relative Radiometric Normalization (RRN). It also includes utilities for generating seamlines, cloud masks, Pseudo-Invariant Features, statistics, preprocessing, and more.
 
-### Features
+## Features
 
 - **Automated:** Works without manual intervention, making it ideal for large-scale applications.
 
@@ -72,9 +72,9 @@ However, global correction alone cannot capture intra-image variability so a sec
 ### 1. System requirements
 Before installing, ensure you have the following system-level prerequisites:
 
-- **Python ≥ 3.10**  
-- **PROJ ≥ 9.3**  
-- **GDAL ≥ 3.6**
+- Python ≥ 3.10
+- PROJ ≥ 9.3
+- GDAL ≥ 3.6
 
 An easy way to install these dependancies is to use [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install#quickstart-install-instructions):
 ```bash
@@ -109,11 +109,11 @@ Example scripts are provided to verify a successful installation and help you ge
 
 ---
 
-1. [Download](https://qgis.org/download/) and install QGIS
-2.	Open QGIS
-3.	Go to Plugins → Manage and Install Plugins…
-4.	Find spectralmatch in the list, install, and enable it
-5.	Find the plugin in the Processing Toolbox
+### 1. [Download](https://qgis.org/download/) and install QGIS
+### 2.	Open QGIS
+### 3.	Go to Plugins → Manage and Install Plugins…
+### 4.	Find spectralmatch in the list, install, and enable it
+### 5.	Find the plugin in the Processing Toolbox
 
 
 ## Documentation

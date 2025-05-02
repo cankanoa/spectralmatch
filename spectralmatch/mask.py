@@ -7,7 +7,6 @@ from rasterio.enums import Resampling
 from rasterio.transform import from_origin
 from omnicloudmask import predict_from_array
 from rasterio.features import shapes
-from .handlers import _write_vector
 from osgeo import gdal, ogr, osr
 
 def create_cloud_mask_with_omnicloudmask(
@@ -199,6 +198,7 @@ def post_process_raster_cloud_mask_to_vector(
 
     return mem_ds
 
+
 def create_ndvi_mask(
     input_image_path,
     output_image_path,
@@ -220,6 +220,7 @@ def create_ndvi_mask(
     gdal.GetDriverByName("VRT").CreateCopy(output_image_path, mem_ds)
     ds, mem_ds = None, None
     return output_image_path
+
 
 def post_process_threshold_to_vector(
     input_image_path: str,
@@ -262,35 +263,3 @@ def post_process_threshold_to_vector(
     gdal.Polygonize(mem_ds.GetRasterBand(1), mem_ds.GetRasterBand(1), out_lyr, 0, [])
     ds, mem_ds, out_ds = None, None, None
     return output_vector_path
-
-if __name__ == "__main__":
-    create_cloud_mask_with_omnicloudmask(
-        "input_image_path.tif",
-        5,
-        3,
-        8,
-        "output_mask>path.tif",
-        down_sample_m=10
-    )
-    _write_vector(
-            post_process_raster_cloud_mask_to_vector(
-                "input_image_path.tif",
-                None,
-                {1: 50},
-                {0: 0, 1: 1, 2: 1, 3: 1}
-        ),
-        "output_vector_path.tif",
-    )
-
-    create_ndvi_mask(
-        "input_image_path.tif",
-        "output_image_path.tif",
-        4,
-        3,
-        )
-    post_process_threshold_to_vector(
-        "input_image_path.tif",
-        'output_vector_path.gpkg',
-        0.2,
-        "<=",
-        )
