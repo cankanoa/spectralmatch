@@ -1,3 +1,4 @@
+import multiprocessing as mp
 import math
 import gc
 import os
@@ -7,11 +8,331 @@ import rasterio
 from osgeo import gdal
 from scipy.ndimage import map_coordinates, gaussian_filter
 from rasterio.windows import Window
-from spectralmatch.utils.utils_common import _create_windows
 from rasterio.transform import from_origin
 from rasterio.crs import CRS
 from rasterio.errors import RasterioIOError
-from typing import Tuple, Optional, List
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from typing import Tuple, Optional, List, Literal
+
+from ..utils import _check_raster_requirements, _get_nodata_value, _create_windows, _choose_context
+_worker_dataset_cache = {}
+
+def local_block_adjustment(
+    input_image_paths: List[str],
+    output_image_folder: str,
+    *,
+    output_local_basename: str = "_local",
+    custom_nodata_value: float | None = None,
+    target_blocks_per_image: int = 100,
+    alpha: float = 1.0,
+    calculation_dtype_precision: str = "float32",
+    output_dtype: str = "float32",
+    projection: str = "EPSG:4326",
+    debug_mode: bool = False,
+    tile_width_and_height_tuple: Optional[Tuple[int, int]] = None,
+    correction_method: Literal["gamma", "linear"] = "gamma",
+    parallel: bool = False,
+    max_workers: int | None = None,
+    ):
+
+    """
+    Matches histograms of input raster images using local histogram matching approach.
+    This function processes raster images, adjusts their histograms locally based on
+    reference blocks, and saves the corrected images to the specified output directory.
+    The procedure operates block-wise on the raster images for local corrections and
+    supports parallel execution for performance optimization.
+
+    Args:
+    input_image_paths (List[str]): A list of paths to input raster image files.
+    output_image_folder (str): Directory path where the output images will be saved.
+    output_local_basename (str): Suffix for the output filenames indicating local
+    histogram matching, default is "_local".
+    custom_nodata_value (float | None): Custom value to represent no data areas;
+    if None, it is auto-detected from input rasters.
+    target_blocks_per_image (int): Approximate number of blocks to divide each
+    raster for local histogram matching, default is 100.
+    alpha (float): Scaling factor for adjustment when applying histogram corrections,
+    default is 1.0 (no scaling).
+    calculation_dtype_precision (str): The data type precision used internally
+    for corrections, default is "float32".
+    output_dtype (str): Data type of the output images, default is "float32".
+    projection (str): Coordinate reference system for the output rasters,
+    default is "EPSG:4326".
+    debug_mode (bool): Flag to enable saving intermediate block map for debugging,
+    default is False.
+    tile_width_and_height_tuple (Optional[Tuple[int, int]]): Optional tuple
+    specifying the width and height of tiles for processing input raster,
+    default is None.
+    correction_method (Literal["gamma", "linear"]): Method for histogram correction,
+    either "gamma" or "linear." Default is "gamma".
+    parallel (bool): If True, enables parallel processing for higher efficiency,
+    default is False.
+    max_workers (int | None): Limits the number of parallel workers, default is
+    None (uses system CPU count if parallel is True).
+
+    Returns:
+    List[str]: List of file paths to the output raster images that have been
+    locally histogram-matched.
+    """
+    print("Start local matching")
+    _check_raster_requirements(input_image_paths, debug_mode)
+
+    nodata_val = _get_nodata_value(input_image_paths, custom_nodata_value)
+    if debug_mode: print(f"Global nodata value: {nodata_val}")
+
+    out_img_dir = os.path.join(output_image_folder, "Images")
+    if not os.path.exists(out_img_dir): os.makedirs(out_img_dir)
+
+    bounding_rect = _get_bounding_rectangle(input_image_paths)
+    M, N = _compute_block_size(input_image_paths, target_blocks_per_image, bounding_rect)
+    # M, N = _compute_mosaic_coefficient_of_variation(input_image_paths, global_nodata_value) # Aproach from the paper to compute bock size
+
+    with rasterio.open(input_image_paths[0]) as ds:
+        num_bands = ds.count
+
+    if debug_mode: print("Computing global reference block map")
+    block_ref_mean, _ = _compute_blocks(
+        input_image_paths,
+        bounding_rect,
+        M,
+        N,
+        num_bands,
+        nodata_value=nodata_val,
+        tile_width_and_height_tuple=tile_width_and_height_tuple,
+    )
+
+    if debug_mode:
+        _download_block_map(
+            block_map=np.nan_to_num(block_ref_mean, nan=nodata_val),
+            bounding_rect=bounding_rect,
+            output_image_path= os.path.join(output_image_folder, "BlockReferenceMean", "BlockReferenceMean.tif"),
+            nodata_value=nodata_val,
+            projection=projection,
+        )
+
+    if parallel and max_workers is None:
+        max_workers = mp.cpu_count()
+
+    out_paths: List[str] = []
+    for img_path in input_image_paths:
+        in_name = os.path.splitext(os.path.basename(img_path))[0]
+        out_name = os.path.splitext(os.path.basename(img_path))[0] + output_local_basename
+        out_path = os.path.join(out_img_dir, f"{out_name}.tif")
+        out_paths.append(str(out_path))
+
+        if debug_mode: print(f"Processing {in_name}")
+        if debug_mode: print(f"Computing local block map")
+        block_loc_mean, block_loc_count = _compute_blocks(
+            [img_path],
+            bounding_rect,
+            M,
+            N,
+            num_bands,
+            nodata_value=nodata_val,
+            tile_width_and_height_tuple=tile_width_and_height_tuple,
+        )
+
+        # block_local_mean = _smooth_array(block_local_mean, nodata_value=global_nodata_value)
+
+        if debug_mode:
+            _download_block_map(
+                block_map=np.nan_to_num(block_loc_mean, nan=nodata_val),
+                bounding_rect=bounding_rect,
+                output_image_path=os.path.join(output_image_folder, "BlockLocalMean", f"{out_name}_BlockLocalMean.tif"),
+                nodata_value=nodata_val,
+                projection=projection,
+            )
+            _download_block_map(
+                block_map=np.nan_to_num(block_loc_count, nan=nodata_val),
+                bounding_rect=bounding_rect,
+                output_image_path=os.path.join(output_image_folder, "BlockLocalCount", f"{out_name}_BlockLocalCount.tif"),
+                nodata_value=nodata_val,
+                projection=projection,
+            )
+
+        if debug_mode: print(f"Computing local correction, applying, and saving")
+        with rasterio.open(img_path) as src:
+            meta = src.meta.copy()
+            meta.update({"count": num_bands, "dtype": output_dtype, "nodata": nodata_val})
+            with rasterio.open(out_path, "w", **meta) as dst:
+
+                if tile_width_and_height_tuple:
+                    tw, th = tile_width_and_height_tuple
+                    windows = list(_create_windows(src.width, src.height, tw, th))
+                else:
+                    windows = [Window(0, 0, src.width, src.height)]
+
+                if parallel:
+                    ctx = _choose_context(prefer_fork=True)
+
+                    pool = ProcessPoolExecutor(
+                        max_workers=max_workers,
+                        mp_context=ctx,
+                        initializer=_init_worker,
+                        initargs=(img_path,),
+                    )
+
+                    futures = [
+                        pool.submit(_compute_tile_local,
+                                    w,
+                                    b,
+                                    M,
+                                    N,
+                                    bounding_rect,
+                                    block_ref_mean,
+                                    block_loc_mean,
+                                    nodata_val,
+                                    alpha,
+                                    correction_method,
+                                    calculation_dtype_precision,
+                                    debug_mode,
+                                    )
+                        for b in range(num_bands)
+                        for w in windows
+                    ]
+                    for fut in as_completed(futures):
+                        win, b_idx, buf = fut.result()
+                        dst.write(buf.astype(output_dtype), b_idx + 1, window=win)
+                    pool.shutdown()
+                else:
+                    _init_worker(img_path)
+
+                    for b in range(num_bands):
+                        for win in windows:
+                            win_, b_idx, buf = _compute_tile_local(
+                                win,
+                                b,
+                                M,
+                                N,
+                                bounding_rect,
+                                block_ref_mean,
+                                block_loc_mean,
+                                nodata_val,
+                                alpha,
+                                correction_method,
+                                calculation_dtype_precision,
+                                debug_mode
+                            )
+                            dst.write(buf.astype(output_dtype), b_idx + 1, window=win_)
+    print("Finished local matching")
+    return out_paths
+
+
+def _compute_tile_local(
+    window: Window,
+    band_idx: int,
+    M,
+    N,
+    bounding_rect,
+    block_ref_mean,
+    block_loc_mean,
+    nodata_val,
+    alpha,
+    correction_method,
+    calculation_dtype_precision,
+    debug_mode,
+    ):
+
+    if debug_mode: print(f"Processing band: {band_idx}")
+
+    ds = _worker_dataset_cache["ds"]
+    arr_in = ds.read(band_idx + 1, window=window).astype(calculation_dtype_precision)
+    arr_out = np.full_like(arr_in, nodata_val, dtype=calculation_dtype_precision)
+
+    mask = arr_in != nodata_val
+    if not np.any(mask):
+        return window, band_idx, arr_out
+
+    vr, vc = np.where(mask)
+
+    win_tr = ds.window_transform(window)
+    col_coords = win_tr[2] + np.arange(window.width) * win_tr[0]
+    row_coords = win_tr[5] + np.arange(window.height) * win_tr[4]
+
+    row_f = np.clip(
+        ((bounding_rect[3] - row_coords) / (bounding_rect[3] - bounding_rect[1])) * M
+        - 0.5,
+        0,
+        M - 1,
+    )
+    col_f = np.clip(
+        ((col_coords - bounding_rect[0]) / (bounding_rect[2] - bounding_rect[0])) * N
+        - 0.5,
+        0,
+        N - 1,
+    )
+
+    ref = _weighted_bilinear_interpolation(
+        block_ref_mean[:, :, band_idx], col_f[vc], row_f[vr]
+    )
+    loc = _weighted_bilinear_interpolation(
+        block_loc_mean[:, :, band_idx], col_f[vc], row_f[vr]
+    )
+    # if debug_mode:
+    #     gammas_array = np.full(arr_in.shape, global_nodata_value, dtype=calculation_dtype_precision)
+    #     gammas_array[valid_rows, valid_cols] = gammas
+    #     _download_block_map(
+    #         block_map=gammas_array,
+    #         bounding_rect=this_image_bounds,
+    #         output_image_path=os.path.join(output_image_folder, "Gamma", out_name + f"_Gamma.tif"),
+    #         projection=projection,
+    #         nodata_value=global_nodata_value,
+    #         output_bands_map=(b+1,),
+    #         override_band_count=num_bands,
+    #     )
+
+    # if debug_mode:
+    #     _download_block_map(
+    #         block_map=np.where(valid_mask, 1, global_nodata_value),
+    #         bounding_rect=this_image_bounds,
+    #         output_image_path=os.path.join(output_image_folder, "ValidMasks", out_name + f"_ValidMask.tif"),
+    #         projection=projection,
+    #         nodata_value=global_nodata_value,
+    #         output_bands_map=(b+1,),
+    #         override_band_count=num_bands
+    #     )
+
+    # if debug_mode:
+    #     _download_block_map(
+    #         block_map=reference_band,
+    #         bounding_rect=this_image_bounds,
+    #         output_image_path=os.path.join(output_image_folder, "ReferenceBand", out_name + f"_ReferenceBand.tif"),
+    #         projection=projection,
+    #         nodata_value=global_nodata_value,
+    #         output_bands_map=(b+1,),
+    #         override_band_count=num_bands,
+    #     )
+    #
+    # if debug_mode:
+    #     _download_block_map(
+    #         block_map=local_band,
+    #         bounding_rect=this_image_bounds,
+    #         output_image_path=os.path.join(output_image_folder, "LocalBand", out_name + f"_LocalBand.tif"),
+    #         projection=projection,
+    #         nodata_value=global_nodata_value,
+    #         output_bands_map=(b+1,),
+    #         override_band_count=num_bands,
+    #     )
+
+    if correction_method == "gamma":
+        smallest = np.min([arr_in[mask], ref, loc])
+        if smallest <= 0:
+            offset = abs(smallest) + 1
+            arr_out[mask], _ = _apply_gamma_correction(
+                arr_in[mask] + offset,
+                ref + offset,
+                loc + offset,
+                alpha,
+            )
+            arr_out[mask] -= offset
+        else:
+            arr_out[mask], _ = _apply_gamma_correction(arr_in[mask], ref, loc, alpha)
+    elif correction_method == "linear":
+        arr_out[mask] = arr_in[mask] * (ref / loc)
+    else: raise ValueError('Invalid correction method')
+
+    return window, band_idx, arr_out
+
 
 def _get_bounding_rectangle(
     image_paths: List[str]
@@ -38,7 +359,6 @@ def _compute_mosaic_coefficient_of_variation(
     band_index: int = 1,
     calculation_dtype_precision="float32",
     ) -> Tuple[int, int]:
-
     """
     Computes an adjusted block size for image processing based on the coefficient
     of variation of pixel values across multiple images.
@@ -49,28 +369,28 @@ def _compute_mosaic_coefficient_of_variation(
     resulting block size can be used for tasks such as spatial data processing.
 
     Args:
-        image_paths (List[str]): List of file paths to the input images.
-        nodata_value (float): Value that indicates no data in the raster datasets.
-            Pixels with this value will be ignored during calculations.
-        reference_std (float): Reference standard deviation used for the
-            coefficient of variation comparison. Default is 45.0.
-        reference_mean (float): Reference mean used for the coefficient of
-            variation comparison. Default is 125.0.
-        base_block_size (Tuple[int, int]): Initial block size as a tuple
-            (rows, columns). Default is (10, 10).
-        band_index (int): Index of the image band to extract pixel values from.
-            Band indexing is 1-based. Default is 1.
-        calculation_dtype_precision (str): Data type to use for calculations.
-            This is used for converting the raster arrays during processing.
-            Default is 'float32'.
+    image_paths (List[str]): List of file paths to the input images.
+    nodata_value (float): Value that indicates no data in the raster datasets.
+    Pixels with this value will be ignored during calculations.
+    reference_std (float): Reference standard deviation used for the
+    coefficient of variation comparison. Default is 45.0.
+    reference_mean (float): Reference mean used for the coefficient of
+    variation comparison. Default is 125.0.
+    base_block_size (Tuple[int, int]): Initial block size as a tuple
+    (rows, columns). Default is (10, 10).
+    band_index (int): Index of the image band to extract pixel values from.
+    Band indexing is 1-based. Default is 1.
+    calculation_dtype_precision (str): Data type to use for calculations.
+    This is used for converting the raster arrays during processing.
+    Default is 'float32'.
 
     Returns:
-        Tuple[int, int]: Adjusted block size as a tuple (rows, columns). The
-        block size is computed based on the ratio of computed and reference
-        coefficients of variation.
+    Tuple[int, int]: Adjusted block size as a tuple (rows, columns). The
+    block size is computed based on the ratio of computed and reference
+    coefficients of variation.
 
     Raises:
-        None
+    None
     """
     all_pixels = []
 
@@ -207,7 +527,6 @@ def _weighted_bilinear_interpolation(
     x_frac,
     y_frac
     ):
-
     """
     Performs weighted bilinear interpolation on a 2D array with optional handling of NaNs.
 
@@ -216,17 +535,18 @@ def _weighted_bilinear_interpolation(
     The interpolation utilizes fractional indices provided in `x_frac` and `y_frac`.
 
     Args:
-        C_B (np.ndarray): A 2D array of numerical values, which may include NaN values.
-        x_frac (np.ndarray): Fractional indices along the x-axis where interpolation is to
-            be performed.
-        y_frac (np.ndarray): Fractional indices along the y-axis where interpolation is to
-            be performed.
+    C_B (np.ndarray): A 2D array of numerical values, which may include NaN values.
+    x_frac (np.ndarray): Fractional indices along the x-axis where interpolation is to
+    be performed.
+    y_frac (np.ndarray): Fractional indices along the y-axis where interpolation is to
+    be performed.
 
     Returns:
-        np.ndarray: A 1D array of interpolated values corresponding to the provided
-            fractional indices. Output values are NaN where interpolation is not possible
-            due to invalid neighbors.
+    np.ndarray: A 1D array of interpolated values corresponding to the provided
+    fractional indices. Output values are NaN where interpolation is not possible
+    due to invalid neighbors.
     """
+
     # 1) Create a mask that is 1 where valid (not NaN), 0 where NaN
     mask = ~np.isnan(C_B)
 
@@ -340,7 +660,6 @@ def _compute_block_size(
     target_blocks_per_image,
     bounding_rect
     ):
-
     """
     Calculates the optimal block size (M, N) for dividing a set of input images into
     blocks, while maintaining the aspect ratio defined by the provided bounding
@@ -351,20 +670,21 @@ def _compute_block_size(
     number of blocks by scaling to the aspect ratio of the bounding rectangle.
 
     Args:
-        input_image_array_path (list[str]): List of paths to input image arrays.
-        target_blocks_per_image (int): Desired number of blocks per image.
-        bounding_rect (tuple[int, int, int, int]): Tuple containing the minimum and
-            maximum x and y coordinates of the bounding rectangle in the form
-            (x_min, y_min, x_max, y_max).
+    input_image_array_path (list[str]): List of paths to input image arrays.
+    target_blocks_per_image (int): Desired number of blocks per image.
+    bounding_rect (tuple[int, int, int, int]): Tuple containing the minimum and
+    maximum x and y coordinates of the bounding rectangle in the form
+    (x_min, y_min, x_max, y_max).
 
     Returns:
-        tuple[int, int]: A tuple containing the number of rows (M) and columns (N)
-        that together divide the images into approximately the desired number of
-        blocks, while maintaining the aspect ratio of the bounding rectangle.
+    tuple[int, int]: A tuple containing the number of rows (M) and columns (N)
+    that together divide the images into approximately the desired number of
+    blocks, while maintaining the aspect ratio of the bounding rectangle.
 
     Raises:
-        ValueError: If the target_blocks_per_image is less than or equal to zero.
+    ValueError: If the target_blocks_per_image is less than or equal to zero.
     """
+
     num_images = len(input_image_array_path)
 
     # Total target blocks scaled by the number of images
@@ -407,7 +727,6 @@ def _apply_gamma_correction(
     Mins: np.ndarray,
     alpha: float = 1.0
     ) -> Tuple[np.ndarray, np.ndarray]:
-
     """
     Applies gamma correction to an input array based on provided reference and input
     values, with an optional scaling factor.
@@ -417,22 +736,23 @@ def _apply_gamma_correction(
     using the formula: `P_res = alpha * P_in^gamma`.
 
     Args:
-        arr_in (np.ndarray): The input array to be gamma-corrected.
-        Mrefs (np.ndarray): Reference values used for computing gamma values.
-        Mins (np.ndarray): Input values used for computing gamma values, must be greater
-            than zero to avoid invalid logarithmic operations.
-        alpha (float): Optional scaling factor applied during the gamma correction. Default
-            is 1.0.
+    arr_in (np.ndarray): The input array to be gamma-corrected.
+    Mrefs (np.ndarray): Reference values used for computing gamma values.
+    Mins (np.ndarray): Input values used for computing gamma values, must be greater
+    than zero to avoid invalid logarithmic operations.
+    alpha (float): Optional scaling factor applied during the gamma correction. Default
+    is 1.0.
 
     Returns:
-        Tuple[np.ndarray, np.ndarray]: A tuple containing:
-            - Corrected output array (`arr_out_valid`) after applying gamma correction.
-            - Array of gamma values computed from the reference and input values.
+    Tuple[np.ndarray, np.ndarray]: A tuple containing:
+    - Corrected output array (`arr_out_valid`) after applying gamma correction.
+    - Array of gamma values computed from the reference and input values.
 
     Raises:
-        ValueError: If any element of `Mins` is less than or equal to zero, which would
-            result in invalid logarithmic operations.
+    ValueError: If any element of `Mins` is less than or equal to zero, which would
+    result in invalid logarithmic operations.
     """
+
     # Ensure no division by zero
     if np.any(Mins <= 0):
         raise ValueError(
@@ -451,7 +771,6 @@ def _apply_gamma_correction(
 def _get_lowest_pixel_value(
     raster_path
     ):
-
     """
     Retrieves the lowest pixel value from a raster file, ignoring nodata values if they are present. This function
     reads the raster file, processes the data to handle nodata values by replacing them with NaN, and calculates
@@ -459,13 +778,14 @@ def _get_lowest_pixel_value(
     handles missing data gracefully.
 
     Args:
-        raster_path (str): Path to the raster file to be processed. Should be a readable file compatible with
-            rasterio.
+    raster_path (str): Path to the raster file to be processed. Should be a readable file compatible with
+    rasterio.
 
     Returns:
-        float: The lowest valid pixel value in the raster, ignoring nodata values. If all pixels are nodata,
-            returns NaN.
+    float: The lowest valid pixel value in the raster, ignoring nodata values. If all pixels are nodata,
+    returns NaN.
     """
+
     with rasterio.open(raster_path) as src:
         # Read the first band as a NumPy array
         data = src.read(1)
@@ -482,7 +802,6 @@ def _add_value_to_raster(
     output_image_path,
     value
     ):
-
     """
     Adds a specified numeric value to all valid (non-masked) pixels in a raster file
     and writes the modified raster to a new output file.
@@ -492,16 +811,17 @@ def _add_value_to_raster(
     with the same metadata as the original raster into a specified output file.
 
     Args:
-        input_image_path (str): Path to the input raster file.
-        output_image_path (str): Path where the modified raster will be saved.
-        value (float | int): Numeric value to be added to the raster data.
+    input_image_path (str): Path to the input raster file.
+    output_image_path (str): Path where the modified raster will be saved.
+    value (float | int): Numeric value to be added to the raster data.
 
     Raises:
-        FileNotFoundError: If the input raster file does not exist.
-        RasterioIOError: If there is an issue reading or writing the raster file.
-        ValueError: If the data type of the value is incompatible with the raster
-            data's type.
+    FileNotFoundError: If the input raster file does not exist.
+    RasterioIOError: If there is an issue reading or writing the raster file.
+    ValueError: If the data type of the value is incompatible with the raster
+    data's type.
     """
+
     # Open the source raster
     with rasterio.open(input_image_path) as src:
         # Read data as a masked array: nodata pixels are masked
@@ -537,7 +857,6 @@ def _smooth_array(
     nodata_value: Optional[float] = None,
     scale_factor: float = 1.0,
     ) -> np.ndarray:
-
     """
     Smooths a 2D array using Gaussian filtering while handling nodata values.
 
@@ -546,16 +865,17 @@ def _smooth_array(
     and reintroduces the nodata value in the output for consistency with the input.
 
     Args:
-        input_array (np.ndarray): The 2D array to be smoothed.
-        nodata_value (Optional[float]): The value representing missing data in
-            the array. If provided, these values will be excluded from smoothing.
-            Default is None.
-        scale_factor (float): The smoothing scale factor (sigma) for the Gaussian
-            filter. Default is 1.0.
+    input_array (np.ndarray): The 2D array to be smoothed.
+    nodata_value (Optional[float]): The value representing missing data in
+    the array. If provided, these values will be excluded from smoothing.
+    Default is None.
+    scale_factor (float): The smoothing scale factor (sigma) for the Gaussian
+    filter. Default is 1.0.
 
     Returns:
-        np.ndarray: The smoothed array, with nodata values reintroduced if specified.
+    np.ndarray: The smoothed array, with nodata values reintroduced if specified.
     """
+
     # Replace nodata_value with NaN for consistency
     if nodata_value is not None:
         input_array = np.where(input_array == nodata_value, np.nan, input_array)
@@ -582,3 +902,9 @@ def _smooth_array(
         smoothed_normalized = np.where(valid_mask, smoothed_normalized, nodata_value)
 
     return smoothed_normalized
+
+
+def _init_worker(img_path: str):
+    import rasterio
+    global _worker_dataset_cache
+    _worker_dataset_cache["ds"] = rasterio.open(img_path, "r")

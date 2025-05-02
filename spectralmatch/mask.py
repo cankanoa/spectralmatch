@@ -7,7 +7,7 @@ from rasterio.enums import Resampling
 from rasterio.transform import from_origin
 from omnicloudmask import predict_from_array
 from rasterio.features import shapes
-from spectralmatch.handlers import write_vector
+from .handlers import _write_vector
 from osgeo import gdal, ogr, osr
 
 def create_cloud_mask_with_omnicloudmask(
@@ -272,7 +272,7 @@ if __name__ == "__main__":
         "output_mask>path.tif",
         down_sample_m=10
     )
-    write_vector(
+    _write_vector(
             post_process_raster_cloud_mask_to_vector(
                 "input_image_path.tif",
                 None,

@@ -1,12 +1,15 @@
-import rasterio
 import warnings
+import sys
+import multiprocessing as mp
+import rasterio
 
-from typing import List, Union, Optional
+from typing import List, Optional, Union
 from rasterio.windows import Window
 
+
 def _check_raster_requirements(
-        input_image_paths,
-        debug_mode: bool = False,
+    input_image_paths,
+    debug_mode: bool = False,
     ) -> bool:
 
     if debug_mode: print(f"Found {len(input_image_paths)} images")
@@ -32,6 +35,7 @@ def _check_raster_requirements(
     if debug_mode: print("Input data checks passed: geotransform are present, CRS match, band count match, nodata match")
     return True
 
+
 def _get_nodata_value(
     input_image_paths: List[Union[str]],
     custom_nodata_value: Optional[float] = None,
@@ -53,15 +57,52 @@ def _get_nodata_value(
     warnings.warn("Custom nodata value not set and could not get one from the first band so no nodata value will be used.")
     return None
 
+
 def _create_windows(
     width,
     height,
     tile_width,
     tile_height,
     ):
-    
+
     for row_off in range(0, height, tile_height):
         for col_off in range(0, width, tile_width):
             win_width = min(tile_width, width - col_off)
             win_height = min(tile_height, height - row_off)
             yield Window(col_off, row_off, win_width, win_height)
+
+
+def _choose_context(
+    prefer_fork: bool = True
+    ) -> mp.context.BaseContext:
+
+    """
+    Chooses and returns the most suitable multiprocessing context based on the given
+    preference and the operating system.
+
+    This function attempts to decide the multiprocessing context based on whether
+    the platform supports forking or not and user preference. Fork contexts are given
+    priority on Linux systems. For macOS, it tries to utilize a fork context, but if
+    unsupported, falls back to other options. On other platforms, it defaults to
+    "forkserver" or "spawn" if no other option is available.
+
+    Args:
+    prefer_fork (bool): A boolean flag indicating whether to prioritize the
+    "fork" context when available. Defaults to True.
+
+    Returns:
+    mp.context.BaseContext: The multiprocessing context selected based
+    on the provided preference and platform compatibility.
+    """
+
+    if prefer_fork and sys.platform.startswith("linux"):
+        return mp.get_context("fork")
+    if prefer_fork and sys.platform == "darwin":
+        try:
+            return mp.get_context("fork")
+        except ValueError:
+            pass
+    try:
+        return mp.get_context("forkserver")
+    except ValueError:
+        return mp.get_context("spawn")
