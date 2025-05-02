@@ -7,9 +7,9 @@
 > [!IMPORTANT]
 > This library is experimental and still under heavy development.
  
-## Overview
+ ---
 
----
+## Overview
 
 ![Global and Local Matching](./images/spectralmatch.png)
 
@@ -36,9 +36,9 @@
 - **Large-Scale Mosaics:** Designed to process and blend vast image collections effectively.
 - **Time Series**: Normalize images across time with to compare spectral changes.
 
-## Current Matching Algorithms
-
 ---
+
+## Current Matching Algorithms
 
 ### Global to local matching
 This technique is derived from 'An auto-adapting global-to-local color balancing method for optical imagery mosaic' by Yu et al., 2017 (DOI: 10.1016/j.isprsjprs.2017.08.002). It is particularly useful for very high-resolution imagery (satellite or otherwise) and works in a two phase process.
@@ -65,9 +65,9 @@ However, global correction alone cannot capture intra-image variability so a sec
 
 - **Local Adjustments:** Block-level color differences result from the global application of adjustments.
 
-## Installation with Pypi and use as a Python Library
-
 ---
+
+## Installation with Pypi and use as a Python Library
 
 ### 1. System requirements
 Before installing, ensure you have the following system-level prerequisites:
@@ -105,9 +105,9 @@ Example scripts are provided to verify a successful installation and help you ge
 
  - Global to local: [`docs/examples/example_global_to_local.py`](docs/examples/example_global_to_local.py)
 
-## Install and use as a QGIS Plugin
-
 ---
+
+## Install and use as a QGIS Plugin
 
 ### 1. [Download](https://qgis.org/download/) and install QGIS
 ### 2.	Open QGIS
@@ -115,16 +115,15 @@ Example scripts are provided to verify a successful installation and help you ge
 ### 4.	Find spectralmatch in the list, install, and enable it
 ### 5.	Find the plugin in the Processing Toolbox
 
+---
 
 ## Documentation
 
----
-
 Documentation is available at [spectralmatch.github.io/spectralmatch/](https://spectralmatch.github.io/spectralmatch/).
 
-## Contributing Guide
-
 ---
+
+## Contributing Guide
 
 We welcome all contributions the project! To get started:
 1. [Create an issue](https://github.com/spectralmatch/spectralmatch/issues/new) with the appropriate label describing the feature or improvement. Provide relevant context, desired timeline, any assistance needed, who will be responsible for the work, anticipated results, and any other details.
@@ -132,9 +131,9 @@ We welcome all contributions the project! To get started:
 3. Make your changes and add any necessary tests.
 4. Open a Pull Request against the main repository.
 
-## Developer Guide
-
 ---
+
+## Developer Guide
 
 1. **Clone the Repository**  
    ```bash
@@ -159,6 +158,8 @@ We welcome all contributions the project! To get started:
    pre-commit install
    pre-commit run --all-files
    ```
+
+---
 
 ## Testing
 
