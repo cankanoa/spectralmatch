@@ -17,6 +17,20 @@ def create_cloud_mask_with_omnicloudmask(
     output_mask_path,
     down_sample_m=None, # Down sample to 10 m if imagery has a spatial resolution < 10 m
     ):
+    """
+    Generates a cloud mask using OmniCloudMask from a multi-band image.
+
+    Args:
+    input_image_path (str): Path to the input image.
+    red_band_index (int): Index of the red band.
+    green_band_index (int): Index of the green band.
+    nir_band_index (int): Index of the NIR (or substitute blue) band.
+    output_mask_path (str): Path to save the output cloud mask GeoTIFF.
+    down_sample_m (float, optional): Target resolution (in meters) to downsample the input before processing.
+
+    Outputs:
+    Saves a single-band cloud mask GeoTIFF at the specified path.
+    """
 
     with rasterio.open(input_image_path) as src:
         if down_sample_m is not None:
@@ -71,47 +85,33 @@ def post_process_raster_cloud_mask_to_vector(
     polygon_buffering_in_map_units: dict = None,
     value_mapping: dict = None
     ) -> ogr.DataSource:
-
     """
-    Vectorizes a cloud mask raster and post-processes the polygons.
+    Converts a raster cloud mask to a vector layer with optional filtering, buffering, and merging.
 
-    Parameters:
-    input_image (str): Path to the input mask raster (e.g., a TIFF).
-    minimum_mask_size_percentile (float, optional): Percentile threshold; polygons whose area is below
-    this percentile are removed. If None, no area-based filtering is applied.
-    polygon_buffering_in_map_units (dict, optional): A dictionary mapping a polygon's 'value' attribute
-    (from vectorization) to a buffering distance in map units.
-    For example: {0: 5, 1: 30} buffers polygons with value 0 by 5 units and those with value 1 by 30 units.
-    If a polygon's value is not in the dictionary, its geometry remains unchanged.
-    value_mapping (dict, optional): A dictionary mapping original pixel values to new group values.
-    For example: {1: 1, 2: 1, 3: 1} clusters pixels with values 1, 2, and 3 together.
+    Args:
+    input_image_path (str): Path to the input cloud mask raster.
+    minimum_mask_size_percentile (float, optional): Percentile threshold to filter small polygons by area.
+    polygon_buffering_in_map_units (dict, optional): Mapping of raster values to buffer distances.
+    value_mapping (dict, optional): Mapping of original raster values to new values before vectorization.
 
     Returns:
-    ogr.DataSource: An in-memory GDAL vector datasource containing the processed polygon features.
+    ogr.DataSource: In-memory vector layer with merged and filtered polygons.
 
-    The function performs:
-    1. Reading the first band of the raster mask.
-    2. Optional value mapping.
-    3. Vectorization of the raster into polygons.
-    4. (Optional) Removal of polygons with areas below the given percentile.
-    5. Buffering for each polygon based on the provided dictionary.
-    6. Merging of overlapping polygons with the same "value".
-    7. Conversion into an in-memory GDAL vector datasource.
+    Outputs:
+    Returns an OGR DataSource containing post-processed vector features.
     """
-    # --- Step 1: Read the raster mask ---
+
     with rasterio.open(input_image_path) as src:
         raster_data = src.read(1)
         transform = src.transform
-        crs = src.crs  # Rasterio CRS (usually a pyproj CRS)
+        crs = src.crs
 
-    # --- Step 2: Apply optional value mapping ---
     if value_mapping is not None:
         mapped = np.copy(raster_data)
         for orig_value, new_value in value_mapping.items():
             mapped[raster_data == orig_value] = new_value
         raster_data = mapped
 
-    # --- Step 3: Vectorize the raster ---
     results = (
         {'properties': {'value': v}, 'geometry': s}
         for s, v in shapes(raster_data, transform=transform, connectivity=4)
@@ -121,17 +121,15 @@ def post_process_raster_cloud_mask_to_vector(
         print("No features were detected in the raster mask.")
         return None
 
-    # Create a GeoDataFrame from the vectorized features.
+
     gdf = gpd.GeoDataFrame.from_features(features, crs=crs)
 
-    # --- Step 4: Compute areas and, if requested, filter out small polygons ---
     gdf['area'] = gdf.geometry.area
     if minimum_mask_size_percentile is not None:
         area_threshold = np.percentile(gdf['area'], minimum_mask_size_percentile)
         print(f"Area threshold (at {minimum_mask_size_percentile}th percentile): {area_threshold:.2f}")
         gdf = gdf[gdf['area'] >= area_threshold].copy()
 
-    # --- Step 5: Apply buffering per polygon based on the provided dictionary ---
     if polygon_buffering_in_map_units is not None:
         gdf['geometry'] = gdf.apply(
             lambda row: row['geometry'].buffer(polygon_buffering_in_map_units.get(row['value'], 0))
@@ -139,8 +137,6 @@ def post_process_raster_cloud_mask_to_vector(
             axis=1
         )
 
-    # --- Step 6: Merge overlapping polygons by 'value' ---
-    # Group by the 'value' attribute and merge (union) polygons within each group.
     merged_features = []
     for val, group in gdf.groupby('value'):
         # Use union_all() to merge the geometries within the group.
@@ -159,7 +155,7 @@ def post_process_raster_cloud_mask_to_vector(
     # Create a new GeoDataFrame from merged features.
     gdf = gpd.GeoDataFrame(merged_features, crs=gdf.crs)
 
-    # --- Step 7: Convert the GeoDataFrame to an in-memory GDAL vector datasource ---
+
     ogr_driver = ogr.GetDriverByName("Memory")
     mem_ds = ogr_driver.CreateDataSource("in_memory")
 
@@ -185,7 +181,6 @@ def post_process_raster_cloud_mask_to_vector(
     # Here we add 'value' for example.
     field_defn = ogr.FieldDefn("value", ogr.OFTInteger)
     mem_layer.CreateField(field_defn)
-    # Optionally, add other fields (e.g. 'area') if desired.
 
     # Add each row from the GeoDataFrame as an OGR feature.
     for idx, row in gdf.iterrows():
@@ -200,11 +195,23 @@ def post_process_raster_cloud_mask_to_vector(
 
 
 def create_ndvi_mask(
-    input_image_path,
-    output_image_path,
-    nir_band=4,
-    red_band=3,
-   ):
+    input_image_path: str,
+    output_image_path: str,
+    nir_band: int=4,
+    red_band: int=3,
+    ):
+    """
+    Computes NDVI from a multi-band image and saves the result as a VRT raster.
+
+    Args:
+    input_image_path (str): Path to the input image with NIR and red bands.
+    output_image_path (str): Path to save the NDVI output as a VRT file.
+    nir_band (int, optional): Band index for NIR. Defaults to 4.
+    red_band (int, optional): Band index for red. Defaults to 3.
+
+    Returns:
+    str: Path to the saved NDVI output.
+    """
 
     ds = gdal.Open(input_image_path)
     nir = ds.GetRasterBand(nir_band).ReadAsArray().astype(np.float32)
@@ -225,9 +232,24 @@ def create_ndvi_mask(
 def post_process_threshold_to_vector(
     input_image_path: str,
     output_vector_path: str,
-    threshold_val,
-    operator_str="<=",
+    threshold_val: float | int,
+    operator_str: str="<=",
     ):
+    """
+    Converts a thresholded raster mask to a vector layer based on a comparison operator.
+
+    Args:
+    input_image_path (str): Path to the input single-band raster.
+    output_vector_path (str): Path to save the output vector file (GeoPackage).
+    threshold_val (float | int): Threshold value to apply.
+    operator_str (str, optional): Comparison operator ('<=', '>=', '<', '>', '=='). Defaults to '<='.
+
+    Returns:
+    str: Path to the saved vector file.
+
+    Raises:
+    ValueError: If an unsupported comparison operator is provided.
+    """
 
     ds = gdal.Open(input_image_path)
     band = ds.GetRasterBand(1)
