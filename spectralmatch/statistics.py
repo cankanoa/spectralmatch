@@ -7,12 +7,25 @@ import matplotlib.pyplot as plt
 
 
 def compare_image_spectral_profiles(
-    title,
-    xlabel,
-    ylabel,
-    input_image_dict,
-    output_figure_path,
+    input_image_dict: dict,
+    output_figure_path: str,
+    title: str,
+    xlabel: str,
+    ylabel: str,
     ):
+    """
+    Compares spectral profiles of multiple images by plotting median and interquartile ranges.
+
+    Args:
+    input_image_dict (dict): Mapping of labels to image file paths.
+    output_figure_path (str): Path to save the output plot.
+    title (str): Title of the plot.
+    xlabel (str): Label for the x-axis.
+    ylabel (str): Label for the y-axis.
+
+    Outputs:
+    Saves a spectral profile comparison figure to the specified path.
+    """
 
     plt.figure(figsize=(10, 6))
     colors = itertools.cycle(plt.cm.tab10.colors)  # Cycle through colors
@@ -54,9 +67,19 @@ def compare_image_spectral_profiles(
 
 
 def compare_image_spectral_profiles_pairs(
-    image_groups_dict,
-    output_figure_path
+    image_groups_dict: dict,
+    output_figure_path: str,
     ):
+    """
+    Plots paired spectral profiles for before-and-after image comparisons.
+
+    Args:
+    image_groups_dict (dict): Mapping of labels to image path pairs (before, after).
+    output_figure_path (str): Path to save the resulting comparison figure.
+
+    Outputs:
+    Saves a spectral comparison plot showing pre- and post-processing profiles.
+    """
 
     plt.figure(figsize=(10, 6))
     colors = itertools.cycle(plt.cm.tab10.colors)  # Cycle through colors
@@ -90,9 +113,22 @@ def compare_image_spectral_profiles_pairs(
 
 
 def compare_spatial_spectral_difference_average(
-    input_overlapping_image_pair_path,
-    output_image_path
+    input_overlapping_image_pair_path: list,
+    output_image_path: str,
     ):
+    """
+    Generates a heatmap of the average spectral difference between two overlapping images.
+
+    Args:
+    input_overlapping_image_pair_path (list): List containing exactly two image paths (pre and post).
+    output_image_path (str): Path to save the resulting difference visualization.
+
+    Outputs:
+    Saves a heatmap image illustrating spatial spectral differences.
+
+    Raises:
+    ValueError: If the list does not contain exactly two images or if image dimensions differ.
+    """
 
     if len(input_overlapping_image_pair_path) != 2:
         raise ValueError("Function requires exactly two image paths for comparison.")
@@ -123,24 +159,23 @@ def compare_spatial_spectral_difference_average(
 
 
 def compare_spatial_spectral_difference_individual_bands(
-    input_overlapping_image_pair_paths,
-    output_image_path
+    input_overlapping_image_pair_paths: tuple,
+    output_image_path: str,
     ):
-
     """
-    Compare two overlapping images on a per-band, per-pixel basis and produce
-    a color-coded difference visualization as a PNG image.
+    Creates a color-coded visualization of spectral differences per band between two overlapping images.
 
-    Parameters
-    ----------
-    input_overlapping_image_pair_paths : tuple or list of str
-    A tuple/list of exactly two file paths to the images to compare.
-    output_image_path : str
-    The file path (e.g. "output.png") where the resulting visualization will be saved as a PNG.
+    Args:
+    input_overlapping_image_pair_paths (tuple): Tuple of two image paths (before, after).
+    output_image_path (str): Path to save the RGB difference visualization as a PNG.
+
+    Outputs:
+    Saves a PNG image where color represents the dominant band of spectral difference and brightness indicates magnitude.
+
+    Raises:
+    ValueError: If input images differ in shape.
     """
-    # -------------------------------------------------------------------------
-    # 1. Read the input images as NumPy arrays
-    # -------------------------------------------------------------------------
+
     path1, path2 = input_overlapping_image_pair_paths
     with rasterio.open(path1) as src1, rasterio.open(path2) as src2:
         img1 = src1.read()  # shape: (num_bands, height, width)
@@ -154,21 +189,11 @@ def compare_spatial_spectral_difference_individual_bands(
 
         num_bands, height, width = img1.shape
 
-    # -------------------------------------------------------------------------
-    # 2. Compute absolute difference per band, per pixel
-    # -------------------------------------------------------------------------
     diff = np.abs(img1 - img2).astype(np.float32)  # (bands, height, width)
 
-    # -------------------------------------------------------------------------
-    # 3. Compute global min/max difference for optional brightness scaling
-    # -------------------------------------------------------------------------
     global_min = diff.min()  # often 0
     global_max = diff.max()
 
-    # -------------------------------------------------------------------------
-    # 4. Assign colors for each band
-    # -------------------------------------------------------------------------
-    # You can assign your own color palette. Below is a simple example:
     default_colors = [
         (1.0, 0.0, 0.0),  # Band 1 -> Red
         (0.0, 1.0, 0.0),  # Band 2 -> Green
@@ -179,14 +204,10 @@ def compare_spatial_spectral_difference_individual_bands(
         (1.0, 0.5, 0.0),  # Band 7 -> Orange
         # etc. Add more if needed
     ]
-    # If there are more bands than colors, cycle through them
+
     band_colors = [default_colors[i % len(default_colors)] for i in range(num_bands)]
     band_colors = np.array(band_colors, dtype=np.float32)  # shape: (num_bands, 3)
 
-    # -------------------------------------------------------------------------
-    # 5. Create the output visualization (RGB image) by blending band colors
-    #    according to each band’s fraction of the total difference.
-    # -------------------------------------------------------------------------
     # Initialize an empty float array for RGB: shape = (3, height, width)
     output_rgb = np.zeros((3, height, width), dtype=np.float32)
 
@@ -203,21 +224,12 @@ def compare_spatial_spectral_difference_individual_bands(
         # fraction_diff[b] is shape (height, width)
         output_rgb += fraction_diff[b] * band_colors[b].reshape(3, 1, 1)
 
-    # -------------------------------------------------------------------------
-    # 6. Optionally scale the brightness by overall difference magnitude
-    #    so pixels with greater differences appear brighter.
-    # -------------------------------------------------------------------------
+
     brightness = (sum_diff - global_min) / (global_max - global_min + 1e-10)
     brightness = np.clip(brightness, 0.0, 1.0)
     # Multiply the RGB by brightness
     output_rgb *= brightness.reshape(1, height, width)
 
-    # -------------------------------------------------------------------------
-    # 7. Convert to the format expected by matplotlib (height x width x 3)
-    #    and save as a PNG with matplotlib.
-    # -------------------------------------------------------------------------
-    # Currently: output_rgb has shape (3, height, width).
-    # We transpose to (height, width, 3).
     output_rgb_for_plot = np.transpose(output_rgb, (1, 2, 0))
 
     # Ensure the data is in 0..1

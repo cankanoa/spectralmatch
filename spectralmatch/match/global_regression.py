@@ -7,14 +7,35 @@ import sys
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import List, Optional, Tuple
+
+from numpy import ndarray
 from scipy.optimize import least_squares
 from rasterio.windows import Window
 from rasterio.transform import rowcol
 from rasterio.features import geometry_mask
+from rasterio.coords import BoundingBox
 
 from ..utils import _create_windows, _check_raster_requirements, _get_nodata_value, _choose_context
 _worker_dataset_cache = {}
 
+# def _mask_tile(
+#         src,
+#         geoms,
+#         window
+# ):
+#
+#     transform = src.window_transform(window)
+#     shape = (window.height, window.width)
+#
+#     mask_arr = geometry_mask(
+#         geometries=geoms,
+#         transform=transform,
+#         invert=True,
+#         out_shape=shape
+#     )
+#
+#     tile = src.read(window=window)
+#     return tile * mask_arr.astype(tile.dtype)
 
 def global_regression(
     input_image_paths: List[str],
@@ -31,34 +52,27 @@ def global_regression(
     max_workers: int | None = None,
     calc_dtype: str = "float32",
     ):
-
     """
-    Matches multiple input raster images to a common global statistical range using overlapping areas
-    for deriving statistical adjustments. Adjustments include mean and standard deviation factors, ensuring
-    the images are globally consistent in derived values.
-
-    This function processes pairs of overlapping raster images to compute statistical parameters, combines
-    global statistics for the entire collection of raster images, and generates output raster images with
-    adjusted pixel values. Additional features such as custom nodata values, vector mask usage, and tiling
-    are supported. The function allows parallel processing to optimize performance.
+    Performs global radiometric normalization across overlapping images using least squares regression.
 
     Args:
-    input_image_paths (List[str]): Paths to input raster images.
-    output_image_folder (str): Directory where adjusted images will be saved.
-    custom_mean_factor (float): Scale factor for mean adjustment, default is 1.0.
-    custom_std_factor (float): Scale factor for standard deviation adjustment, default is 1.0.
-    output_global_basename (str): Global basename suffix added to output image filenames, default is "_global".
-    vector_mask_path (Optional[str]): Path to a vector mask file used to limit processing, optional.
-    tile_width_and_height_tuple (Optional[Tuple[int, int]]): Tuple specifying tile width and height for tiled processing, optional.
-    debug_mode (bool): Enables debug mode when set to True, default is False.
-    custom_nodata_value (float | None): Override nodata value for rasters, optional.
-    parallel (bool): Enables parallel processing when set to True, default is False.
-    max_workers (int | None): Maximum number of workers for parallel processing, default is None.
-    calc_dtype (str): Data type used for intermediate calculations, default is "float32".
+    input_image_paths (List[str]): List of input raster image paths.
+    output_image_folder (str): Folder to save normalized output images.
+    custom_mean_factor (float, optional): Weight for mean constraints in regression. Defaults to 1.0.
+    custom_std_factor (float, optional): Weight for standard deviation constraints in regression. Defaults to 1.0.
+    output_global_basename (str, optional): Suffix for output filenames. Defaults to "_global".
+    vector_mask_path (Optional[str], optional): Optional mask to limit stats to specific areas. Defaults to None.
+    tile_width_and_height_tuple (Optional[Tuple[int, int]], optional): Tile size for block-wise processing. Defaults to None.
+    debug_mode (bool, optional): If True, prints debug information and constraint matrices. Defaults to False.
+    custom_nodata_value (float | None, optional): Overrides detected NoData value. Defaults to None.
+    parallel (bool, optional): Enables parallel tile processing. Defaults to False.
+    max_workers (int | None, optional): Number of worker processes. Defaults to CPU count.
+    calc_dtype (str, optional): Data type used for internal calculations. Defaults to "float32".
 
     Returns:
-    List[str]: Paths to the output adjusted raster images.
+    List[str]: Paths to the globally adjusted output raster images.
     """
+
     print("Start global matching")
 
     _check_raster_requirements(input_image_paths, debug_mode)
@@ -249,28 +263,24 @@ def _process_tile_global(
     band_idx: int,
     a: float,
     b: float,
-    nodata,
+    nodata: int | float,
     calc_dtype: str,
     debug_mode: bool,
     ):
-
     """
-    Processes a specific global tile within a dataset by applying a linear transformation
-    to the pixel values based on the provided coefficients while handling no-data values.
+    Applies a global linear transformation (scale and offset) to a raster tile.
 
     Args:
-    window (Window): The spatial window of the tile to be processed, representing a
-    portion of the dataset.
-    band_idx (int): The index of the band within the dataset to be processed.
-    a (float): The multiplier coefficient for the linear transformation.
-    b (float): The additive coefficient for the linear transformation.
-    nodata: The value representing no-data in the dataset. Pixels with this value
-    will not undergo processing.
+    window (Window): Rasterio window specifying the region to process.
+    band_idx (int): Band index to read and adjust.
+    a (float): Multiplicative factor for normalization.
+    b (float): Additive offset for normalization.
+    nodata (int | float): NoData value to ignore during processing.
+    calc_dtype (str): Data type to cast the block for computation.
+    debug_mode (bool): If True, prints processing information.
 
     Returns:
-    tuple[Window, numpy.ndarray]: A tuple where the first element is the processed
-    spatial window, and the second element is the transformed array of pixel values
-    for the given tile.
+    Tuple[Window, np.ndarray]: Window and the adjusted data block.
     """
 
     if debug_mode: print(f"Processing band: {band_idx}, window: {window}")
@@ -283,21 +293,24 @@ def _process_tile_global(
 
 
 def _print_constraint_system(
-    constraint_matrix,
-    adjustment_params,
-    observed_values_vector,
-    overlap_pairs,
-    num_images
+    constraint_matrix: ndarray,
+    adjustment_params: ndarray,
+    observed_values_vector: ndarray,
+    overlap_pairs: tuple,
+    num_images: int,
     ):
     """
-    Prints the constraint matrix, adjustment parameters, and observed values with labels.
+    Prints the constraint matrix system with labeled rows and columns for debugging regression inputs.
 
-    Parameters:
-    constraint_matrix (np.ndarray): The constraint matrix.
-    adjustment_params (np.ndarray): The adjustment parameters vector.
-    observed_values_vector (np.ndarray): The observed values vector.
-    overlap_pairs (list of tuple): List of (i, j) index pairs for overlaps.
-    num_images (int): Number of images involved.
+    Args:
+    constraint_matrix (ndarray): Coefficient matrix used in the regression system.
+    adjustment_params (ndarray): Solved adjustment parameters (regression output).
+    observed_values_vector (ndarray): Target values in the regression system.
+    overlap_pairs (tuple): Pairs of overlapping image indices used in constraints.
+    num_images (int): Total number of images in the system.
+
+    Returns:
+    None
     """
 
     np.set_printoptions(
@@ -345,26 +358,16 @@ def _print_constraint_system(
     np.savetxt(sys.stdout, observed_values_vector, fmt="%18.3f")
 
 def _find_overlaps(
-    image_bounds_dict
+    image_bounds_dict: dict,
     ):
     """
-    Determines overlaps between rectangular regions defined in a dictionary of image bounds.
-
-    Each rectangular region is defined by the minimum and maximum coordinates in both
-    x and y directions. The function identifies pairs of regions that overlap with each
-    other, based on their bounds. An overlap is determined if one rectangle's area
-    intersects with another.
+    Finds all pairs of images with overlapping spatial bounds.
 
     Args:
-    image_bounds_dict (dict): A dictionary where keys represent unique identifiers
-    for rectangular regions and values are dictionaries
-    containing the bounds of each region. The bounds
-    dictionary must include the keys 'x_min', 'x_max',
-    'y_min', and 'y_max'.
+    image_bounds_dict (dict): Dictionary mapping image indices to their rasterio bounds.
 
     Returns:
-    tuple: A tuple of tuples, where each nested tuple contains two keys from the
-    input dictionary representing regions that overlap with one another.
+    Tuple[Tuple[int, int], ...]: Pairs of image indices with overlapping extents.
     """
 
     overlaps = []
@@ -383,40 +386,40 @@ def _find_overlaps(
     return tuple(overlaps)
 
 
-def _mask_tile(
-    src,
-    geoms,
-    window
-    ):
-
-    transform = src.window_transform(window)
-    shape = (window.height, window.width)
-
-    mask_arr = geometry_mask(
-        geometries=geoms,
-        transform=transform,
-        invert=True,
-        out_shape=shape
-    )
-
-    tile = src.read(window=window)
-    return tile * mask_arr.astype(tile.dtype)
-
-
 def _calculate_overlap_stats(
-    num_bands,
-    input_image_path_i,
-    input_image_path_j,
-    id_i,
-    id_j,
-    bound_i,
-    bound_j,
-    nodata_i,
-    nodata_j,
-    vector_mask_path=None,
+    num_bands: int,
+    input_image_path_i: str,
+    input_image_path_j: str,
+    id_i: int,
+    id_j: int,
+    bound_i: BoundingBox,
+    bound_j: BoundingBox,
+    nodata_i: int | float,
+    nodata_j: int | float,
+    vector_mask_path: str=None,
     tile_width_and_height_tuple: tuple = None,
-    debug_mode=False,
+    debug_mode: bool =False,
     ):
+    """
+    Calculates mean, standard deviation, and valid pixel count for overlapping regions between two images.
+
+    Args:
+    num_bands (int): Number of bands in the images.
+    input_image_path_i (str): Path to the first image.
+    input_image_path_j (str): Path to the second image.
+    id_i (int): Index of the first image.
+    id_j (int): Index of the second image.
+    bound_i (BoundingBox): Spatial bounds of the first image.
+    bound_j (BoundingBox): Spatial bounds of the second image.
+    nodata_i (int | float): NoData value for the first image.
+    nodata_j (int | float): NoData value for the second image.
+    vector_mask_path (str, optional): Optional path to a vector mask for clipping. Defaults to None.
+    tile_width_and_height_tuple (tuple, optional): Optional tile size for chunked processing. Defaults to None.
+    debug_mode (bool, optional): If True, prints debug information. Defaults to False.
+
+    Returns:
+    dict: Nested dictionary of overlap statistics indexed by image ID and band.
+    """
 
     stats = {id_i: {id_j: {}}, id_j: {id_i: {}}}
 
@@ -504,12 +507,22 @@ def _calculate_overlap_stats(
 
 
 def _adjust_size_of_tiles_to_fit_bounds(
-    windows,
-    max_width,
-    max_height
+    windows: Window,
+    max_width: int,
+    max_height: int,
     ):
+    """
+    Adjusts a list of raster windows to ensure they fit within specified maximum bounds.
 
-    """Ensure no window extends beyond the target width/height (overlap bounds)."""
+    Args:
+    windows (Window): Iterable of rasterio Windows to be adjusted.
+    max_width (int): Maximum allowed width (in pixels).
+    max_height (int): Maximum allowed height (in pixels).
+
+    Returns:
+    list[Window]: List of adjusted windows clipped to the specified bounds.
+    """
+
     adjusted_windows = []
     for win in windows:
         new_width = min(win.width, max_width - win.col_off)
@@ -522,13 +535,27 @@ def _adjust_size_of_tiles_to_fit_bounds(
 
 
 def _calculate_whole_stats(
-    input_image_path,
-    nodata,
-    num_bands,
-    image_id,
-    vector_mask_path=None,
+    input_image_path: str,
+    nodata: int | float,
+    num_bands: int,
+    image_id: int,
+    vector_mask_path: str=None,
     tile_width_and_height_tuple: tuple = None,
     ):
+    """
+    Computes mean, standard deviation, and valid pixel count for each band in a single image.
+
+    Args:
+    input_image_path (str): Path to the input raster image.
+    nodata (int | float): NoData value to ignore during calculations.
+    num_bands (int): Number of bands to process.
+    image_id (int): Unique ID for the image, used as a key in the output.
+    vector_mask_path (str, optional): Optional vector mask path to restrict statistics to masked regions. Defaults to None.
+    tile_width_and_height_tuple (tuple, optional): Optional tile size for block-wise processing. Defaults to None.
+
+    Returns:
+    dict: Dictionary with image ID as key and per-band statistics as sub-dictionary.
+    """
 
     stats = {image_id: {}}
 
@@ -589,6 +616,16 @@ def _calculate_whole_stats(
 
 
 def _init_worker(img_path: str):
+    """
+    Initializes a global dataset cache for a worker process by opening a raster file.
+
+    Args:
+    img_path (str): Path to the image file to be opened and cached.
+
+    Returns:
+    None
+    """
+
     import rasterio
     global _worker_dataset_cache
     _worker_dataset_cache["ds"] = rasterio.open(img_path, "r")
