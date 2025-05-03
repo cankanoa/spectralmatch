@@ -101,9 +101,7 @@ pip install .
 
 ### 3. Run example code and modify for use (optional)
 
-Example scripts are provided to verify a successful installation and help you get started quickly:
-
- - Global to local: [`docs/examples/example_global_to_local.py`](docs/examples/example_global_to_local.py)
+Example scripts are provided to verify a successful installation and help you get started quickly at [`/docs/examples`](https://github.com/spectralmatch/spectralmatch/blob/main/docs/examples/)
 
 ---
 
