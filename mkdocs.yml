@@ -15,7 +15,11 @@ theme:
 
 plugins:
     - search
-    - mkdocstrings
+    - mkdocstrings:
+        handlers:
+          python:
+            options:
+                show_root_toc_entry: false
     - git-revision-date
     - mkdocs-jupyter:
         include_source: true
@@ -41,7 +45,7 @@ nav:
     - Examples:
         - "Match: Global to Local": examples/example_global_to_local.py
         - Create Cloud Mask: examples/mask_cloud.py
-        - Create Vegetation Mask: example/mask_ndvi.py
+        - Create Vegetation Mask: examples/mask_ndvi.py
         - Calculate Statistics for Figures: examples/calculate_statistics.py
         - Benchmark Mulithreading: examples/benchmark.py
     - API Reference:
