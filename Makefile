@@ -1,4 +1,5 @@
 MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+ENV_NAME = spectralmatch
 
 # Install
 install:
@@ -9,6 +10,18 @@ install-dev:
 
 install-docs:
 	pip install -e '$(MAKEFILE_DIR).[docs]'
+
+install-setup:
+	bash -c "\
+		conda create -y -n $(ENV_NAME) python>=3.10 gdal>=3.6 proj>=9.3 -c conda-forge && \
+		source $$(conda info --base)/etc/profile.d/conda.sh && \
+		conda activate $(ENV_NAME) && \
+		pip install . && \
+		pip install -e '.[dev]' && \
+		pip install -e '.[docs]' && \
+		pre-commit install && \
+		echo '✅ Setup complete. Environment \"$(ENV_NAME)\" is ready.' \
+	"
 
 
 # Docs
@@ -53,6 +66,8 @@ lint:
 test:
 	pytest $(MAKEFILE_DIR)
 
+test-file:
+	pytest $(path)
 
 # Cleanup
 clean:

@@ -66,10 +66,12 @@ However, global correction alone cannot capture intra-image variability so a sec
 - **Local Adjustments:** Block-level color differences result from the global application of adjustments.
 
 ---
+## Installation
+> Other installation instructions are available in the docs [here](https://spectralmatch.github.io/spectralmatch/installation/).
 
-## Installation as a Python Library
+### Installation as a Python Library
 
-### 1. System requirements
+#### 1. System requirements
 Before installing, ensure you have the following system-level prerequisites:
 
 - Python ≥ 3.10
@@ -82,7 +84,7 @@ conda create -n spectralmatch python>=3.10 gdal>=3.6 proj>=9.3 -c conda-forge
 conda activate spectralmatch
 ```
 
-### 2. Install spectralmatch (via PyPI or Source)
+#### 2. Install spectralmatch
 
 The recommended way to install is via [PyPI](https://pypi.org/). (this method installs only the core code as a library):
 
@@ -90,28 +92,17 @@ The recommended way to install is via [PyPI](https://pypi.org/). (this method in
 pip install spectralmatch
 ```
 
-
-Another install method is to clone the repository and confugure the dependancies with `pyproject.toml`. (this method installs the whole repository for development or customization):
-
-```bash
-git clone https://github.com/spectralmatch/spectralmatch.git
-cd spectralmatch
-pip install .
-```
-
-### 3. Run example code and modify for use (optional)
+#### 3. Run example code and modify for use (optional)
 
 Example scripts are provided to verify a successful installation and help you get started quickly at [`/docs/examples`](https://github.com/spectralmatch/spectralmatch/blob/main/docs/examples/)
 
----
+### Installation as a QGIS Plugin
 
-## Installation as a QGIS Plugin
-
-### 1. [Download](https://qgis.org/download/) and install QGIS
-### 2.	Open QGIS
-### 3.	Go to Plugins → Manage and Install Plugins…
-### 4.	Find spectralmatch in the list, install, and enable it
-### 5.	Find the plugin in the Processing Toolbox
+#### 1. [Download](https://qgis.org/download/) and install QGIS
+#### 2.	Open QGIS
+#### 3.	Go to Plugins → Manage and Install Plugins…
+#### 4.	Find spectralmatch in the list, install, and enable it
+#### 5.	Find the plugin in the Processing Toolbox
 
 ---
 
@@ -120,58 +111,9 @@ Example scripts are provided to verify a successful installation and help you ge
 Documentation is available at [spectralmatch.github.io/spectralmatch/](https://spectralmatch.github.io/spectralmatch/).
 
 ---
+## Development Guide
 
-## Contributing Guide
-
-We welcome all contributions the project! To get started:
-1. [Create an issue](https://github.com/spectralmatch/spectralmatch/issues/new) with the appropriate label describing the feature or improvement. Provide relevant context, desired timeline, any assistance needed, who will be responsible for the work, anticipated results, and any other details.
-2. [Fork the repository](https://github.com/spectralmatch/spectralmatch/fork) and create a new feature branch.
-3. Make your changes and add any necessary tests.
-4. Open a Pull Request against the main repository.
-
----
-
-## Developer Guide
-
-1. **Clone the Repository**  
-   ```bash
-   git clone https://github.com/spectralmatch/spectralmatch.git
-   cd spectralmatch
-   ```
-
-2. **Install with Dev andor Docs Extras**
-
-   There are additional `[dev]` and `[docs]` dependancies specified in `pyproject.toml`:
-
-   ```bash
-   pip install -e ".[dev]"   # for developer dependencies
-   pip install -e ".[docs]"  # for documentation dependencies
-   ```
-
-3. **Set Up Pre-commit Hooks**
-
-   To maintain code consistency before each commit install these hooks:
-
-   ```bash
-   pre-commit install
-   pre-commit run --all-files
-   ```
-
----
-
-## Testing
-
-[pytest](https://docs.pytest.org/) is used for testing. Tests will automatically be run when merging into main but they can also be run locally via:
-
-```bash
-pytest
-```
-
-Run tests for a specific file or function:
-
-```bash
-pytest folder/file.py
-```
+Development Guide is available at [spectralmatch.github.io/spectralmatch/development](https://spectralmatch.github.io/spectralmatch/development/)
 
 ---
 
