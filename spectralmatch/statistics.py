@@ -17,14 +17,14 @@ def compare_image_spectral_profiles(
     Compares spectral profiles of multiple images by plotting median and interquartile ranges.
 
     Args:
-    input_image_dict (dict): Mapping of labels to image file paths.
-    output_figure_path (str): Path to save the output plot.
-    title (str): Title of the plot.
-    xlabel (str): Label for the x-axis.
-    ylabel (str): Label for the y-axis.
+        input_image_dict (dict): Mapping of labels to image file paths.
+        output_figure_path (str): Path to save the output plot.
+        title (str): Title of the plot.
+        xlabel (str): Label for the x-axis.
+        ylabel (str): Label for the y-axis.
 
     Outputs:
-    Saves a spectral profile comparison figure to the specified path.
+        Saves a spectral profile comparison figure to the specified path.
     """
 
     plt.figure(figsize=(10, 6))
@@ -74,11 +74,11 @@ def compare_image_spectral_profiles_pairs(
     Plots paired spectral profiles for before-and-after image comparisons.
 
     Args:
-    image_groups_dict (dict): Mapping of labels to image path pairs (before, after).
-    output_figure_path (str): Path to save the resulting comparison figure.
+        image_groups_dict (dict): Mapping of labels to image path pairs (before, after).
+        output_figure_path (str): Path to save the resulting comparison figure.
 
     Outputs:
-    Saves a spectral comparison plot showing pre- and post-processing profiles.
+        Saves a spectral comparison plot showing pre- and post-processing profiles.
     """
 
     plt.figure(figsize=(10, 6))
@@ -120,14 +120,14 @@ def compare_spatial_spectral_difference_average(
     Generates a heatmap of the average spectral difference between two overlapping images.
 
     Args:
-    input_overlapping_image_pair_path (list): List containing exactly two image paths (pre and post).
-    output_image_path (str): Path to save the resulting difference visualization.
+        input_overlapping_image_pair_path (list): List containing exactly two image paths (pre and post).
+        output_image_path (str): Path to save the resulting difference visualization.
 
     Outputs:
-    Saves a heatmap image illustrating spatial spectral differences.
+        Saves a heatmap image illustrating spatial spectral differences.
 
     Raises:
-    ValueError: If the list does not contain exactly two images or if image dimensions differ.
+        ValueError: If the list does not contain exactly two images or if image dimensions differ.
     """
 
     if len(input_overlapping_image_pair_path) != 2:
@@ -166,14 +166,14 @@ def compare_spatial_spectral_difference_individual_bands(
     Creates a color-coded visualization of spectral differences per band between two overlapping images.
 
     Args:
-    input_overlapping_image_pair_paths (tuple): Tuple of two image paths (before, after).
-    output_image_path (str): Path to save the RGB difference visualization as a PNG.
+        input_overlapping_image_pair_paths (tuple): Tuple of two image paths (before, after).
+        output_image_path (str): Path to save the RGB difference visualization as a PNG.
 
     Outputs:
-    Saves a PNG image where color represents the dominant band of spectral difference and brightness indicates magnitude.
+        Saves a PNG image where color represents the dominant band of spectral difference and brightness indicates magnitude.
 
     Raises:
-    ValueError: If input images differ in shape.
+        ValueError: If input images differ in shape.
     """
 
     path1, path2 = input_overlapping_image_pair_paths

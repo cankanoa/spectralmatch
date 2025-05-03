@@ -19,14 +19,14 @@ def write_vector(
     Writes an in-memory OGR DataSource to disk in a supported vector format.
 
     Args:
-    mem_ds (ogr.DataSource): In-memory vector data source.
-    output_vector_path (str): Output file path (.shp, .geojson, or .gpkg).
+        mem_ds (ogr.DataSource): In-memory vector data source.
+        output_vector_path (str): Output file path (.shp, .geojson, or .gpkg).
 
     Returns:
-    None
+        None
 
     Raises:
-    RuntimeError: If no suitable driver is found or output creation fails.
+        RuntimeError: If no suitable driver is found or output creation fails.
     """
 
     driver_mapping = {
@@ -89,19 +89,19 @@ def merge_rasters(
     Merges multiple raster files into a single output mosaic with optional resampling and tiling.
 
     Args:
-    data_in (list): List of input raster file paths.
-    data_out (str): Output raster file path.
-    resampling_method (Literal["nearest", "bilinear", "cubic"], optional): Resampling method. Defaults to "nearest".
-    tap (bool, optional): Align output bounds to target-aligned pixels. Defaults to False.
-    resolution (Literal["highest", "lowest"], optional): Use resolution of highest or lowest input. Defaults to "highest".
-    tile_width_and_height_tuple (tuple[int, int], optional): Tile size for block-wise processing. Defaults to None.
-    debug_mode (bool, optional): If True, prints debug messages. Defaults to False.
+        data_in (list): List of input raster file paths.
+        data_out (str): Output raster file path.
+        resampling_method (Literal["nearest", "bilinear", "cubic"], optional): Resampling method. Defaults to "nearest".
+        tap (bool, optional): Align output bounds to target-aligned pixels. Defaults to False.
+        resolution (Literal["highest", "lowest"], optional): Use resolution of highest or lowest input. Defaults to "highest".
+        tile_width_and_height_tuple (tuple[int, int], optional): Tile size for block-wise processing. Defaults to None.
+        debug_mode (bool, optional): If True, prints debug messages. Defaults to False.
 
     Returns:
-    None
+        None
 
     Outputs:
-    Saves a merged GeoTIFF raster to the specified path.
+        Saves a merged GeoTIFF raster to the specified path.
     """
 
     if not os.path.exists(os.path.dirname(data_out)): os.makedirs(os.path.dirname(data_out))
@@ -189,12 +189,12 @@ def align_rasters(
     Aligns a list of rasters to a common grid using the highest input resolution.
 
     Args:
-    input_image_paths (list[str]): List of input raster file paths.
-    resample_method (str, optional): Resampling method (e.g., "bilinear", "nearest", "average"). Defaults to "bilinear".
-    tap (bool, optional): Align to target-aligned pixels (TAP). Defaults to True.
+        input_image_paths (list[str]): List of input raster file paths.
+        resample_method (str, optional): Resampling method (e.g., "bilinear", "nearest", "average"). Defaults to "bilinear".
+        tap (bool, optional): Align to target-aligned pixels (TAP). Defaults to True.
 
     Returns:
-    list[str]: List of file paths to the aligned raster outputs (in a temporary directory).
+        list[str]: List of file paths to the aligned raster outputs (in a temporary directory).
     """
 
     temp_dir = tempfile.mkdtemp()  # Persistent temp directory

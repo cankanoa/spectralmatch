@@ -21,15 +21,15 @@ def create_cloud_mask_with_omnicloudmask(
     Generates a cloud mask using OmniCloudMask from a multi-band image.
 
     Args:
-    input_image_path (str): Path to the input image.
-    red_band_index (int): Index of the red band.
-    green_band_index (int): Index of the green band.
-    nir_band_index (int): Index of the NIR (or substitute blue) band.
-    output_mask_path (str): Path to save the output cloud mask GeoTIFF.
-    down_sample_m (float, optional): Target resolution (in meters) to downsample the input before processing.
+        input_image_path (str): Path to the input image.
+        red_band_index (int): Index of the red band.
+        green_band_index (int): Index of the green band.
+        nir_band_index (int): Index of the NIR (or substitute blue) band.
+        output_mask_path (str): Path to save the output cloud mask GeoTIFF.
+        down_sample_m (float, optional): Target resolution (in meters) to downsample the input before processing.
 
     Outputs:
-    Saves a single-band cloud mask GeoTIFF at the specified path.
+        Saves a single-band cloud mask GeoTIFF at the specified path.
     """
 
     with rasterio.open(input_image_path) as src:
@@ -89,16 +89,16 @@ def post_process_raster_cloud_mask_to_vector(
     Converts a raster cloud mask to a vector layer with optional filtering, buffering, and merging.
 
     Args:
-    input_image_path (str): Path to the input cloud mask raster.
-    minimum_mask_size_percentile (float, optional): Percentile threshold to filter small polygons by area.
-    polygon_buffering_in_map_units (dict, optional): Mapping of raster values to buffer distances.
-    value_mapping (dict, optional): Mapping of original raster values to new values before vectorization.
+        input_image_path (str): Path to the input cloud mask raster.
+        minimum_mask_size_percentile (float, optional): Percentile threshold to filter small polygons by area.
+        polygon_buffering_in_map_units (dict, optional): Mapping of raster values to buffer distances.
+        value_mapping (dict, optional): Mapping of original raster values to new values before vectorization.
 
     Returns:
-    ogr.DataSource: In-memory vector layer with merged and filtered polygons.
+        ogr.DataSource: In-memory vector layer with merged and filtered polygons.
 
     Outputs:
-    Returns an OGR DataSource containing post-processed vector features.
+        Returns an OGR DataSource containing post-processed vector features.
     """
 
     with rasterio.open(input_image_path) as src:
@@ -204,13 +204,13 @@ def create_ndvi_mask(
     Computes NDVI from a multi-band image and saves the result as a VRT raster.
 
     Args:
-    input_image_path (str): Path to the input image with NIR and red bands.
-    output_image_path (str): Path to save the NDVI output as a VRT file.
-    nir_band (int, optional): Band index for NIR. Defaults to 4.
-    red_band (int, optional): Band index for red. Defaults to 3.
+        input_image_path (str): Path to the input image with NIR and red bands.
+        output_image_path (str): Path to save the NDVI output as a VRT file.
+        nir_band (int, optional): Band index for NIR. Defaults to 4.
+        red_band (int, optional): Band index for red. Defaults to 3.
 
     Returns:
-    str: Path to the saved NDVI output.
+        str: Path to the saved NDVI output.
     """
 
     ds = gdal.Open(input_image_path)
@@ -239,16 +239,16 @@ def post_process_threshold_to_vector(
     Converts a thresholded raster mask to a vector layer based on a comparison operator.
 
     Args:
-    input_image_path (str): Path to the input single-band raster.
-    output_vector_path (str): Path to save the output vector file (GeoPackage).
-    threshold_val (float | int): Threshold value to apply.
-    operator_str (str, optional): Comparison operator ('<=', '>=', '<', '>', '=='). Defaults to '<='.
+        input_image_path (str): Path to the input single-band raster.
+        output_vector_path (str): Path to save the output vector file (GeoPackage).
+        threshold_val (float | int): Threshold value to apply.
+        operator_str (str, optional): Comparison operator ('<=', '>=', '<', '>', '=='). Defaults to '<='.
 
     Returns:
-    str: Path to the saved vector file.
+        str: Path to the saved vector file.
 
     Raises:
-    ValueError: If an unsupported comparison operator is provided.
+        ValueError: If an unsupported comparison operator is provided.
     """
 
     ds = gdal.Open(input_image_path)

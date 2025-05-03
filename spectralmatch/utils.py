@@ -15,14 +15,14 @@ def _check_raster_requirements(
     Validates a list of raster image paths to ensure they are compatible for processing.
 
     Args:
-    input_image_paths (list[str]): Paths to input raster images.
-    debug_mode (bool): If True, prints debug messages.
+        input_image_paths (list[str]): Paths to input raster images.
+        debug_mode (bool): If True, prints debug messages.
 
     Returns:
-    bool: True if all input images meet geospatial and metadata consistency checks.
+        bool: True if all input images meet geospatial and metadata consistency checks.
 
     Raises:
-    ValueError: If any image lacks a geotransform, has a mismatched CRS, band count, or nodata value.
+        ValueError: If any image lacks a geotransform, has a mismatched CRS, band count, or nodata value.
     """
 
     if debug_mode: print(f"Found {len(input_image_paths)} images")
@@ -57,14 +57,14 @@ def _get_nodata_value(
     Determines the NoData value to use from a list of raster images or a custom override.
 
     Args:
-    input_image_paths (List[str]): List of raster image paths.
-    custom_nodata_value (float, optional): User-defined NoData value.
+        input_image_paths (List[str]): List of raster image paths.
+        custom_nodata_value (float, optional): User-defined NoData value.
 
     Returns:
-    float | None: The determined NoData value, or None if unavailable.
+        float | None: The determined NoData value, or None if unavailable.
 
     Warnings:
-    Emits a warning if a custom value overrides the image value or if no value is found.
+        Emits a warning if a custom value overrides the image value or if no value is found.
     """
 
     try:
@@ -94,13 +94,13 @@ def _create_windows(
     Generates tiled windows across a raster based on specified dimensions.
 
     Args:
-    width (int): Total width of the raster.
-    height (int): Total height of the raster.
-    tile_width (int): Width of each tile.
-    tile_height (int): Height of each tile.
+        width (int): Total width of the raster.
+        height (int): Total height of the raster.
+        tile_width (int): Width of each tile.
+        tile_height (int): Height of each tile.
 
     Yields:
-    rasterio.windows.Window: A window representing a tile's position and size.
+        rasterio.windows.Window: A window representing a tile's position and size.
     """
 
     for row_off in range(0, height, tile_height):
@@ -117,10 +117,10 @@ def _choose_context(
     Selects the optimal multiprocessing context based on platform and preference.
 
     Args:
-    prefer_fork (bool): If True, prefers 'fork' context when available. Defaults to True.
+        prefer_fork (bool): If True, prefers 'fork' context when available. Defaults to True.
 
     Returns:
-    multiprocessing.context.BaseContext: The selected multiprocessing context.
+        multiprocessing.context.BaseContext: The selected multiprocessing context.
     """
 
     if prefer_fork and sys.platform.startswith("linux"):

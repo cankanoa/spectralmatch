@@ -56,21 +56,21 @@ def global_regression(
     Performs global radiometric normalization across overlapping images using least squares regression.
 
     Args:
-    input_image_paths (List[str]): List of input raster image paths.
-    output_image_folder (str): Folder to save normalized output images.
-    custom_mean_factor (float, optional): Weight for mean constraints in regression. Defaults to 1.0.
-    custom_std_factor (float, optional): Weight for standard deviation constraints in regression. Defaults to 1.0.
-    output_global_basename (str, optional): Suffix for output filenames. Defaults to "_global".
-    vector_mask_path (Optional[str], optional): Optional mask to limit stats to specific areas. Defaults to None.
-    tile_width_and_height_tuple (Optional[Tuple[int, int]], optional): Tile size for block-wise processing. Defaults to None.
-    debug_mode (bool, optional): If True, prints debug information and constraint matrices. Defaults to False.
-    custom_nodata_value (float | None, optional): Overrides detected NoData value. Defaults to None.
-    parallel (bool, optional): Enables parallel tile processing. Defaults to False.
-    max_workers (int | None, optional): Number of worker processes. Defaults to CPU count.
-    calc_dtype (str, optional): Data type used for internal calculations. Defaults to "float32".
+        input_image_paths (List[str]): List of input raster image paths.
+        output_image_folder (str): Folder to save normalized output images.
+        custom_mean_factor (float, optional): Weight for mean constraints in regression. Defaults to 1.0.
+        custom_std_factor (float, optional): Weight for standard deviation constraints in regression. Defaults to 1.0.
+        output_global_basename (str, optional): Suffix for output filenames. Defaults to "_global".
+        vector_mask_path (Optional[str], optional): Optional mask to limit stats to specific areas. Defaults to None.
+        tile_width_and_height_tuple (Optional[Tuple[int, int]], optional): Tile size for block-wise processing. Defaults to None.
+        debug_mode (bool, optional): If True, prints debug information and constraint matrices. Defaults to False.
+        custom_nodata_value (float | None, optional): Overrides detected NoData value. Defaults to None.
+        parallel (bool, optional): Enables parallel tile processing. Defaults to False.
+        max_workers (int | None, optional): Number of worker processes. Defaults to CPU count.
+        calc_dtype (str, optional): Data type used for internal calculations. Defaults to "float32".
 
     Returns:
-    List[str]: Paths to the globally adjusted output raster images.
+        List[str]: Paths to the globally adjusted output raster images.
     """
 
     print("Start global matching")
@@ -271,16 +271,16 @@ def _process_tile_global(
     Applies a global linear transformation (scale and offset) to a raster tile.
 
     Args:
-    window (Window): Rasterio window specifying the region to process.
-    band_idx (int): Band index to read and adjust.
-    a (float): Multiplicative factor for normalization.
-    b (float): Additive offset for normalization.
-    nodata (int | float): NoData value to ignore during processing.
-    calc_dtype (str): Data type to cast the block for computation.
-    debug_mode (bool): If True, prints processing information.
+        window (Window): Rasterio window specifying the region to process.
+        band_idx (int): Band index to read and adjust.
+        a (float): Multiplicative factor for normalization.
+        b (float): Additive offset for normalization.
+        nodata (int | float): NoData value to ignore during processing.
+        calc_dtype (str): Data type to cast the block for computation.
+        debug_mode (bool): If True, prints processing information.
 
     Returns:
-    Tuple[Window, np.ndarray]: Window and the adjusted data block.
+        Tuple[Window, np.ndarray]: Window and the adjusted data block.
     """
 
     if debug_mode: print(f"Processing band: {band_idx}, window: {window}")
@@ -303,14 +303,14 @@ def _print_constraint_system(
     Prints the constraint matrix system with labeled rows and columns for debugging regression inputs.
 
     Args:
-    constraint_matrix (ndarray): Coefficient matrix used in the regression system.
-    adjustment_params (ndarray): Solved adjustment parameters (regression output).
-    observed_values_vector (ndarray): Target values in the regression system.
-    overlap_pairs (tuple): Pairs of overlapping image indices used in constraints.
-    num_images (int): Total number of images in the system.
+        constraint_matrix (ndarray): Coefficient matrix used in the regression system.
+        adjustment_params (ndarray): Solved adjustment parameters (regression output).
+        observed_values_vector (ndarray): Target values in the regression system.
+        overlap_pairs (tuple): Pairs of overlapping image indices used in constraints.
+        num_images (int): Total number of images in the system.
 
     Returns:
-    None
+        None
     """
 
     np.set_printoptions(
@@ -364,10 +364,10 @@ def _find_overlaps(
     Finds all pairs of images with overlapping spatial bounds.
 
     Args:
-    image_bounds_dict (dict): Dictionary mapping image indices to their rasterio bounds.
+        image_bounds_dict (dict): Dictionary mapping image indices to their rasterio bounds.
 
     Returns:
-    Tuple[Tuple[int, int], ...]: Pairs of image indices with overlapping extents.
+        Tuple[Tuple[int, int], ...]: Pairs of image indices with overlapping extents.
     """
 
     overlaps = []
@@ -404,21 +404,21 @@ def _calculate_overlap_stats(
     Calculates mean, standard deviation, and valid pixel count for overlapping regions between two images.
 
     Args:
-    num_bands (int): Number of bands in the images.
-    input_image_path_i (str): Path to the first image.
-    input_image_path_j (str): Path to the second image.
-    id_i (int): Index of the first image.
-    id_j (int): Index of the second image.
-    bound_i (BoundingBox): Spatial bounds of the first image.
-    bound_j (BoundingBox): Spatial bounds of the second image.
-    nodata_i (int | float): NoData value for the first image.
-    nodata_j (int | float): NoData value for the second image.
-    vector_mask_path (str, optional): Optional path to a vector mask for clipping. Defaults to None.
-    tile_width_and_height_tuple (tuple, optional): Optional tile size for chunked processing. Defaults to None.
-    debug_mode (bool, optional): If True, prints debug information. Defaults to False.
+        num_bands (int): Number of bands in the images.
+        input_image_path_i (str): Path to the first image.
+        input_image_path_j (str): Path to the second image.
+        id_i (int): Index of the first image.
+        id_j (int): Index of the second image.
+        bound_i (BoundingBox): Spatial bounds of the first image.
+        bound_j (BoundingBox): Spatial bounds of the second image.
+        nodata_i (int | float): NoData value for the first image.
+        nodata_j (int | float): NoData value for the second image.
+        vector_mask_path (str, optional): Optional path to a vector mask for clipping. Defaults to None.
+        tile_width_and_height_tuple (tuple, optional): Optional tile size for chunked processing. Defaults to None.
+        debug_mode (bool, optional): If True, prints debug information. Defaults to False.
 
     Returns:
-    dict: Nested dictionary of overlap statistics indexed by image ID and band.
+        dict: Nested dictionary of overlap statistics indexed by image ID and band.
     """
 
     stats = {id_i: {id_j: {}}, id_j: {id_i: {}}}
@@ -515,12 +515,12 @@ def _adjust_size_of_tiles_to_fit_bounds(
     Adjusts a list of raster windows to ensure they fit within specified maximum bounds.
 
     Args:
-    windows (Window): Iterable of rasterio Windows to be adjusted.
-    max_width (int): Maximum allowed width (in pixels).
-    max_height (int): Maximum allowed height (in pixels).
+        windows (Window): Iterable of rasterio Windows to be adjusted.
+        max_width (int): Maximum allowed width (in pixels).
+        max_height (int): Maximum allowed height (in pixels).
 
     Returns:
-    list[Window]: List of adjusted windows clipped to the specified bounds.
+        list[Window]: List of adjusted windows clipped to the specified bounds.
     """
 
     adjusted_windows = []
@@ -546,15 +546,15 @@ def _calculate_whole_stats(
     Computes mean, standard deviation, and valid pixel count for each band in a single image.
 
     Args:
-    input_image_path (str): Path to the input raster image.
-    nodata (int | float): NoData value to ignore during calculations.
-    num_bands (int): Number of bands to process.
-    image_id (int): Unique ID for the image, used as a key in the output.
-    vector_mask_path (str, optional): Optional vector mask path to restrict statistics to masked regions. Defaults to None.
-    tile_width_and_height_tuple (tuple, optional): Optional tile size for block-wise processing. Defaults to None.
+        input_image_path (str): Path to the input raster image.
+        nodata (int | float): NoData value to ignore during calculations.
+        num_bands (int): Number of bands to process.
+        image_id (int): Unique ID for the image, used as a key in the output.
+        vector_mask_path (str, optional): Optional vector mask path to restrict statistics to masked regions. Defaults to None.
+        tile_width_and_height_tuple (tuple, optional): Optional tile size for block-wise processing. Defaults to None.
 
     Returns:
-    dict: Dictionary with image ID as key and per-band statistics as sub-dictionary.
+        dict: Dictionary with image ID as key and per-band statistics as sub-dictionary.
     """
 
     stats = {image_id: {}}
@@ -620,10 +620,10 @@ def _init_worker(img_path: str):
     Initializes a global dataset cache for a worker process by opening a raster file.
 
     Args:
-    img_path (str): Path to the image file to be opened and cached.
+        img_path (str): Path to the image file to be opened and cached.
 
     Returns:
-    None
+        None
     """
 
     import rasterio
