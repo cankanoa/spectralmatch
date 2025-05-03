@@ -11,7 +11,7 @@ theme:
     features:
         - navigation.instant
         - search.highlight
-    custom_dir: overrides
+    custom_dir: docs/overrides
 
 plugins:
     - search
