@@ -73,4 +73,4 @@ pip install -e ".[dev]"   # developer dependencies
 pip install -e ".[docs]"  # documentation dependencies
 ```
 
-### 3. Read the [Development Guide](https://spectralmatch.github.io/spectralmatch/development/) if you with to Contribute
+### 3. Read the [Development Guide](https://spectralmatch.github.io/spectralmatch/development/) if you aim to contribute

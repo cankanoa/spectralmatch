@@ -1,4 +1,4 @@
-# spectralmatch: A toolkit for performing Relative Radiometric Normalization, with utilities for generating seamlines, cloud masks, Pseudo-Invariant Features, and statistics
+# spectralmatch: A toolkit to perform Relative Radiometric Normalization, with utilities for generating seamlines, cloud masks, Pseudo-Invariant Features, and statistics
 
 [![Your-License-Badge](https://img.shields.io/badge/License-MIT-green)](#)
 [![codecov](https://codecov.io/gh/cankanoa/spatialmatch/graph/badge.svg?token=OKAM0BUUNS)](https://codecov.io/gh/cankanoa/spatialmatch)
@@ -69,6 +69,14 @@ However, global correction alone cannot capture intra-image variability so a sec
 ## Installation
 > Other installation instructions are available in the docs [here](https://spectralmatch.github.io/spectralmatch/installation/).
 
+### Installation as a QGIS Plugin
+
+#### 1. [Download](https://qgis.org/download/) and install QGIS
+#### 2.	Open QGIS
+#### 3.	Go to Plugins → Manage and Install Plugins…
+#### 4.	Find spectralmatch in the list, install, and enable it
+#### 5.	Find the plugin in the Processing Toolbox
+
 ### Installation as a Python Library
 
 #### 1. System requirements
@@ -96,14 +104,6 @@ pip install spectralmatch
 
 Example scripts are provided to verify a successful installation and help you get started quickly at [`/docs/examples`](https://github.com/spectralmatch/spectralmatch/blob/main/docs/examples/)
 
-### Installation as a QGIS Plugin
-
-#### 1. [Download](https://qgis.org/download/) and install QGIS
-#### 2.	Open QGIS
-#### 3.	Go to Plugins → Manage and Install Plugins…
-#### 4.	Find spectralmatch in the list, install, and enable it
-#### 5.	Find the plugin in the Processing Toolbox
-
 ---
 
 ## Documentation
@@ -119,4 +119,4 @@ Development Guide is available at [spectralmatch.github.io/spectralmatch/develop
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE.md) for details.
+This project is licensed under the MIT License. See [LICENSE](https://github.com/spectralmatch/spectralmatch/blob/main/LICENSE) for details.

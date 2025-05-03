@@ -9,6 +9,7 @@ This project provides a [Makefile](https://github.com/spectralmatch/spectralmatc
 ## Contributing Instructions
 
 We welcome all contributions the project! To get started:
+
 1. [Create an issue](https://github.com/spectralmatch/spectralmatch/issues/new) with the appropriate label describing the feature or improvement. Provide relevant context, desired timeline, any assistance needed, who will be responsible for the work, anticipated results, and any other details.
 
 2. [Fork the repository](https://github.com/spectralmatch/spectralmatch/fork) and create a new feature branch.
@@ -86,7 +87,7 @@ make lint
 make test
 ```
 
-To test a individual folder file:
+To test a individual folder or file:
 ```bash
 make test-file path=path/to/folder_or_file
 ```
