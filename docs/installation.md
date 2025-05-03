@@ -1,13 +1,5 @@
 # Installation Methods
 
-## Install and use as a QGIS Plugin
-
-### 1. [Download](https://qgis.org/download/) and install QGIS
-### 2.	Open QGIS
-### 3.	Go to Plugins → Manage and Install Plugins…
-### 4.	Find spectralmatch in the list, install, and enable it
-### 5.	Find the plugin in the Processing Toolbox
-
 ## Installation with Pypi and use as a Python Library
 
 ### 1. System requirements
@@ -43,3 +35,11 @@ pip install .
 ### 3. Run example code and modify for use (optional)
 
 Example scripts are provided to verify a successful installation and help you get started quickly at [`/docs/examples`](https://github.com/spectralmatch/spectralmatch/blob/main/docs/examples/)
+
+## Install and use as a QGIS Plugin
+
+### 1. [Download](https://qgis.org/download/) and install QGIS
+### 2.	Open QGIS
+### 3.	Go to Plugins → Manage and Install Plugins…
+### 4.	Find spectralmatch in the list, install, and enable it
+### 5.	Find the plugin in the Processing Toolbox

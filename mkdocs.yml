@@ -42,6 +42,7 @@ nav:
     - Installation: installation.md
     - Changelog: https://github.com/spectralmatch/spectralmatch/releases
     - Report Issues: https://github.com/spectralmatch/spectralmatch/issues
+    - Development Guide: development.md
     - Examples:
         - "Match: Global to Local": examples/example_global_to_local.py
         - Create Cloud Mask: examples/mask_cloud.py
