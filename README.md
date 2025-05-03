@@ -67,7 +67,7 @@ However, global correction alone cannot capture intra-image variability so a sec
 
 ---
 
-## Installation with Pypi and use as a Python Library
+## Installation as a Python Library
 
 ### 1. System requirements
 Before installing, ensure you have the following system-level prerequisites:
@@ -105,7 +105,7 @@ Example scripts are provided to verify a successful installation and help you ge
 
 ---
 
-## Install and use as a QGIS Plugin
+## Installation as a QGIS Plugin
 
 ### 1. [Download](https://qgis.org/download/) and install QGIS
 ### 2.	Open QGIS
