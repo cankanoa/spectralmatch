@@ -1,28 +1,30 @@
+MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+
 # Install
 install:
-	pip install .
+	pip install $(MAKEFILE_DIR).
 
 install-dev:
-	pip install -e '.[dev]'
+	pip install -e '$(MAKEFILE_DIR).[dev]'
 
 install-docs:
-	pip install -e '.[docs]'
+	pip install -e '$(MAKEFILE_DIR).[docs]'
 
 
 # Docs
 docs-serve:
-	mkdir -p docs/images
-	cp -r images/* docs/images/
-	mkdocs serve -a localhost:8001
+	mkdir -p $(MAKEFILE_DIR)docs/images
+	cp -r $(MAKEFILE_DIR)images/* $(MAKEFILE_DIR)docs/images/
+	mkdocs serve -a localhost:8000
 
 docs-build:
-	mkdir -p docs/images
-	cp -r images/* docs/images/
+	mkdir -p $(MAKEFILE_DIR)docs/images
+	cp -r $(MAKEFILE_DIR)images/* $(MAKEFILE_DIR)docs/images/
 	mkdocs build
 
 docs-deploy:
-	mkdir -p docs/images
-	cp -r images/* docs/images/
+	mkdir -p $(MAKEFILE_DIR)docs/images
+	cp -r $(MAKEFILE_DIR)images/* $(MAKEFILE_DIR)docs/images/
 	mkdocs gh-deploy
 
 
@@ -38,21 +40,26 @@ tag:
 
 # Code formatting
 format:
-	black .
+	black $(MAKEFILE_DIR).
 
 check-format:
-	black --check .
+	black --check $(MAKEFILE_DIR).
 
 lint:
-	ruff check .
+	ruff check $(MAKEFILE_DIR).
 
 
 # Testing
 test:
-	pytest
+	pytest $(MAKEFILE_DIR)
 
 
 # Cleanup
 clean:
-	rm -rf build dist *.egg-info __pycache__ .pytest_cache docs/examples/example_data/Output site
-
+	rm -rf $(MAKEFILE_DIR)build \
+	       $(MAKEFILE_DIR)dist \
+	       $(MAKEFILE_DIR)*.egg-info \
+	       $(MAKEFILE_DIR)__pycache__ \
+	       $(MAKEFILE_DIR).pytest_cache \
+	       $(MAKEFILE_DIR)docs/examples/example_data/Output \
+	       $(MAKEFILE_DIR)site
