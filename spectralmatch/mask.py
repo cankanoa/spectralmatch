@@ -199,7 +199,7 @@ def create_ndvi_mask(
     output_image_path: str,
     nir_band: int=4,
     red_band: int=3,
-    ):
+    )-> str:
     """
     Computes NDVI from a multi-band image and saves the result as a VRT raster.
 
@@ -234,7 +234,7 @@ def post_process_threshold_to_vector(
     output_vector_path: str,
     threshold_val: float | int,
     operator_str: str="<=",
-    ):
+    ) -> str:
     """
     Converts a thresholded raster mask to a vector layer based on a comparison operator.
 

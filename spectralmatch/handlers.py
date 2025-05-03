@@ -97,9 +97,6 @@ def merge_rasters(
         tile_width_and_height_tuple (tuple[int, int], optional): Tile size for block-wise processing. Defaults to None.
         debug_mode (bool, optional): If True, prints debug messages. Defaults to False.
 
-    Returns:
-        None
-
     Outputs:
         Saves a merged GeoTIFF raster to the specified path.
     """

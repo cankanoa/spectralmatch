@@ -51,7 +51,7 @@ def global_regression(
     parallel: bool = False,
     max_workers: int | None = None,
     calc_dtype: str = "float32",
-    ):
+    ) -> list:
     """
     Performs global radiometric normalization across overlapping images using least squares regression.
 

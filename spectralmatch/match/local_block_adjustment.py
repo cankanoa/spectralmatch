@@ -33,7 +33,7 @@ def local_block_adjustment(
     correction_method: Literal["gamma", "linear"] = "gamma",
     parallel: bool = False,
     max_workers: int | None = None,
-    ):
+    )-> list:
     """
     Performs local radiometric adjustment on a set of raster images using block-based statistics.
 
