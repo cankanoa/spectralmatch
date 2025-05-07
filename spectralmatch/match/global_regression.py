@@ -73,7 +73,7 @@ def global_regression(
         List[str]: Paths to the globally adjusted output raster images.
     """
 
-    print("Start global matching")
+    print("Start global regression")
 
     _check_raster_requirements(input_image_paths, debug_mode)
 
@@ -255,7 +255,7 @@ def global_regression(
                 if parallel:
                     pool.shutdown()
 
-    print("Finished global matching")
+    print("Finished global regression")
     return out_paths
 
 def _process_tile_global(
