@@ -1,12 +1,12 @@
-# Development Guide
+# Contributing Guide
 
-This project provides a [Makefile](https://github.com/spectralmatch/spectralmatch/blob/main/Makefile) to streamline development tasks. Makefiles allow you to automate and organize common tasks, in this case to help serve and deploy documentation, manage version tags, format and lint code, and run tests.
+This project includes a [Makefile](https://github.com/spectralmatch/spectralmatch/blob/main/Makefile) to streamline development tasks. Makefiles allow you to automate and organize common tasks, in this case to help serve and deploy documentation, manage version tags, format and lint code, and run tests.
 
 > **Installation instructions are on their own [page](installation.md)**
 
 ---
 
-## Contributing Instructions
+## Collaboration Instructions
 
 We welcome all contributions the project! To get started:
 

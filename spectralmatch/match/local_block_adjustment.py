@@ -57,7 +57,7 @@ def local_block_adjustment(
         List[str]: Paths to the locally adjusted output raster images.
     """
 
-    print("Start local matching")
+    print("Start local block adjustment")
     _check_raster_requirements(input_image_paths, debug_mode)
 
     nodata_val = _get_nodata_value(input_image_paths, custom_nodata_value)
@@ -197,7 +197,7 @@ def local_block_adjustment(
                                 debug_mode
                             )
                             dst.write(buf.astype(output_dtype), b_idx + 1, window=win_)
-    print("Finished local matching")
+    print("Finished local block adjustment")
     return out_paths
 
 

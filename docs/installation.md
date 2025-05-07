@@ -49,7 +49,7 @@ git clone https://github.com/spectralmatch/spectralmatch.git
 cd spectralmatch
 ```
 
-> After this, assuming you hame Makefile installed, you can use `make install-setup` to try to do the rest of the setup automatically
+> Assuming you have Make installed, you can then run `make install-setup` to automatically complete the remaining setup steps.
 
 ### 2. System requirements
 Before installing, ensure you have the following system-level prerequisites:
@@ -73,4 +73,4 @@ pip install -e ".[dev]"   # developer dependencies
 pip install -e ".[docs]"  # documentation dependencies
 ```
 
-### 3. Read the [Development Guide](https://spectralmatch.github.io/spectralmatch/development/) if you aim to contribute
+### 3. Read the [Contributing Guide](https://spectralmatch.github.io/spectralmatch/contributing/) if you aim to contribute

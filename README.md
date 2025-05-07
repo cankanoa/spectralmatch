@@ -67,7 +67,7 @@ However, global correction alone cannot capture intra-image variability so a sec
 
 ---
 ## Installation
-> Other installation instructions are available in the docs [here](https://spectralmatch.github.io/spectralmatch/installation/).
+> Other installation instructions are available in the [docs](https://spectralmatch.github.io/spectralmatch/installation/).
 
 ### Installation as a QGIS Plugin
 
@@ -111,9 +111,9 @@ Example scripts are provided to verify a successful installation and help you ge
 Documentation is available at [spectralmatch.github.io/spectralmatch/](https://spectralmatch.github.io/spectralmatch/).
 
 ---
-## Development Guide
+## Contributing Guide
 
-Development Guide is available at [spectralmatch.github.io/spectralmatch/development](https://spectralmatch.github.io/spectralmatch/development/)
+Contributing Guide is available at [spectralmatch.github.io/spectralmatch/development](https://spectralmatch.github.io/spectralmatch/development/).
 
 ---
 
