@@ -4,6 +4,7 @@ import gc
 import os
 import numpy as np
 import rasterio
+import traceback
 
 from osgeo import gdal
 from scipy.ndimage import map_coordinates, gaussian_filter
@@ -241,107 +242,110 @@ def _compute_tile_local(
     Returns:
         tuple: (Window, band index, corrected tile as np.ndarray)
     """
+    try:
+        if debug_mode: print(f"b{band_idx}w{w_id}[{window.col_off}:{window.row_off} {window.width}x{window.height}], ", end="", flush=True)
 
-    if debug_mode: print(f"b{band_idx}w{w_id}[{window.col_off}:{window.row_off} {window.width}x{window.height}], ", end="", flush=True)
+        ds = _worker_dataset_cache["ds"]
+        arr_in = ds.read(band_idx + 1, window=window).astype(calculation_dtype_precision)
+        arr_out = np.full_like(arr_in, nodata_val, dtype=calculation_dtype_precision)
 
-    ds = _worker_dataset_cache["ds"]
-    arr_in = ds.read(band_idx + 1, window=window).astype(calculation_dtype_precision)
-    arr_out = np.full_like(arr_in, nodata_val, dtype=calculation_dtype_precision)
+        mask = arr_in != nodata_val
+        if not np.any(mask):
+            return window, band_idx, arr_out
 
-    mask = arr_in != nodata_val
-    if not np.any(mask):
+        vr, vc = np.where(mask)
+
+        win_tr = ds.window_transform(window)
+        col_coords = win_tr[2] + np.arange(window.width) * win_tr[0]
+        row_coords = win_tr[5] + np.arange(window.height) * win_tr[4]
+
+        row_f = np.clip(
+            ((bounding_rect[3] - row_coords) / (bounding_rect[3] - bounding_rect[1])) * M
+            - 0.5,
+            0,
+            M - 1,
+        )
+        col_f = np.clip(
+            ((col_coords - bounding_rect[0]) / (bounding_rect[2] - bounding_rect[0])) * N
+            - 0.5,
+            0,
+            N - 1,
+        )
+
+        ref = _weighted_bilinear_interpolation(
+            block_ref_mean[:, :, band_idx], col_f[vc], row_f[vr]
+        )
+        loc = _weighted_bilinear_interpolation(
+            block_loc_mean[:, :, band_idx], col_f[vc], row_f[vr]
+        )
+        # if debug_mode:
+        #     gammas_array = np.full(arr_in.shape, global_nodata_value, dtype=calculation_dtype_precision)
+        #     gammas_array[valid_rows, valid_cols] = gammas
+        #     _download_block_map(
+        #         block_map=gammas_array,
+        #         bounding_rect=this_image_bounds,
+        #         output_image_path=os.path.join(output_image_folder, "Gamma", out_name + f"_Gamma.tif"),
+        #         projection=projection,
+        #         nodata_value=global_nodata_value,
+        #         output_bands_map=(b+1,),
+        #         override_band_count=num_bands,
+        #     )
+
+        # if debug_mode:
+        #     _download_block_map(
+        #         block_map=np.where(valid_mask, 1, global_nodata_value),
+        #         bounding_rect=this_image_bounds,
+        #         output_image_path=os.path.join(output_image_folder, "ValidMasks", out_name + f"_ValidMask.tif"),
+        #         projection=projection,
+        #         nodata_value=global_nodata_value,
+        #         output_bands_map=(b+1,),
+        #         override_band_count=num_bands
+        #     )
+
+        # if debug_mode:
+        #     _download_block_map(
+        #         block_map=reference_band,
+        #         bounding_rect=this_image_bounds,
+        #         output_image_path=os.path.join(output_image_folder, "ReferenceBand", out_name + f"_ReferenceBand.tif"),
+        #         projection=projection,
+        #         nodata_value=global_nodata_value,
+        #         output_bands_map=(b+1,),
+        #         override_band_count=num_bands,
+        #     )
+        #
+        # if debug_mode:
+        #     _download_block_map(
+        #         block_map=local_band,
+        #         bounding_rect=this_image_bounds,
+        #         output_image_path=os.path.join(output_image_folder, "LocalBand", out_name + f"_LocalBand.tif"),
+        #         projection=projection,
+        #         nodata_value=global_nodata_value,
+        #         output_bands_map=(b+1,),
+        #         override_band_count=num_bands,
+        #     )
+
+        if correction_method == "gamma":
+            smallest = np.min([arr_in[mask], ref, loc])
+            if smallest <= 0:
+                offset = abs(smallest) + 1
+                arr_out[mask], _ = _apply_gamma_correction(
+                    arr_in[mask] + offset,
+                    ref + offset,
+                    loc + offset,
+                    alpha,
+                )
+                arr_out[mask] -= offset
+            else:
+                arr_out[mask], _ = _apply_gamma_correction(arr_in[mask], ref, loc, alpha)
+        elif correction_method == "linear":
+            arr_out[mask] = arr_in[mask] * (ref / loc)
+        else: raise ValueError('Invalid correction method')
+
         return window, band_idx, arr_out
-
-    vr, vc = np.where(mask)
-
-    win_tr = ds.window_transform(window)
-    col_coords = win_tr[2] + np.arange(window.width) * win_tr[0]
-    row_coords = win_tr[5] + np.arange(window.height) * win_tr[4]
-
-    row_f = np.clip(
-        ((bounding_rect[3] - row_coords) / (bounding_rect[3] - bounding_rect[1])) * M
-        - 0.5,
-        0,
-        M - 1,
-    )
-    col_f = np.clip(
-        ((col_coords - bounding_rect[0]) / (bounding_rect[2] - bounding_rect[0])) * N
-        - 0.5,
-        0,
-        N - 1,
-    )
-
-    ref = _weighted_bilinear_interpolation(
-        block_ref_mean[:, :, band_idx], col_f[vc], row_f[vr]
-    )
-    loc = _weighted_bilinear_interpolation(
-        block_loc_mean[:, :, band_idx], col_f[vc], row_f[vr]
-    )
-    # if debug_mode:
-    #     gammas_array = np.full(arr_in.shape, global_nodata_value, dtype=calculation_dtype_precision)
-    #     gammas_array[valid_rows, valid_cols] = gammas
-    #     _download_block_map(
-    #         block_map=gammas_array,
-    #         bounding_rect=this_image_bounds,
-    #         output_image_path=os.path.join(output_image_folder, "Gamma", out_name + f"_Gamma.tif"),
-    #         projection=projection,
-    #         nodata_value=global_nodata_value,
-    #         output_bands_map=(b+1,),
-    #         override_band_count=num_bands,
-    #     )
-
-    # if debug_mode:
-    #     _download_block_map(
-    #         block_map=np.where(valid_mask, 1, global_nodata_value),
-    #         bounding_rect=this_image_bounds,
-    #         output_image_path=os.path.join(output_image_folder, "ValidMasks", out_name + f"_ValidMask.tif"),
-    #         projection=projection,
-    #         nodata_value=global_nodata_value,
-    #         output_bands_map=(b+1,),
-    #         override_band_count=num_bands
-    #     )
-
-    # if debug_mode:
-    #     _download_block_map(
-    #         block_map=reference_band,
-    #         bounding_rect=this_image_bounds,
-    #         output_image_path=os.path.join(output_image_folder, "ReferenceBand", out_name + f"_ReferenceBand.tif"),
-    #         projection=projection,
-    #         nodata_value=global_nodata_value,
-    #         output_bands_map=(b+1,),
-    #         override_band_count=num_bands,
-    #     )
-    #
-    # if debug_mode:
-    #     _download_block_map(
-    #         block_map=local_band,
-    #         bounding_rect=this_image_bounds,
-    #         output_image_path=os.path.join(output_image_folder, "LocalBand", out_name + f"_LocalBand.tif"),
-    #         projection=projection,
-    #         nodata_value=global_nodata_value,
-    #         output_bands_map=(b+1,),
-    #         override_band_count=num_bands,
-    #     )
-
-    if correction_method == "gamma":
-        smallest = np.min([arr_in[mask], ref, loc])
-        if smallest <= 0:
-            offset = abs(smallest) + 1
-            arr_out[mask], _ = _apply_gamma_correction(
-                arr_in[mask] + offset,
-                ref + offset,
-                loc + offset,
-                alpha,
-            )
-            arr_out[mask] -= offset
-        else:
-            arr_out[mask], _ = _apply_gamma_correction(arr_in[mask], ref, loc, alpha)
-    elif correction_method == "linear":
-        arr_out[mask] = arr_in[mask] * (ref / loc)
-    else: raise ValueError('Invalid correction method')
-
-    return window, band_idx, arr_out
-
+    except Exception as e:
+        print(f"\nWorker failed on band {band_idx}, window {window}: {e}")
+        traceback.print_exc()
+        raise
 
 def _get_bounding_rectangle(
     image_paths: List[str]
