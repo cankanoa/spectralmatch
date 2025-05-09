@@ -144,6 +144,7 @@ def local_block_adjustment(
                     windows = list(_create_windows(src.width, src.height, tw, th))
                 else:
                     windows = [Window(0, 0, src.width, src.height)]
+                if debug_mode: print(f"BandIDWindowID[xStart:yStart xSizeXySize] ({len(windows)} windows): ", end="")
 
                 if parallel:
                     ctx = _choose_context(prefer_fork=True)
@@ -169,9 +170,10 @@ def local_block_adjustment(
                                     correction_method,
                                     calculation_dtype_precision,
                                     debug_mode,
+                                    w_id,
                                     )
                         for b in range(num_bands)
-                        for w in windows
+                        for w_id, w in enumerate(windows)
                     ]
                     for fut in as_completed(futures):
                         win, b_idx, buf = fut.result()
@@ -181,7 +183,7 @@ def local_block_adjustment(
                     _init_worker(img_path)
 
                     for b in range(num_bands):
-                        for win in windows:
+                        for w_id, win in enumerate(windows):
                             win_, b_idx, buf = _compute_tile_local(
                                 win,
                                 b,
@@ -194,9 +196,11 @@ def local_block_adjustment(
                                 alpha,
                                 correction_method,
                                 calculation_dtype_precision,
-                                debug_mode
+                                debug_mode,
+                                w_id,
                             )
                             dst.write(buf.astype(output_dtype), b_idx + 1, window=win_)
+                if debug_mode: print()
     print("Finished local block adjustment")
     return out_paths
 
@@ -214,6 +218,7 @@ def _compute_tile_local(
     correction_method: Literal["gamma", "linear"],
     calculation_dtype_precision: str,
     debug_mode: bool,
+    w_id: int,
     ):
     """
     Applies local radiometric correction to a raster tile using bilinear interpolation of reference and local block means.
@@ -231,12 +236,13 @@ def _compute_tile_local(
         correction_method (Literal["gamma", "linear"]): Type of correction to apply.
         calculation_dtype_precision (str): Data type to use for internal computation (e.g., "float32").
         debug_mode (bool): If True, prints debug info.
+        w_id (int): Which window is processing.
 
     Returns:
         tuple: (Window, band index, corrected tile as np.ndarray)
     """
 
-    if debug_mode: print(f"Processing band: {band_idx}")
+    if debug_mode: print(f"b{band_idx}w{w_id}[{window.col_off}:{window.row_off} {window.width}x{window.height}], ", end="", flush=True)
 
     ds = _worker_dataset_cache["ds"]
     arr_in = ds.read(band_idx + 1, window=window).astype(calculation_dtype_precision)
@@ -649,7 +655,6 @@ def _download_block_map(
                 for idx, b in enumerate(band_indices):
                     band_data = block_map if num_bands == 1 else block_map[:, :, idx]
                     dst.write(band_data, b)
-                print(f"Bands added to existing raster {base}")
                 return
         except RasterioIOError as e:
             raise RuntimeError(f"Error reading existing file {output_image_path}: {e}")
