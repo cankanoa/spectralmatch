@@ -179,10 +179,10 @@ def local_block_adjustment(
 
             with rasterio.open(out_path, "w", **meta) as dst:
 
-                if window_size is(isinstance(window_size, tuple)):
+                if isinstance(window_size, tuple):
                     tw, th = window_size
                     windows = list(_create_windows(src.width, src.height, tw, th))
-                if window_size == "block":
+                elif window_size == "block":
                     # Compute block size in projected units
                     block_width_geo = (bounds_canvas_coords[2] - bounds_canvas_coords[0]) / num_col
                     block_height_geo = (bounds_canvas_coords[3] - bounds_canvas_coords[1]) / num_row
@@ -195,7 +195,7 @@ def local_block_adjustment(
                     tile_height = max(1, int(round(block_height_geo / res_y)))
 
                     windows = list(_create_windows(src.width, src.height, tile_width, tile_height))
-                else:
+                elif window_size is None:
                     windows = [Window(0, 0, src.width, src.height)]
                 if debug_logs: print(f"BandIDWindowID[xStart:yStart xSizeXySize] ({len(windows)} windows): ", end="")
 
@@ -661,8 +661,6 @@ def _compute_local_blocks(
     block_height = (y_max - y_min) / num_row
     min_required_pixels = valid_pixel_threshold * block_width * block_height
 
-    fallback_block_cache: dict[Tuple[int, int, int], Tuple[float, float]] = {}
-
     for image_index, image_path in enumerate(image_paths):
         with rasterio.open(image_path) as dataset:
             dataset_bounds = dataset.bounds
@@ -691,7 +689,7 @@ def _compute_local_blocks(
                             transform=dataset.transform,
                         )
                         tiles_to_process.append((row_idx, col_idx, intersected_window))
-            else:
+            elif isinstance(window_size, tuple):
                 tile_width, tile_height = window_size
                 for tile in _create_windows(dataset.width, dataset.height, tile_width, tile_height):
                     tiles_to_process.append((None, None, tile))
