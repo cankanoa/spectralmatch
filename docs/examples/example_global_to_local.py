@@ -39,9 +39,9 @@ global_image_paths_array = [os.path.join(global_folder, f) for f in os.listdir(g
 matched_local_images_paths = local_block_adjustment(
     global_image_paths_array,
     local_folder,
-    target_blocks_per_image=100,
-    debug_mode=True,
-    window_size="block",
+    number_of_blocks=100,
+    debug_mode=False,
+    window_size=(512,512),
     parallel=True,
     )
 
