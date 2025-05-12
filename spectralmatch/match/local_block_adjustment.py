@@ -1,6 +1,5 @@
 import multiprocessing as mp
 import math
-import gc
 import os
 import numpy as np
 import rasterio
@@ -8,12 +7,11 @@ import traceback
 
 from osgeo import gdal
 from scipy.ndimage import map_coordinates, gaussian_filter
-from rasterio.windows import Window
+from rasterio.windows import from_bounds, Window
 from rasterio.transform import from_origin
 from rasterio.crs import CRS
-from rasterio.errors import RasterioIOError
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from typing import Tuple, Optional, List, Literal
+from typing import Tuple, Optional, List, Literal, Union
 
 from ..utils import _check_raster_requirements, _get_nodata_value, _create_windows, _choose_context
 _worker_dataset_cache = {}
@@ -24,13 +22,12 @@ def local_block_adjustment(
     *,
     output_local_basename: str = "_local",
     custom_nodata_value: float | None = None,
-    target_blocks_per_image: int = 100,
+    number_of_blocks: Union[int, Tuple[int, int], Literal["coefficient_of_variation"]] = 100,
     alpha: float = 1.0,
     calculation_dtype_precision: str = "float32",
     output_dtype: str = "float32",
-    projection: str = "EPSG:4326",
     debug_mode: bool = False,
-    tile_width_and_height_tuple: Optional[Tuple[int, int]] = None,
+    window_size: Optional[Tuple[int, int] | Literal["block"]] | None = None,
     correction_method: Literal["gamma", "linear"] = "gamma",
     parallel: bool = False,
     max_workers: int | None = None,
@@ -43,13 +40,12 @@ def local_block_adjustment(
         output_image_folder (str): Folder to save corrected output rasters.
         output_local_basename (str, optional): Suffix for output filenames. Defaults to "_local".
         custom_nodata_value (float | None, optional): Overrides detected NoData value. Defaults to None.
-        target_blocks_per_image (int, optional): Approximate number of blocks per image. Defaults to 100.
+        number_of_blocks (int | tuple | Literal["coefficient_of_variation"]): int as a target of blocks per image, tuple to set manually set total blocks width and height, coefficient_of_variation to find the number of blocks based on this metric.
         alpha (float, optional): Blending factor between global and local means. Defaults to 1.0.
         calculation_dtype_precision (str, optional): Precision for internal calculations. Defaults to "float32".
         output_dtype (str, optional): Data type for output rasters. Defaults to "float32".
-        projection (str, optional): CRS projection string for output block maps. Defaults to "EPSG:4326".
         debug_mode (bool, optional): If True, saves intermediate block maps and prints progress. Defaults to False.
-        tile_width_and_height_tuple (Tuple[int, int], optional): Tile size for block-wise correction. Defaults to None.
+        window_size (Tuple[int, int], optional): Tile size for block-wise correction. Defaults to None.
         correction_method (Literal["gamma", "linear"], optional): Local correction method. Defaults to "gamma".
         parallel (bool, optional): If True, enables multiprocessing. Defaults to False.
         max_workers (int | None, optional): Max number of parallel workers. Defaults to number of CPUs.
@@ -60,89 +56,123 @@ def local_block_adjustment(
 
     print("Start local block adjustment")
     _check_raster_requirements(input_image_paths, debug_mode)
+    if not os.path.exists(output_image_folder): os.makedirs(output_image_folder)
 
+    input_image_names = [os.path.splitext(os.path.basename(path))[0] for path in input_image_paths]
     nodata_val = _get_nodata_value(input_image_paths, custom_nodata_value)
+    projection = rasterio.open(input_image_paths[0]).crs
     if debug_mode: print(f"Global nodata value: {nodata_val}")
+    bounds_canvas_coords = _get_bounding_rectangle(input_image_paths)
+    bounds_images_coords = [rasterio.open(img).bounds for img in input_image_paths]
+    with rasterio.open(input_image_paths[0]) as ds:num_bands = ds.count
 
-    out_img_dir = os.path.join(output_image_folder, "Images")
-    if not os.path.exists(out_img_dir): os.makedirs(out_img_dir)
+    # Calculate the number of blocks
+    if isinstance(number_of_blocks, int):
+        num_row, num_col = _compute_block_size(input_image_paths, number_of_blocks, bounds_canvas_coords)
+    elif isinstance(number_of_blocks, tuple):
+        num_row, num_col = number_of_blocks
+    elif isinstance(number_of_blocks, str):
+        num_row, num_col = _compute_mosaic_coefficient_of_variation(input_image_paths, nodata_val) # This is the approach from the paper to compute bock size
 
-    bounding_rect = _get_bounding_rectangle(input_image_paths)
-    M, N = _compute_block_size(input_image_paths, target_blocks_per_image, bounding_rect)
-    # M, N = _compute_mosaic_coefficient_of_variation(input_image_paths, global_nodata_value) # Aproach from the paper to compute bock size
-
-    with rasterio.open(input_image_paths[0]) as ds:
-        num_bands = ds.count
-
-    if debug_mode: print("Computing global reference block map")
-    block_ref_mean, _ = _compute_blocks(
+    if debug_mode: print("Computing local block map")
+    block_local_means, block_local_counts = _compute_local_blocks(
         input_image_paths,
-        bounding_rect,
-        M,
-        N,
+        bounds_canvas_coords,
+        num_row,
+        num_col,
         num_bands,
-        nodata_value=nodata_val,
-        tile_width_and_height_tuple=tile_width_and_height_tuple,
+        window_size,
+        debug_mode,
+        nodata_val,
+        calculation_dtype_precision,
     )
+
+    bounds_images_block_space = get_bounding_rect_images_block_space(block_local_counts)
+
+    if debug_mode: print("Computing reference block map")
+
+    block_reference_mean = _compute_reference_blocks(
+        block_local_means,
+        block_local_counts,
+        )
 
     if debug_mode:
         _download_block_map(
-            block_map=np.nan_to_num(block_ref_mean, nan=nodata_val),
-            bounding_rect=bounding_rect,
-            output_image_path= os.path.join(output_image_folder, "BlockReferenceMean", "BlockReferenceMean.tif"),
-            nodata_value=nodata_val,
-            projection=projection,
+            np.nan_to_num(block_reference_mean, nan=nodata_val),
+            bounds_canvas_coords,
+            os.path.join(output_image_folder, "BlockReferenceMean", f"BlockReferenceMean.tif"),
+            projection,
+            calculation_dtype_precision,
+            nodata_val,
+            num_col,
+            num_row,
         )
+        for img_idx, (block_local_mean, block_local_count, input_image_name) in enumerate(zip(block_local_means, block_local_counts, input_image_names)):
+            _download_block_map(
+                np.nan_to_num(block_local_mean, nan=nodata_val),
+                bounds_canvas_coords,
+                os.path.join(output_image_folder, "BlockLocalMean", f"{input_image_name}_BlockLocalMean.tif"),
+                projection,
+                calculation_dtype_precision,
+                nodata_val,
+                num_col,
+                num_row,
+            )
+            _download_block_map(
+                np.nan_to_num(block_local_count, nan=nodata_val),
+                bounds_canvas_coords,
+                os.path.join(output_image_folder, "BlockLocalCount", f"{input_image_name}_BlockLocalCount.tif"),
+                projection,
+                calculation_dtype_precision,
+                nodata_val,
+                num_col,
+                num_row,
+            )
+
+    # block_local_mean = _smooth_array(block_local_mean, nodata_value=global_nodata_value)
 
     if parallel and max_workers is None:
         max_workers = mp.cpu_count()
 
     out_paths: List[str] = []
-    for img_path in input_image_paths:
+    for img_idx, img_path in enumerate(input_image_paths):
         in_name = os.path.splitext(os.path.basename(img_path))[0]
         out_name = os.path.splitext(os.path.basename(img_path))[0] + output_local_basename
-        out_path = os.path.join(out_img_dir, f"{out_name}.tif")
+        out_path = os.path.join(output_image_folder, f"{out_name}.tif")
         out_paths.append(str(out_path))
 
         if debug_mode: print(f"Processing {in_name}")
-        if debug_mode: print(f"Computing local block map")
-        block_loc_mean, block_loc_count = _compute_blocks(
-            [img_path],
-            bounding_rect,
-            M,
-            N,
-            num_bands,
-            nodata_value=nodata_val,
-            tile_width_and_height_tuple=tile_width_and_height_tuple,
-        )
-
-        # block_local_mean = _smooth_array(block_local_mean, nodata_value=global_nodata_value)
-
-        if debug_mode:
-            _download_block_map(
-                block_map=np.nan_to_num(block_loc_mean, nan=nodata_val),
-                bounding_rect=bounding_rect,
-                output_image_path=os.path.join(output_image_folder, "BlockLocalMean", f"{out_name}_BlockLocalMean.tif"),
-                nodata_value=nodata_val,
-                projection=projection,
-            )
-            _download_block_map(
-                block_map=np.nan_to_num(block_loc_count, nan=nodata_val),
-                bounding_rect=bounding_rect,
-                output_image_path=os.path.join(output_image_folder, "BlockLocalCount", f"{out_name}_BlockLocalCount.tif"),
-                nodata_value=nodata_val,
-                projection=projection,
-            )
-
         if debug_mode: print(f"Computing local correction, applying, and saving")
         with rasterio.open(img_path) as src:
             meta = src.meta.copy()
             meta.update({"count": num_bands, "dtype": output_dtype, "nodata": nodata_val})
+            block_reference_mean_masked = np.where(
+                (np.arange(block_reference_mean.shape[0])[:, None, None] >= bounds_images_block_space[img_idx][0]) &
+                (np.arange(block_reference_mean.shape[0])[:, None, None] < bounds_images_block_space[img_idx][2]) &
+                (np.arange(block_reference_mean.shape[1])[None, :, None] >= bounds_images_block_space[img_idx][1]) &
+                (np.arange(block_reference_mean.shape[1])[None, :, None] < bounds_images_block_space[img_idx][3]),
+                block_reference_mean,
+                np.nan
+            )
+
             with rasterio.open(out_path, "w", **meta) as dst:
 
-                if tile_width_and_height_tuple:
-                    tw, th = tile_width_and_height_tuple
+                if window_size is(isinstance(window_size, tuple)):
+                    tw, th = window_size
                     windows = list(_create_windows(src.width, src.height, tw, th))
+                if window_size == "block":
+                    # Compute block size in projected units
+                    block_width_geo = (bounds_canvas_coords[2] - bounds_canvas_coords[0]) / num_col
+                    block_height_geo = (bounds_canvas_coords[3] - bounds_canvas_coords[1]) / num_row
+
+                    # Convert geographic block size to pixel size using image resolution
+                    res_x = abs(src.transform.a)
+                    res_y = abs(src.transform.e)
+
+                    tile_width = max(1, int(round(block_width_geo / res_x)))
+                    tile_height = max(1, int(round(block_height_geo / res_y)))
+
+                    windows = list(_create_windows(src.width, src.height, tile_width, tile_height))
                 else:
                     windows = [Window(0, 0, src.width, src.height)]
                 if debug_mode: print(f"BandIDWindowID[xStart:yStart xSizeXySize] ({len(windows)} windows): ", end="")
@@ -161,17 +191,22 @@ def local_block_adjustment(
                         pool.submit(_compute_tile_local,
                                     w,
                                     b,
-                                    M,
-                                    N,
-                                    bounding_rect,
-                                    block_ref_mean,
-                                    block_loc_mean,
+                                    num_row,
+                                    num_col,
+                                    bounds_canvas_coords,
+                                    bounds_images_coords[img_idx],
+                                    block_reference_mean_masked,
+                                    block_local_means[img_idx],
                                     nodata_val,
                                     alpha,
                                     correction_method,
                                     calculation_dtype_precision,
                                     debug_mode,
                                     w_id,
+                                    output_image_folder,
+                                    out_name,
+                                    projection,
+                                    num_bands
                                     )
                         for b in range(num_bands)
                         for w_id, w in enumerate(windows)
@@ -188,17 +223,22 @@ def local_block_adjustment(
                             win_, b_idx, buf = _compute_tile_local(
                                 win,
                                 b,
-                                M,
-                                N,
-                                bounding_rect,
-                                block_ref_mean,
-                                block_loc_mean,
+                                num_row,
+                                num_col,
+                                bounds_canvas_coords,
+                                bounds_images_coords[img_idx],
+                                block_reference_mean_masked,
+                                block_local_means[img_idx],
                                 nodata_val,
                                 alpha,
                                 correction_method,
                                 calculation_dtype_precision,
                                 debug_mode,
                                 w_id,
+                                output_image_folder,
+                                out_name,
+                                projection,
+                                num_bands,
                             )
                             dst.write(buf.astype(output_dtype), b_idx + 1, window=win_)
                 if debug_mode: print()
@@ -206,12 +246,73 @@ def local_block_adjustment(
     return out_paths
 
 
+def get_bounding_rect_images_block_space(
+    block_valid_counts: np.ndarray
+    ) -> np.ndarray:
+    """
+    Compute block-space bounding rectangles for each image based on valid pixel counts.
+
+    Args:
+        block_valid_counts (np.ndarray): Shape (num_images, num_row, num_col, num_bands)
+
+    Returns:
+        np.ndarray of shape (num_images, 4): each row is (min_row, min_col, max_row, max_col)
+    """
+
+    num_images, num_row, num_col, num_bands = block_valid_counts.shape
+    output = np.zeros((num_images, 4), dtype=int)
+
+    for i in range(num_images):
+        valid_mask = np.any(block_valid_counts[i] > 0, axis=2)
+        rows, cols = np.where(valid_mask)
+
+        if rows.size > 0 and cols.size > 0:
+            min_row, max_row = rows.min(), rows.max() + 1
+            min_col, max_col = cols.min(), cols.max() + 1
+        else:
+            min_row = max_row = min_col = max_col = 0
+
+        output[i] = (min_row, min_col, max_row, max_col)
+
+    return output
+
+
+def _compute_reference_blocks(
+    block_local_means: np.ndarray,
+    block_valid_counts: np.ndarray,
+    min_total_valid_pixels: int = 1,
+    ) -> np.ndarray:
+    """
+    Computes reference block means across images by averaging local block means, weighted by valid counts.
+
+    Args:
+    block_local_means (np.ndarray): Shape (num_images, num_row, num_col, num_bands)
+    block_valid_counts (np.ndarray): Shape (num_images, num_row, num_col, num_bands)
+    min_total_valid_pixels (int): Minimum total valid pixels required to compute a mean
+
+    Returns:
+    np.ndarray: Reference block map of shape (num_row, num_col, num_bands)
+    """
+    weighted_sum = np.nansum(block_local_means * block_valid_counts, axis=0)
+    total_count = np.sum(block_valid_counts, axis=0)
+
+    with np.errstate(invalid='ignore', divide='ignore'):
+        ref_block_mean = np.where(
+            total_count >= min_total_valid_pixels,
+            weighted_sum / total_count,
+            np.nan,
+        )
+
+    return ref_block_mean
+
+
 def _compute_tile_local(
     window: Window,
     band_idx: int,
-    M: int,
-    N: int,
-    bounding_rect: tuple,
+    num_row: int,
+    num_col: int,
+    bounds_canvas_coords: tuple,
+    bounding_rect_image: tuple,
     block_ref_mean: np.ndarray,
     block_loc_mean: np.ndarray,
     nodata_val: float | int,
@@ -220,6 +321,10 @@ def _compute_tile_local(
     calculation_dtype_precision: str,
     debug_mode: bool,
     w_id: int,
+    output_image_folder: str,
+    out_name: str,
+    projection: rasterio.CRS,
+    num_bands: int
     ):
     """
     Applies local radiometric correction to a raster tile using bilinear interpolation of reference and local block means.
@@ -227,11 +332,12 @@ def _compute_tile_local(
     Args:
         window (Window): Rasterio window defining the tile extent.
         band_idx (int): Index of the band to process.
-        M (int): Number of rows in the block grid.
-        N (int): Number of columns in the block grid.
-        bounding_rect (tuple): Bounding rectangle of the full mosaic (minx, miny, maxx, maxy).
-        block_ref_mean (np.ndarray): Global block mean reference array (shape: M x N x bands).
-        block_loc_mean (np.ndarray): Local block mean array for the current image (shape: M x N x bands).
+        num_row (int): Number of rows in the block grid.
+        num_col (int): Number of columns in the block grid.
+        bounds_canvas_coords (tuple): Bounding rectangle of the full mosaic (minx, miny, maxx, maxy).
+        bounding_rect_image (tuple): Bounding rectangle of the current image (minx, miny, maxx, maxy).
+        block_ref_mean (np.ndarray): Global block mean reference array (shape: num_row x num_col x bands).
+        block_loc_mean (np.ndarray): Local block mean array for the current image (shape: num_row x num_col x bands).
         nodata_val (float | int): Value representing NoData in the raster.
         alpha (float): Blending weight between global and local statistics.
         correction_method (Literal["gamma", "linear"]): Type of correction to apply.
@@ -260,16 +366,16 @@ def _compute_tile_local(
         row_coords = win_tr[5] + np.arange(window.height) * win_tr[4]
 
         row_f = np.clip(
-            ((bounding_rect[3] - row_coords) / (bounding_rect[3] - bounding_rect[1])) * M
+            ((bounds_canvas_coords[3] - row_coords) / (bounds_canvas_coords[3] - bounds_canvas_coords[1])) * num_row
             - 0.5,
             0,
-            M - 1,
+            num_row - 1,
         )
         col_f = np.clip(
-            ((col_coords - bounding_rect[0]) / (bounding_rect[2] - bounding_rect[0])) * N
+            ((col_coords - bounds_canvas_coords[0]) / (bounds_canvas_coords[2] - bounds_canvas_coords[0])) * num_col
             - 0.5,
             0,
-            N - 1,
+            num_col - 1,
         )
 
         ref = _weighted_bilinear_interpolation(
@@ -278,57 +384,12 @@ def _compute_tile_local(
         loc = _weighted_bilinear_interpolation(
             block_loc_mean[:, :, band_idx], col_f[vc], row_f[vr]
         )
-        # if debug_mode:
-        #     gammas_array = np.full(arr_in.shape, global_nodata_value, dtype=calculation_dtype_precision)
-        #     gammas_array[valid_rows, valid_cols] = gammas
-        #     _download_block_map(
-        #         block_map=gammas_array,
-        #         bounding_rect=this_image_bounds,
-        #         output_image_path=os.path.join(output_image_folder, "Gamma", out_name + f"_Gamma.tif"),
-        #         projection=projection,
-        #         nodata_value=global_nodata_value,
-        #         output_bands_map=(b+1,),
-        #         override_band_count=num_bands,
-        #     )
-
-        # if debug_mode:
-        #     _download_block_map(
-        #         block_map=np.where(valid_mask, 1, global_nodata_value),
-        #         bounding_rect=this_image_bounds,
-        #         output_image_path=os.path.join(output_image_folder, "ValidMasks", out_name + f"_ValidMask.tif"),
-        #         projection=projection,
-        #         nodata_value=global_nodata_value,
-        #         output_bands_map=(b+1,),
-        #         override_band_count=num_bands
-        #     )
-
-        # if debug_mode:
-        #     _download_block_map(
-        #         block_map=reference_band,
-        #         bounding_rect=this_image_bounds,
-        #         output_image_path=os.path.join(output_image_folder, "ReferenceBand", out_name + f"_ReferenceBand.tif"),
-        #         projection=projection,
-        #         nodata_value=global_nodata_value,
-        #         output_bands_map=(b+1,),
-        #         override_band_count=num_bands,
-        #     )
-        #
-        # if debug_mode:
-        #     _download_block_map(
-        #         block_map=local_band,
-        #         bounding_rect=this_image_bounds,
-        #         output_image_path=os.path.join(output_image_folder, "LocalBand", out_name + f"_LocalBand.tif"),
-        #         projection=projection,
-        #         nodata_value=global_nodata_value,
-        #         output_bands_map=(b+1,),
-        #         override_band_count=num_bands,
-        #     )
 
         if correction_method == "gamma":
             smallest = np.min([arr_in[mask], ref, loc])
             if smallest <= 0:
                 offset = abs(smallest) + 1
-                arr_out[mask], _ = _apply_gamma_correction(
+                arr_out[mask], gammas = _apply_gamma_correction(
                     arr_in[mask] + offset,
                     ref + offset,
                     loc + offset,
@@ -336,16 +397,34 @@ def _compute_tile_local(
                 )
                 arr_out[mask] -= offset
             else:
-                arr_out[mask], _ = _apply_gamma_correction(arr_in[mask], ref, loc, alpha)
+                arr_out[mask], gammas = _apply_gamma_correction(arr_in[mask], ref, loc, alpha)
         elif correction_method == "linear":
-            arr_out[mask] = arr_in[mask] * (ref / loc)
+            gammas = ref / loc
+            arr_out[mask] = arr_in[mask] * gammas
         else: raise ValueError('Invalid correction method')
+
+        if debug_mode:
+            gammas_array = np.full((*arr_in.shape, num_bands), np.nan, dtype=calculation_dtype_precision)
+            gammas_array[..., band_idx][mask] = gammas
+            _download_block_map(
+                gammas_array,
+                bounding_rect_image,
+                os.path.join(output_image_folder, "Gamma", out_name + f"_Gamma.tif"),
+                projection,
+                calculation_dtype_precision,
+                nodata_val,
+                arr_in.shape[1],
+                arr_in.shape[0],
+                (band_idx,),
+                window,
+            )
 
         return window, band_idx, arr_out
     except Exception as e:
         print(f"\nWorker failed on band {band_idx}, window {window}: {e}")
         traceback.print_exc()
         raise
+
 
 def _get_bounding_rectangle(
     image_paths: List[str]
@@ -432,118 +511,129 @@ def _compute_mosaic_coefficient_of_variation(
 
     # Adjust block size
     m, n = base_block_size
-    M = max(1, int(round(r * m)))
-    N = max(1, int(round(r * n)))
+    num_row = max(1, int(round(r * m)))
+    num_col = max(1, int(round(r * n)))
 
-    return M, N
+    return num_row, num_col
 
-
-def _compute_blocks(
+def _compute_local_blocks(
     image_paths: List[str],
-    bounding_rect: Tuple[float, float, float, float],
-    M: int,
-    N: int,
+    bounds_canvas_coords: Tuple[float, float, float, float],
+    num_row: int,
+    num_col: int,
     num_bands: int,
-    nodata_value: float = None,
+    window_size: Optional[Tuple[int, int] | Literal["block"]] | None,
+    debug_mode: bool,
+    nodata_value: float,
+    calculation_dtype_precision: str,
     valid_pixel_threshold: float = 0.001,
-    calculation_dtype_precision="float32",
-    tile_width_and_height_tuple: tuple = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Computes block-wise mean values across multiple raster images for each band.
+    Computes per-image block means and valid pixel counts for a raster stack.
 
     Args:
-        image_paths (List[str]): List of raster file paths.
-        bounding_rect (Tuple[float, float, float, float]): Bounding box covering all rasters (minx, miny, maxx, maxy).
-        M (int): Number of rows in the block grid.
-        N (int): Number of columns in the block grid.
-        num_bands (int): Number of bands to process.
-        nodata_value (float, optional): Value representing NoData pixels. Defaults to None.
-        valid_pixel_threshold (float, optional): Minimum valid pixel ratio to compute a block mean. Defaults to 0.001.
-        calculation_dtype_precision (str, optional): Precision used during calculations. Defaults to "float32".
-        tile_width_and_height_tuple (tuple, optional): Tile dimensions for memory-efficient processing. Defaults to None.
+        image_paths: List of input raster paths.
+        bounds_canvas_coords: Full mosaic bounding box (minx, miny, maxx, maxy).
+        num_row: Number of block rows.
+        num_col: Number of block columns.
+        num_bands: Number of raster bands.
+        window_size: Tile mode: None (full), "block", or (width, height).
+        debug_mode: If True, prints debug output.
+        nodata_value: Pixel value representing NoData.
+        calculation_dtype_precision: Internal processing dtype (e.g., "float32").
+        valid_pixel_threshold: Minimum valid pixel area per block (0–1).
 
     Returns:
         Tuple[np.ndarray, np.ndarray]:
-            - 3D array of block means with shape (M, N, bands), containing NaNs where insufficient data exists.
-            - 3D array of valid pixel counts per block and band.
+            - Block means (num_images, num_row, num_col, num_bands)
+            - Valid pixel counts (num_images, num_row, num_col, num_bands)
     """
 
-    sum_of_means_3d = np.zeros((M, N, num_bands), dtype=calculation_dtype_precision)
-    image_count_3d = np.zeros((M, N, num_bands), dtype=calculation_dtype_precision)
-    sum_of_counts_3d = np.zeros((M, N, num_bands), dtype=calculation_dtype_precision)
+    num_images = len(image_paths)
+    output_shape = (num_images, num_row, num_col, num_bands)
+    block_value_sum = np.zeros(output_shape, dtype=calculation_dtype_precision)
+    block_pixel_count = np.zeros(output_shape, dtype=calculation_dtype_precision)
 
-    x_min, y_min, x_max, y_max = bounding_rect
-    block_width = (x_max - x_min) / N
-    block_height = (y_max - y_min) / M
+    x_min, y_min, x_max, y_max = bounds_canvas_coords
+    block_width = (x_max - x_min) / num_col
+    block_height = (y_max - y_min) / num_row
+    min_required_pixels = valid_pixel_threshold * block_width * block_height
 
-    for path in image_paths:
-        with rasterio.open(path) as data:
-            transform = data.transform
+    fallback_block_cache: dict[Tuple[int, int, int], Tuple[float, float]] = {}
 
-            sum_map_3d_single = np.zeros((M, N, num_bands), dtype=calculation_dtype_precision)
-            count_map_3d_single = np.zeros((M, N, num_bands), dtype=calculation_dtype_precision)
+    for image_index, image_path in enumerate(image_paths):
+        with rasterio.open(image_path) as dataset:
+            dataset_bounds = dataset.bounds
+            tiles_to_process: List[Tuple[Optional[int], Optional[int], Window]] = []
 
-            for b in range(num_bands):
-                sum_map_2d = np.zeros((M, N), dtype=calculation_dtype_precision)
-                count_map_2d = np.zeros((M, N), dtype=calculation_dtype_precision)
+            if window_size is None:
+                full_window = Window(0, 0, dataset.width, dataset.height)
+                tiles_to_process.append((None, None, full_window))
+            elif window_size == "block":
+                for row_idx in range(num_row):
+                    for col_idx in range(num_col):
+                        block_x0 = x_min + col_idx * block_width
+                        block_x1 = block_x0 + block_width
+                        block_y1 = y_max - row_idx * block_height
+                        block_y0 = block_y1 - block_height
 
-                if tile_width_and_height_tuple:
-                    windows = _create_windows(data.width, data.height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
-                else:
-                    windows = [Window(0, 0, data.width, data.height)]
+                        if (block_x1 <= dataset_bounds.left or block_x0 >= dataset_bounds.right or
+                            block_y1 <= dataset_bounds.bottom or block_y0 >= dataset_bounds.top):
+                            continue
 
-                for win in windows:
-                    arr = data.read(b + 1, window=win).astype(calculation_dtype_precision)
-                    win_transform = data.window_transform(win)
-                    height, width = arr.shape
+                        intersected_window = from_bounds(
+                            max(block_x0, dataset_bounds.left),
+                            max(block_y0, dataset_bounds.bottom),
+                            min(block_x1, dataset_bounds.right),
+                            min(block_y1, dataset_bounds.top),
+                            transform=dataset.transform,
+                        )
+                        tiles_to_process.append((row_idx, col_idx, intersected_window))
+            else:
+                tile_width, tile_height = window_size
+                for tile in _create_windows(dataset.width, dataset.height, tile_width, tile_height):
+                    tiles_to_process.append((None, None, tile))
 
-                    rows, cols = np.meshgrid(np.arange(height), np.arange(width), indexing='ij')
-                    x0, dx, _, y0, _, dy = win_transform.to_gdal()
-                    xs = x0 + dx * (cols + 0.5)
-                    ys = y0 + dy * (rows + 0.5)
-                    xs = np.array(xs).flatten()
-                    ys = np.array(ys).flatten()
-                    arr_flat = arr.flatten()
+            if debug_mode: print(f"BandIDWindowID[xStart:yStart xSizeXySize] ({len(tiles_to_process)} windows): ", end="")
+
+            for band_index in range(num_bands):
+                for tile_index, (row_idx, col_idx, tile_window) in enumerate(tiles_to_process):
+                    if debug_mode:
+                        print(f"b{band_index}t{tile_index}[{int(tile_window.col_off)}:{int(tile_window.row_off)} {int(tile_window.width)}x{int(tile_window.height)}], ", end="", flush=True)
+
+                    tile_data = dataset.read(band_index + 1, window=tile_window).astype(calculation_dtype_precision)
 
                     if nodata_value is not None:
-                        mask = arr_flat != nodata_value
-                        xs, ys, arr_flat = xs[mask], ys[mask], arr_flat[mask]
+                        valid_mask = tile_data != nodata_value
+                    else:
+                        valid_mask = np.ones_like(tile_data, dtype=bool)
 
-                    block_cols = np.clip(((xs - x_min) / block_width).astype(int), 0, N - 1)
-                    block_rows = np.clip(((y_max - ys) / block_height).astype(int), 0, M - 1)
+                    valid_rows, valid_cols = np.where(valid_mask)
+                    if valid_rows.size == 0:
+                        continue
 
-                    np.add.at(sum_map_2d, (block_rows, block_cols), arr_flat)
-                    np.add.at(count_map_2d, (block_rows, block_cols), 1)
+                    pixel_x = tile_window.col_off + valid_cols + 0.5
+                    pixel_y = tile_window.row_off + valid_rows + 0.5
+                    coords_x, coords_y = dataset.transform * (pixel_x, pixel_y)
+                    coords_x = np.array(coords_x)
+                    coords_y = np.array(coords_y)
 
-                    del arr, arr_flat, xs, ys, mask, block_cols, block_rows
-                    gc.collect()
+                    col_blocks = np.clip(((coords_x - x_min) / block_width).astype(int), 0, num_col - 1)
+                    row_blocks = np.clip(((y_max - coords_y) / block_height).astype(int), 0, num_row - 1)
 
-                sum_map_3d_single[..., b] = sum_map_2d
-                count_map_3d_single[..., b] = count_map_2d
-                del sum_map_2d, count_map_2d
-                gc.collect()
+                    pixel_values = tile_data[valid_rows, valid_cols]
+                    np.add.at(block_value_sum[image_index, :, :, band_index], (row_blocks, col_blocks), pixel_values)
+                    np.add.at(block_pixel_count[image_index, :, :, band_index], (row_blocks, col_blocks), 1)
+    print()
 
-            block_map_3d_single = np.full((M, N, num_bands), np.nan, dtype=calculation_dtype_precision)
-            for b in range(num_bands):
-                count_band = count_map_3d_single[..., b]
-                sum_band = sum_map_3d_single[..., b]
-                valid = count_band > (valid_pixel_threshold * block_width * block_height)
-                block_map_3d_single[valid, b] = sum_band[valid] / count_band[valid]
+    with np.errstate(invalid='ignore', divide='ignore'):
+        block_mean_result = np.where(
+            block_pixel_count >= min_required_pixels,
+            block_value_sum / block_pixel_count,
+            np.nan,
+        )
 
-            valid_mask_3d = ~np.isnan(block_map_3d_single)
-            sum_of_means_3d[valid_mask_3d] += block_map_3d_single[valid_mask_3d]
-            image_count_3d[valid_mask_3d] += 1
-            sum_of_counts_3d += count_map_3d_single
-
-            del sum_map_3d_single, count_map_3d_single, block_map_3d_single, valid_mask_3d
-            gc.collect()
-
-    final_block_map = np.full((M, N, num_bands), np.nan, dtype=calculation_dtype_precision)
-    positive_mask = image_count_3d > 0
-    final_block_map[positive_mask] = sum_of_means_3d[positive_mask] / image_count_3d[positive_mask]
-
-    return final_block_map, sum_of_counts_3d
+    return block_mean_result, block_pixel_count
 
 
 def _weighted_bilinear_interpolation(
@@ -592,107 +682,67 @@ def _download_block_map(
     block_map: np.ndarray,
     bounding_rect: Tuple[float, float, float, float],
     output_image_path: str,
-    projection: str = "EPSG:4326",
-    dtype="float32",
-    nodata_value: float = None,
-    output_bands_map: Optional[Tuple[int, ...]] = None,
-    override_band_count: Optional[int] = None,
+    projection: rasterio.CRS,
+    dtype: str,
+    nodata_value: float,
+    width: int,
+    height: int,
+    write_bands: Tuple[int, ...] | None = None,
+    window: Window | None = None,
     ):
+
     """
-    Saves a 2D or 3D block map as a raster file, writing to specific bands if requested.
+    Writes specified bands of a 3D block map to an existing or new raster, using the provided window.
 
     Args:
-        block_map (np.ndarray): 2D or 3D array of block values to write.
-        bounding_rect (Tuple[float, float, float, float]): Bounding box of the map (minx, miny, maxx, maxy).
-        output_image_path (str): Path to save the output raster.
-        projection (str, optional): CRS in EPSG format. Defaults to "EPSG:4326".
-        dtype (str, optional): Data type for output raster. Defaults to "float32".
-        nodata_value (float, optional): NoData value to use in the output. Defaults to None.
-        output_bands_map (Optional[Tuple[int, ...]], optional): Band indices to write to. Defaults to sequential.
-        override_band_count (Optional[int], optional): Total number of bands to reserve in the output. Defaults to inferred max.
-
-    Returns:
-        None
-
-    Raises:
-        ValueError: If band count does not match output_bands_map length.
-        RuntimeError: If an existing file cannot be updated due to metadata mismatch.
+        block_map (np.ndarray): Array of shape (window.height, window.width, num_bands).
+        bounding_rect (tuple): Full bounding box (minx, miny, maxx, maxy).
+        output_image_path (str): Destination file path.
+        projection (CRS): Output CRS.
+        dtype (str): Data type to use for output.
+        nodata_value (float): Nodata value to assign.
+        window (Window): Rasterio window for partial writing.
+        width (int): Width of full output image.
+        height (int): Height of full output image.
+        write_bands (Tuple[int, ...]): Band indices (1-based) to write to or None to write all.
     """
 
-    output_dir = os.path.dirname(output_image_path)
-    base = os.path.basename(output_image_path)
-    if output_dir and not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    num_bands = block_map.shape[2]
+    if block_map.ndim != 3: raise ValueError("block_map must be a 3D array with shape (num_row, num_col, num_bands).")
+    if not os.path.exists(os.path.dirname(output_image_path)): os.makedirs(os.path.dirname(output_image_path))
+    if write_bands is None: write_bands = tuple(range(0, num_bands))
+    if window is None: window = Window(0, 0, width, height)
 
-    x_min, y_min, x_max, y_max = bounding_rect
-    M, N = block_map.shape[:2]
-    num_bands = 1 if block_map.ndim == 2 else block_map.shape[2]
+    transform = from_origin(
+        bounding_rect[0],
+        bounding_rect[3],
+        (bounding_rect[2] - bounding_rect[0]) / width,
+        (bounding_rect[3] - bounding_rect[1]) / height,
+    )
 
-    if output_bands_map is not None and len(output_bands_map) != num_bands:
-        raise ValueError("Length of output_bands_map must match the number of bands in block_map.")
+    if not os.path.exists(output_image_path):
+        profile = {
+            "driver": "GTiff",
+            "height": height,
+            "width": width,
+            "count": num_bands,
+            "dtype": dtype,
+            "crs": projection,
+            "transform": transform,
+            "nodata": nodata_value,
+        }
+        with rasterio.open(output_image_path, "w", **profile) as dst:
+            for b in range(1, num_bands + 1):
+                dst.write(np.full((height, width), nodata_value, dtype=dtype), b)
 
-    band_indices = output_bands_map if output_bands_map is not None else tuple(range(1, num_bands + 1))
-    required_band_count = override_band_count if override_band_count is not None else max(band_indices)
-
-    pixel_width = (x_max - x_min) / N
-    pixel_height = (y_max - y_min) / M
-    transform = from_origin(x_min, y_max, pixel_width, pixel_height)
-    crs = CRS.from_string(projection)
-
-    if os.path.exists(output_image_path):
-        try:
-            with rasterio.open(output_image_path, "r+") as dst:
-                if (
-                    dst.crs != crs or
-                    dst.transform != transform or
-                    dst.width != N or
-                    dst.height != M or
-                    dst.dtypes[0] != dtype
-                ):
-                    raise UserWarning(f"Metadata mismatch for existing file: {output_image_path}. Skipping.")
-
-                if dst.count < max(band_indices):
-                    raise RuntimeError(
-                        f"Raster at {output_image_path} has {dst.count} bands but band {max(band_indices)} is requested. Cannot write."
-                    )
-
-                for idx, b in enumerate(band_indices):
-                    band_data = block_map if num_bands == 1 else block_map[:, :, idx]
-                    dst.write(band_data, b)
-                return
-        except RasterioIOError as e:
-            raise RuntimeError(f"Error reading existing file {output_image_path}: {e}")
-
-    # File does not exist — create new
-    profile = {
-        "driver": "GTiff",
-        "height": M,
-        "width": N,
-        "count": required_band_count,
-        "dtype": dtype,
-        "crs": crs,
-        "transform": transform,
-        "nodata": nodata_value,
-    }
-
-    with rasterio.open(output_image_path, "w", **profile) as dst:
-        # Fill all bands with nodata first if override_band_count was used
-        if override_band_count is not None:
-            for b in range(1, override_band_count + 1):
-                dst.write(np.full((M, N), nodata_value, dtype=dtype), b)
-
-        # Now write the actual bands to their mapped indices
-        for idx, b in enumerate(band_indices):
-            band_data = block_map if num_bands == 1 else block_map[:, :, idx]
-            dst.write(band_data, b)
-
-        print(f"Block map saved to: {output_image_path}")
-
+    with rasterio.open(output_image_path, "r+") as dst:
+        for band_index in write_bands:
+            dst.write(block_map[:, :, band_index].astype(dtype), band_index+1, window=window)
 
 def _compute_block_size(
     input_image_array_path: list,
     target_blocks_per_image: int | float,
-    bounding_rect: tuple,
+    bounds_canvas_coords: tuple,
     ):
     """
     Calculates the number of rows and columns for dividing a bounding rectangle into target-sized blocks.
@@ -700,10 +750,10 @@ def _compute_block_size(
     Args:
         input_image_array_path (list): List of image paths to determine total image count.
         target_blocks_per_image (int | float): Desired number of blocks per image.
-        bounding_rect (tuple): Bounding box covering all images (minx, miny, maxx, maxy).
+        bounds_canvas_coords (tuple): Bounding box covering all images (minx, miny, maxx, maxy).
 
     Returns:
-        Tuple[int, int]: Number of rows (M) and columns (N) for the block grid.
+        Tuple[int, int]: Number of rows (num_row) and columns (num_col) for the block grid.
     """
 
     num_images = len(input_image_array_path)
@@ -711,35 +761,35 @@ def _compute_block_size(
     # Total target blocks scaled by the number of images
     total_blocks = target_blocks_per_image * num_images
 
-    x_min, y_min, x_max, y_max = bounding_rect
+    x_min, y_min, x_max, y_max = bounds_canvas_coords
     bounding_width = x_max - x_min
     bounding_height = y_max - y_min
 
     # Aspect ratio of the bounding rectangle
     aspect_ratio = bounding_width / bounding_height
 
-    # Start by assuming the number of columns (N)
-    # We'll calculate N as the square root of total blocks scaled to the aspect ratio
-    N = math.sqrt(total_blocks * aspect_ratio)
-    N = max(1, round(N))  # Ensure at least one column
+    # Start by assuming the number of columns (num_col)
+    # We'll calculate num_col as the square root of total blocks scaled to the aspect ratio
+    num_col = math.sqrt(total_blocks * aspect_ratio)
+    num_col = max(1, round(num_col))  # Ensure at least one column
 
-    # Calculate the number of rows (M) to match the number of blocks
-    M = max(1, round(total_blocks / N))
+    # Calculate the number of rows (num_row) to match the number of blocks
+    num_row = max(1, round(total_blocks / num_col))
 
-    # Adjust for the closest fit to ensure M * N ≈ total_blocks
-    while M * N < total_blocks:
+    # Adjust for the closest fit to ensure num_row * num_col ≈ total_blocks
+    while num_row * num_col < total_blocks:
         if bounding_width > bounding_height:
-            N += 1
+            num_col += 1
         else:
-            M += 1
+            num_row += 1
 
-    while M * N > total_blocks:
+    while num_row * num_col > total_blocks:
         if bounding_width > bounding_height:
-            N -= 1
+            num_col -= 1
         else:
-            M -= 1
+            num_row -= 1
 
-    return M, N
+    return num_row, num_col
 
 
 def _apply_gamma_correction(

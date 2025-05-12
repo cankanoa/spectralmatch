@@ -45,12 +45,12 @@ def global_regression(
     custom_std_factor: float = 1.0,
     output_global_basename: str = "_global",
     vector_mask_path: Optional[str] = None,
-    tile_width_and_height_tuple: Optional[Tuple[int, int]] = None,
+    window_size: Optional[Tuple[int, int]] = None,
     debug_mode: bool = False,
     custom_nodata_value: float | None = None,
     parallel: bool = False,
     max_workers: int | None = None,
-    calc_dtype: str = "float32",
+    calculation_dtype_precision: str = "float32",
     ) -> list:
     """
     Performs global radiometric normalization across overlapping images using least squares regression.
@@ -62,12 +62,12 @@ def global_regression(
         custom_std_factor (float, optional): Weight for standard deviation constraints in regression. Defaults to 1.0.
         output_global_basename (str, optional): Suffix for output filenames. Defaults to "_global".
         vector_mask_path (Optional[str], optional): Optional mask to limit stats to specific areas. Defaults to None.
-        tile_width_and_height_tuple (Optional[Tuple[int, int]], optional): Tile size for block-wise processing. Defaults to None.
+        window_size (Optional[Tuple[int, int]], optional): Tile size for block-wise processing. Defaults to None.
         debug_mode (bool, optional): If True, prints debug information and constraint matrices. Defaults to False.
         custom_nodata_value (float | None, optional): Overrides detected NoData value. Defaults to None.
         parallel (bool, optional): Enables parallel tile processing. Defaults to False.
         max_workers (int | None, optional): Number of worker processes. Defaults to CPU count.
-        calc_dtype (str, optional): Data type used for internal calculations. Defaults to "float32".
+        calculation_dtype_precision (str, optional): Data type used for internal calculations. Defaults to "float32".
 
     Returns:
         List[str]: Paths to the globally adjusted output raster images.
@@ -103,7 +103,7 @@ def global_regression(
             nodata_val,
             nodata_val,
             vector_mask_path=vector_mask_path,
-            tile_width_and_height_tuple=tile_width_and_height_tuple,
+            window_size=window_size,
             debug_mode=debug_mode,
         )
         all_overlap_stats.update(
@@ -128,7 +128,7 @@ def global_regression(
                 num_bands=num_bands,
                 image_id=idx,
                 vector_mask_path=vector_mask_path,
-                tile_width_and_height_tuple=tile_width_and_height_tuple,
+                window_size=window_size,
             )
         )
 
@@ -188,8 +188,7 @@ def global_regression(
 
         all_params[b] = res.x.reshape((2 * num_images, 1))
 
-    img_dir = os.path.join(output_image_folder, "Images")
-    if not os.path.exists(img_dir): os.makedirs(img_dir)
+    if not os.path.exists(output_image_folder): os.makedirs(output_image_folder)
     out_paths: List[str] = []
 
     if parallel and max_workers is None:
@@ -197,7 +196,7 @@ def global_regression(
 
     for img_idx, img_path in enumerate(input_image_paths):
         base = os.path.splitext(os.path.basename(img_path))[0]
-        out_path = os.path.join(img_dir, f"{base}{output_global_basename}.tif")
+        out_path = os.path.join(output_image_folder, f"{base}{output_global_basename}.tif")
         out_paths.append(str(out_path))
 
         if debug_mode: print(f"Apply adjustments and saving results for {base}")
@@ -206,8 +205,8 @@ def global_regression(
             meta.update({"count": num_bands, "nodata": nodata_val})
             with rasterio.open(out_path, "w", **meta) as dst:
 
-                if tile_width_and_height_tuple:
-                    tw, th = tile_width_and_height_tuple
+                if window_size:
+                    tw, th = window_size
                     windows = list(_create_windows(src.width, src.height, tw, th))
                 else:
                     windows = [Window(0, 0, src.width, src.height)]
@@ -233,7 +232,7 @@ def global_regression(
                                         a,
                                         b0,
                                         nodata_val,
-                                        calc_dtype,
+                                        calculation_dtype_precision,
                                         debug_mode,
                                         )
                             for w in windows
@@ -264,7 +263,7 @@ def _process_tile_global(
     a: float,
     b: float,
     nodata: int | float,
-    calc_dtype: str,
+    calculation_dtype_precision: str,
     debug_mode: bool,
     ):
     """
@@ -276,7 +275,7 @@ def _process_tile_global(
         a (float): Multiplicative factor for normalization.
         b (float): Additive offset for normalization.
         nodata (int | float): NoData value to ignore during processing.
-        calc_dtype (str): Data type to cast the block for computation.
+        calculation_dtype_precision (str): Data type to cast the block for computation.
         debug_mode (bool): If True, prints processing information.
 
     Returns:
@@ -285,7 +284,7 @@ def _process_tile_global(
 
     if debug_mode: print(f"Processing band: {band_idx}, window: {window}")
     ds = _worker_dataset_cache["ds"]
-    block = ds.read(band_idx + 1, window=window).astype(calc_dtype)
+    block = ds.read(band_idx + 1, window=window).astype(calculation_dtype_precision)
 
     mask = block != nodata
     block[mask] = a * block[mask] + b
@@ -397,7 +396,7 @@ def _calculate_overlap_stats(
     nodata_i: int | float,
     nodata_j: int | float,
     vector_mask_path: str=None,
-    tile_width_and_height_tuple: tuple = None,
+    window_size: tuple = None,
     debug_mode: bool =False,
     ):
     """
@@ -414,7 +413,7 @@ def _calculate_overlap_stats(
         nodata_i (int | float): NoData value for the first image.
         nodata_j (int | float): NoData value for the second image.
         vector_mask_path (str, optional): Optional path to a vector mask for clipping. Defaults to None.
-        tile_width_and_height_tuple (tuple, optional): Optional tile size for chunked processing. Defaults to None.
+        window_size (tuple, optional): Optional tile size for chunked processing. Defaults to None.
         debug_mode (bool, optional): If True, prints debug information. Defaults to False.
 
     Returns:
@@ -457,8 +456,8 @@ def _calculate_overlap_stats(
             print(f" - Pixel window {os.path.basename(input_image_path_j)}: cols: {col_min_j} to {col_max_j} ({col_max_j - col_min_j}), rows: {row_min_j} to {row_max_j} ({row_max_j - row_min_j})")
 
         for band in range(num_bands):
-            if tile_width_and_height_tuple:
-                windows = _create_windows(width, height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
+            if window_size:
+                windows = _create_windows(width, height, window_size[0], window_size[1])
             else:
                 windows = [Window(0, 0, width, height)]
             windows = _adjust_size_of_tiles_to_fit_bounds(windows, width, height)
@@ -540,7 +539,7 @@ def _calculate_whole_stats(
     num_bands: int,
     image_id: int,
     vector_mask_path: str=None,
-    tile_width_and_height_tuple: tuple = None,
+    window_size: tuple = None,
     ):
     """
     Computes mean, standard deviation, and valid pixel count for each band in a single image.
@@ -551,7 +550,7 @@ def _calculate_whole_stats(
         num_bands (int): Number of bands to process.
         image_id (int): Unique ID for the image, used as a key in the output.
         vector_mask_path (str, optional): Optional vector mask path to restrict statistics to masked regions. Defaults to None.
-        tile_width_and_height_tuple (tuple, optional): Optional tile size for block-wise processing. Defaults to None.
+        window_size (tuple, optional): Optional tile size for block-wise processing. Defaults to None.
 
     Returns:
         dict: Dictionary with image ID as key and per-band statistics as sub-dictionary.
@@ -572,8 +571,8 @@ def _calculate_whole_stats(
             M2 = 0.0
             count = 0
 
-            if tile_width_and_height_tuple:
-                windows = _create_windows(data.width, data.height, tile_width_and_height_tuple[0], tile_width_and_height_tuple[1])
+            if window_size:
+                windows = _create_windows(data.width, data.height, window_size[0], window_size[1])
             else:
                 windows = [Window(0, 0, data.width, data.height)]
 

@@ -1,5 +1,6 @@
 # Example image
-/docs/examples/example_data/Output
+/docs/examples/example_data/*
+!/docs/examples/example_data/Input/
 *.gpkg-shm
 *.gpkg-wal
 
