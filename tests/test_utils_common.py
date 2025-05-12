@@ -16,7 +16,7 @@ def test_check_raster_requirements_valid(mocker):
     mock_ds2 = _mock_raster("EPSG:4326", 3, -9999)
     mocker.patch("spectralmatch.utils.rasterio.open", side_effect=[mock_ds1, mock_ds2])
 
-    result = _check_raster_requirements(["img1.tif", "img2.tif"], debug_mode=False)
+    result = _check_raster_requirements(["img1.tif", "img2.tif"], debug_logs=False)
     assert result is True
 
 def test_check_raster_requirements_different_crs(mocker):
@@ -25,7 +25,7 @@ def test_check_raster_requirements_different_crs(mocker):
     mocker.patch("spectralmatch.utils.rasterio.open", side_effect=[mock_ds1, mock_ds2])
 
     with pytest.raises(ValueError, match="different CRS"):
-        _check_raster_requirements(["img1.tif", "img2.tif"], debug_mode=False)
+        _check_raster_requirements(["img1.tif", "img2.tif"], debug_logs=False)
 
 def test_check_raster_requirements_different_band_count(mocker):
     mock_ds1 = _mock_raster("EPSG:4326", 3, -9999)
@@ -33,7 +33,7 @@ def test_check_raster_requirements_different_band_count(mocker):
     mocker.patch("spectralmatch.utils.rasterio.open", side_effect=[mock_ds1, mock_ds2])
 
     with pytest.raises(ValueError, match="has 1 bands; expected 3"):
-        _check_raster_requirements(["img1.tif", "img2.tif"], debug_mode=False)
+        _check_raster_requirements(["img1.tif", "img2.tif"], debug_logs=False)
 
 def test_check_raster_requirements_missing_transform(mocker):
     mock_ds1 = _mock_raster("EPSG:4326", 3, -9999)
@@ -42,7 +42,7 @@ def test_check_raster_requirements_missing_transform(mocker):
     mocker.patch("spectralmatch.utils.rasterio.open", side_effect=[mock_ds1, mock_ds2])
 
     with pytest.raises(ValueError, match="has no geotransform"):
-        _check_raster_requirements(["img1.tif", "img2.tif"], debug_mode=False)
+        _check_raster_requirements(["img1.tif", "img2.tif"], debug_logs=False)
 
 def test_check_raster_requirements_different_nodata(mocker):
     mock_ds1 = _mock_raster("EPSG:4326", 2, -9999)
@@ -50,4 +50,4 @@ def test_check_raster_requirements_different_nodata(mocker):
     mocker.patch("spectralmatch.utils.rasterio.open", side_effect=[mock_ds1, mock_ds2])
 
     with pytest.raises(ValueError, match="band 1 has different nodata value"):
-        _check_raster_requirements(["img1.tif", "img2.tif"], debug_mode=False)
+        _check_raster_requirements(["img1.tif", "img2.tif"], debug_logs=False)

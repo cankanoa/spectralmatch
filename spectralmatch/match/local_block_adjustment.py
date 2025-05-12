@@ -12,9 +12,11 @@ from rasterio.transform import from_origin
 from rasterio.crs import CRS
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Tuple, Optional, List, Literal, Union
+from multiprocessing import Lock
 
 from ..utils import _check_raster_requirements, _get_nodata_value, _create_windows, _choose_context
 _worker_dataset_cache = {}
+file_lock = Lock()
 
 def local_block_adjustment(
     input_image_paths: List[str],
@@ -26,11 +28,13 @@ def local_block_adjustment(
     alpha: float = 1.0,
     calculation_dtype_precision: str = "float32",
     output_dtype: str = "float32",
-    debug_mode: bool = False,
+    debug_logs: bool = False,
     window_size: Optional[Tuple[int, int] | Literal["block"]] | None = None,
     correction_method: Literal["gamma", "linear"] = "gamma",
     parallel: bool = False,
     max_workers: int | None = None,
+    save_intermediate_result: bool = False,
+    pre_computed_block_map_paths: Optional[Tuple[str, List[str]]] = None
     )-> list:
     """
     Performs local radiometric adjustment on a set of raster images using block-based statistics.
@@ -44,59 +48,77 @@ def local_block_adjustment(
         alpha (float, optional): Blending factor between global and local means. Defaults to 1.0.
         calculation_dtype_precision (str, optional): Precision for internal calculations. Defaults to "float32".
         output_dtype (str, optional): Data type for output rasters. Defaults to "float32".
-        debug_mode (bool, optional): If True, saves intermediate block maps and prints progress. Defaults to False.
+        debug_logs (bool, optional): If True, prints progress. Defaults to False.
         window_size (Tuple[int, int], optional): Tile size for block-wise correction. Defaults to None.
         correction_method (Literal["gamma", "linear"], optional): Local correction method. Defaults to "gamma".
         parallel (bool, optional): If True, enables multiprocessing. Defaults to False.
         max_workers (int | None, optional): Max number of parallel workers. Defaults to number of CPUs.
+        save_intermediate_result (bool, optional): If True, saves intermediate results for examination or to start midway through with block maps. Defaults to False.
+        pre_computed_block_map_paths (Optional[Tuple[str, List[str]]]):
+            A tuple containing:
+                - A reference block map path (str): This is used for the reference dataset, sets the canvas extent, and determines the number of blocks.
+                - A list of local block map paths (List[str]): Each path corresponds to an image in input_image_paths by position and will be used for the local dataset. The list must have the same length as input_image_paths.
+
+            This is used to:
+                - Load the reference block mean map.
+                - Load each image's local block mean map.
+                - Enable saving intermediate results after block computation and after each image is processed (you can remove a local image from processing and still get the same results as long as it was used for initial calculation).
 
     Returns:
         List[str]: Paths to the locally adjusted output raster images.
     """
 
     print("Start local block adjustment")
-    _check_raster_requirements(input_image_paths, debug_mode)
+    _check_raster_requirements(input_image_paths, debug_logs)
     if not os.path.exists(output_image_folder): os.makedirs(output_image_folder)
+
+    # Load data from precomputed block maps if set
+    if pre_computed_block_map_paths:
+        block_local_means, block_reference_mean, num_row, num_col, bounds_canvas_coords = get_pre_computed_block_maps(pre_computed_block_map_paths, calculation_dtype_precision)
+        validate_pre_computed_block_maps(block_local_means, block_reference_mean, num_row, num_col, bounds_canvas_coords, input_image_paths)
 
     input_image_names = [os.path.splitext(os.path.basename(path))[0] for path in input_image_paths]
     nodata_val = _get_nodata_value(input_image_paths, custom_nodata_value)
     projection = rasterio.open(input_image_paths[0]).crs
-    if debug_mode: print(f"Global nodata value: {nodata_val}")
-    bounds_canvas_coords = _get_bounding_rectangle(input_image_paths)
+    if debug_logs: print(f"Global nodata value: {nodata_val}")
     bounds_images_coords = [rasterio.open(img).bounds for img in input_image_paths]
     with rasterio.open(input_image_paths[0]) as ds:num_bands = ds.count
+    if not pre_computed_block_map_paths: bounds_canvas_coords = _get_bounding_rectangle(input_image_paths)
+
 
     # Calculate the number of blocks
-    if isinstance(number_of_blocks, int):
-        num_row, num_col = _compute_block_size(input_image_paths, number_of_blocks, bounds_canvas_coords)
-    elif isinstance(number_of_blocks, tuple):
-        num_row, num_col = number_of_blocks
-    elif isinstance(number_of_blocks, str):
-        num_row, num_col = _compute_mosaic_coefficient_of_variation(input_image_paths, nodata_val) # This is the approach from the paper to compute bock size
+    if not pre_computed_block_map_paths:
+        if isinstance(number_of_blocks, int):
+            num_row, num_col = _compute_block_size(input_image_paths, number_of_blocks, bounds_canvas_coords)
+        elif isinstance(number_of_blocks, tuple):
+            num_row, num_col = number_of_blocks
+        elif isinstance(number_of_blocks, str):
+            num_row, num_col = _compute_mosaic_coefficient_of_variation(input_image_paths, nodata_val) # This is the approach from the paper to compute bock size
 
-    if debug_mode: print("Computing local block map")
-    block_local_means, block_local_counts = _compute_local_blocks(
-        input_image_paths,
-        bounds_canvas_coords,
-        num_row,
-        num_col,
-        num_bands,
-        window_size,
-        debug_mode,
-        nodata_val,
-        calculation_dtype_precision,
-    )
-
-    bounds_images_block_space = get_bounding_rect_images_block_space(block_local_counts)
-
-    if debug_mode: print("Computing reference block map")
-
-    block_reference_mean = _compute_reference_blocks(
-        block_local_means,
-        block_local_counts,
+    if debug_logs: print("Computing local block map")
+    if not pre_computed_block_map_paths:
+        block_local_means, block_local_counts = _compute_local_blocks(
+            input_image_paths,
+            bounds_canvas_coords,
+            num_row,
+            num_col,
+            num_bands,
+            window_size,
+            debug_logs,
+            nodata_val,
+            calculation_dtype_precision,
         )
 
-    if debug_mode:
+    bounds_images_block_space = get_bounding_rect_images_block_space(block_local_means)
+
+    if debug_logs: print("Computing reference block map")
+    if not pre_computed_block_map_paths:
+        block_reference_mean = _compute_reference_blocks(
+            block_local_means,
+            block_local_counts,
+            )
+
+    if save_intermediate_result:
         _download_block_map(
             np.nan_to_num(block_reference_mean, nan=nodata_val),
             bounds_canvas_coords,
@@ -107,7 +129,7 @@ def local_block_adjustment(
             num_col,
             num_row,
         )
-        for img_idx, (block_local_mean, block_local_count, input_image_name) in enumerate(zip(block_local_means, block_local_counts, input_image_names)):
+        for img_idx, (block_local_mean, input_image_name) in enumerate(zip(block_local_means, input_image_names)):
             _download_block_map(
                 np.nan_to_num(block_local_mean, nan=nodata_val),
                 bounds_canvas_coords,
@@ -118,16 +140,16 @@ def local_block_adjustment(
                 num_col,
                 num_row,
             )
-            _download_block_map(
-                np.nan_to_num(block_local_count, nan=nodata_val),
-                bounds_canvas_coords,
-                os.path.join(output_image_folder, "BlockLocalCount", f"{input_image_name}_BlockLocalCount.tif"),
-                projection,
-                calculation_dtype_precision,
-                nodata_val,
-                num_col,
-                num_row,
-            )
+            # _download_block_map(
+            #     np.nan_to_num(block_local_count, nan=nodata_val),
+            #     bounds_canvas_coords,
+            #     os.path.join(output_image_folder, "BlockLocalCount", f"{input_image_name}_BlockLocalCount.tif"),
+            #     projection,
+            #     calculation_dtype_precision,
+            #     nodata_val,
+            #     num_col,
+            #     num_row,
+            # )
 
     # block_local_mean = _smooth_array(block_local_mean, nodata_value=global_nodata_value)
 
@@ -141,8 +163,8 @@ def local_block_adjustment(
         out_path = os.path.join(output_image_folder, f"{out_name}.tif")
         out_paths.append(str(out_path))
 
-        if debug_mode: print(f"Processing {in_name}")
-        if debug_mode: print(f"Computing local correction, applying, and saving")
+        if debug_logs: print(f"Processing {in_name}")
+        if debug_logs: print(f"Computing local correction, applying, and saving")
         with rasterio.open(img_path) as src:
             meta = src.meta.copy()
             meta.update({"count": num_bands, "dtype": output_dtype, "nodata": nodata_val})
@@ -175,7 +197,7 @@ def local_block_adjustment(
                     windows = list(_create_windows(src.width, src.height, tile_width, tile_height))
                 else:
                     windows = [Window(0, 0, src.width, src.height)]
-                if debug_mode: print(f"BandIDWindowID[xStart:yStart xSizeXySize] ({len(windows)} windows): ", end="")
+                if debug_logs: print(f"BandIDWindowID[xStart:yStart xSizeXySize] ({len(windows)} windows): ", end="")
 
                 if parallel:
                     ctx = _choose_context(prefer_fork=True)
@@ -201,12 +223,13 @@ def local_block_adjustment(
                                     alpha,
                                     correction_method,
                                     calculation_dtype_precision,
-                                    debug_mode,
+                                    debug_logs,
                                     w_id,
                                     output_image_folder,
                                     out_name,
                                     projection,
-                                    num_bands
+                                    num_bands,
+                                    save_intermediate_result,
                                     )
                         for b in range(num_bands)
                         for w_id, w in enumerate(windows)
@@ -233,17 +256,94 @@ def local_block_adjustment(
                                 alpha,
                                 correction_method,
                                 calculation_dtype_precision,
-                                debug_mode,
+                                debug_logs,
                                 w_id,
                                 output_image_folder,
                                 out_name,
                                 projection,
                                 num_bands,
+                                save_intermediate_result,
                             )
                             dst.write(buf.astype(output_dtype), b_idx + 1, window=win_)
-                if debug_mode: print()
+                if debug_logs: print()
     print("Finished local block adjustment")
     return out_paths
+
+
+def get_pre_computed_block_maps(
+    pre_computed_block_map_paths: Tuple[str, List[str]],
+    calculation_dtype_precision: str,
+    ):
+    """
+    Load pre-computed block mean maps from files.
+
+    Args:
+        pre_computed_block_map_paths (tuple[str, list[str]]):
+            - First element is the reference block map file path (str), used to determine block dimensions and canvas extent.
+            - Second element is a list of local block map file paths (List[str]), each corresponding by index to input images.
+        calculation_dtype_precision (str): Used as the dtype to read input rasters and return data.
+
+    Returns:
+        Tuple[
+            np.ndarray,  # block_local_means: shape (num_images, num_row, num_col, num_bands)
+            np.ndarray,  # block_reference_mean: shape (num_row, num_col, num_bands)
+            int,         # num_row
+            int,         # num_col
+            Tuple[float, float, float, float]  # bounds_canvas_coords (minx, miny, maxx, maxy)
+        ]
+    """
+    ref_path, local_paths = pre_computed_block_map_paths
+
+    with rasterio.open(ref_path) as src:
+        ref_data = src.read().astype(calculation_dtype_precision).transpose(1, 2, 0)
+        nodata_val = src.nodata
+        if nodata_val is not None:
+            ref_data[ref_data == nodata_val] = np.nan
+        block_reference_mean = ref_data
+        bounds_canvas_coords = src.bounds
+
+    block_local_means = []
+    for p in local_paths:
+        with rasterio.open(p) as src:
+            data = src.read().astype(calculation_dtype_precision).transpose(1, 2, 0)
+            nodata_val = src.nodata
+            if nodata_val is not None:
+                data[data == nodata_val] = np.nan
+            block_local_means.append(data)
+
+    block_local_means = np.stack(block_local_means, axis=0)
+    num_row, num_col = block_reference_mean.shape[:2]
+
+    print(f"Loaded reference block map and {len(local_paths)} local block maps. Shape: ({num_row}, {num_col}, {block_reference_mean.shape[2]})")
+    return block_local_means, block_reference_mean, num_row, num_col, bounds_canvas_coords
+
+
+def validate_pre_computed_block_maps(
+    block_local_means: np.ndarray,
+    block_reference_mean: np.ndarray,
+    num_row: int,
+    num_col: int,
+    bounds_canvas_coords: Tuple[float, float, float, float],
+    input_image_paths: List[str]
+    ) -> None:
+    """
+    Validate consistency between pre-computed block maps and expected input image metadata.
+
+    Args:
+        block_local_means: Array of shape (num_images, num_row, num_col, num_bands).
+        block_reference_mean: Array of shape (num_row, num_col, num_bands).
+        num_row: Number of block rows.
+        num_col: Number of block columns.
+        bounds_canvas_coords: Bounding box of the canvas (minx, miny, maxx, maxy).
+        input_image_paths: List of input image file paths.
+
+    Raises:
+        ValueError if any inconsistency is found.
+    """
+    if len(input_image_paths) != block_local_means.shape[0]:
+        raise ValueError("Number of input images does not match number of local block maps.")
+    else:
+        print("Number of local block maps matches input images")
 
 
 def get_bounding_rect_images_block_space(
@@ -319,12 +419,13 @@ def _compute_tile_local(
     alpha: float,
     correction_method: Literal["gamma", "linear"],
     calculation_dtype_precision: str,
-    debug_mode: bool,
+    debug_logs: bool,
     w_id: int,
     output_image_folder: str,
     out_name: str,
     projection: rasterio.CRS,
-    num_bands: int
+    num_bands: int,
+    save_intermediate_result: bool,
     ):
     """
     Applies local radiometric correction to a raster tile using bilinear interpolation of reference and local block means.
@@ -342,14 +443,15 @@ def _compute_tile_local(
         alpha (float): Blending weight between global and local statistics.
         correction_method (Literal["gamma", "linear"]): Type of correction to apply.
         calculation_dtype_precision (str): Data type to use for internal computation (e.g., "float32").
-        debug_mode (bool): If True, prints debug info.
+        debug_logs (bool): If True, prints debug info.
         w_id (int): Which window is processing.
+        save_intermediate_result (bool): If true it saves results from steps
 
     Returns:
         tuple: (Window, band index, corrected tile as np.ndarray)
     """
     try:
-        if debug_mode: print(f"b{band_idx}w{w_id}[{window.col_off}:{window.row_off} {window.width}x{window.height}], ", end="", flush=True)
+        if debug_logs: print(f"b{band_idx}w{w_id}[{window.col_off}:{window.row_off} {window.width}x{window.height}], ", end="", flush=True)
 
         ds = _worker_dataset_cache["ds"]
         arr_in = ds.read(band_idx + 1, window=window).astype(calculation_dtype_precision)
@@ -403,7 +505,7 @@ def _compute_tile_local(
             arr_out[mask] = arr_in[mask] * gammas
         else: raise ValueError('Invalid correction method')
 
-        if debug_mode:
+        if save_intermediate_result:
             gammas_array = np.full((*arr_in.shape, num_bands), np.nan, dtype=calculation_dtype_precision)
             gammas_array[..., band_idx][mask] = gammas
             _download_block_map(
@@ -523,7 +625,7 @@ def _compute_local_blocks(
     num_col: int,
     num_bands: int,
     window_size: Optional[Tuple[int, int] | Literal["block"]] | None,
-    debug_mode: bool,
+    debug_logs: bool,
     nodata_value: float,
     calculation_dtype_precision: str,
     valid_pixel_threshold: float = 0.001,
@@ -538,7 +640,7 @@ def _compute_local_blocks(
         num_col: Number of block columns.
         num_bands: Number of raster bands.
         window_size: Tile mode: None (full), "block", or (width, height).
-        debug_mode: If True, prints debug output.
+        debug_logs: If True, prints debug output.
         nodata_value: Pixel value representing NoData.
         calculation_dtype_precision: Internal processing dtype (e.g., "float32").
         valid_pixel_threshold: Minimum valid pixel area per block (0–1).
@@ -594,11 +696,11 @@ def _compute_local_blocks(
                 for tile in _create_windows(dataset.width, dataset.height, tile_width, tile_height):
                     tiles_to_process.append((None, None, tile))
 
-            if debug_mode: print(f"BandIDWindowID[xStart:yStart xSizeXySize] ({len(tiles_to_process)} windows): ", end="")
+            if debug_logs: print(f"BandIDWindowID[xStart:yStart xSizeXySize] ({len(tiles_to_process)} windows): ", end="")
 
             for band_index in range(num_bands):
                 for tile_index, (row_idx, col_idx, tile_window) in enumerate(tiles_to_process):
-                    if debug_mode:
+                    if debug_logs:
                         print(f"b{band_index}t{tile_index}[{int(tile_window.col_off)}:{int(tile_window.row_off)} {int(tile_window.width)}x{int(tile_window.height)}], ", end="", flush=True)
 
                     tile_data = dataset.read(band_index + 1, window=tile_window).astype(calculation_dtype_precision)
@@ -624,7 +726,7 @@ def _compute_local_blocks(
                     pixel_values = tile_data[valid_rows, valid_cols]
                     np.add.at(block_value_sum[image_index, :, :, band_index], (row_blocks, col_blocks), pixel_values)
                     np.add.at(block_pixel_count[image_index, :, :, band_index], (row_blocks, col_blocks), 1)
-    print()
+    if debug_logs: print()
 
     with np.errstate(invalid='ignore', divide='ignore'):
         block_mean_result = np.where(
@@ -709,7 +811,7 @@ def _download_block_map(
 
     num_bands = block_map.shape[2]
     if block_map.ndim != 3: raise ValueError("block_map must be a 3D array with shape (num_row, num_col, num_bands).")
-    if not os.path.exists(os.path.dirname(output_image_path)): os.makedirs(os.path.dirname(output_image_path))
+    if not os.path.exists(os.path.dirname(output_image_path)): os.makedirs(os.path.dirname(output_image_path), exist_ok=True)
     if write_bands is None: write_bands = tuple(range(0, num_bands))
     if window is None: window = Window(0, 0, width, height)
 
@@ -720,24 +822,26 @@ def _download_block_map(
         (bounding_rect[3] - bounding_rect[1]) / height,
     )
 
-    if not os.path.exists(output_image_path):
-        profile = {
-            "driver": "GTiff",
-            "height": height,
-            "width": width,
-            "count": num_bands,
-            "dtype": dtype,
-            "crs": projection,
-            "transform": transform,
-            "nodata": nodata_value,
-        }
-        with rasterio.open(output_image_path, "w", **profile) as dst:
-            for b in range(1, num_bands + 1):
-                dst.write(np.full((height, width), nodata_value, dtype=dtype), b)
+    with file_lock:
+        if not os.path.exists(output_image_path):
+            profile = {
+                "driver": "GTiff",
+                "height": height,
+                "width": width,
+                "count": num_bands,
+                "dtype": dtype,
+                "crs": projection,
+                "transform": transform,
+                "nodata": nodata_value,
+            }
+            with rasterio.open(output_image_path, "w", **profile) as dst:
+                for b in range(1, num_bands + 1):
+                    dst.write(np.full((height, width), nodata_value, dtype=dtype), b)
 
     with rasterio.open(output_image_path, "r+") as dst:
         for band_index in write_bands:
             dst.write(block_map[:, :, band_index].astype(dtype), band_index+1, window=window)
+
 
 def _compute_block_size(
     input_image_array_path: list,

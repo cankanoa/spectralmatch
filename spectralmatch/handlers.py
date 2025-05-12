@@ -83,7 +83,7 @@ def merge_rasters(
     tap: bool = False,
     resolution: Literal["highest", "lowest"] = "highest",
     tile_width_and_height_tuple: Optional[Tuple[int, int]] = None,
-    debug_mode: bool = False,
+    debug_logs: bool = False,
     ):
     """
     Merges multiple raster files into a single output mosaic with optional resampling and tiling.
@@ -95,7 +95,7 @@ def merge_rasters(
         tap (bool, optional): Align output bounds to target-aligned pixels. Defaults to False.
         resolution (Literal["highest", "lowest"], optional): Use resolution of highest or lowest input. Defaults to "highest".
         tile_width_and_height_tuple (tuple[int, int], optional): Tile size for block-wise processing. Defaults to None.
-        debug_mode (bool, optional): If True, prints debug messages. Defaults to False.
+        debug_logs (bool, optional): If True, prints debug messages. Defaults to False.
 
     Outputs:
         Saves a merged GeoTIFF raster to the specified path.
@@ -175,7 +175,7 @@ def merge_rasters(
 
             data_out.write(dst_array, window=window)
 
-    if debug_mode: print(f"Merged raster saved to: {data_out}")
+    if debug_logs: print(f"Merged raster saved to: {data_out}")
 
 def align_rasters(
     input_image_paths: list[str],

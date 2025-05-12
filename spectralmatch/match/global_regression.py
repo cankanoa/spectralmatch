@@ -46,7 +46,7 @@ def global_regression(
     output_global_basename: str = "_global",
     vector_mask_path: Optional[str] = None,
     window_size: Optional[Tuple[int, int]] = None,
-    debug_mode: bool = False,
+    debug_logs: bool = False,
     custom_nodata_value: float | None = None,
     parallel: bool = False,
     max_workers: int | None = None,
@@ -63,7 +63,7 @@ def global_regression(
         output_global_basename (str, optional): Suffix for output filenames. Defaults to "_global".
         vector_mask_path (Optional[str], optional): Optional mask to limit stats to specific areas. Defaults to None.
         window_size (Optional[Tuple[int, int]], optional): Tile size for block-wise processing. Defaults to None.
-        debug_mode (bool, optional): If True, prints debug information and constraint matrices. Defaults to False.
+        debug_logs (bool, optional): If True, prints debug information and constraint matrices. Defaults to False.
         custom_nodata_value (float | None, optional): Overrides detected NoData value. Defaults to None.
         parallel (bool, optional): Enables parallel tile processing. Defaults to False.
         max_workers (int | None, optional): Number of worker processes. Defaults to CPU count.
@@ -75,11 +75,11 @@ def global_regression(
 
     print("Start global regression")
 
-    _check_raster_requirements(input_image_paths, debug_mode)
+    _check_raster_requirements(input_image_paths, debug_logs)
 
     nodata_val = _get_nodata_value(input_image_paths, custom_nodata_value)
 
-    if debug_mode: print("Calculating statistics")
+    if debug_logs: print("Calculating statistics")
     with rasterio.open(input_image_paths[0]) as src: num_bands = src.count
     num_images = len(input_image_paths)
 
@@ -104,7 +104,7 @@ def global_regression(
             nodata_val,
             vector_mask_path=vector_mask_path,
             window_size=window_size,
-            debug_mode=debug_mode,
+            debug_logs=debug_logs,
         )
         all_overlap_stats.update(
             {
@@ -134,7 +134,7 @@ def global_regression(
 
     all_params = np.zeros((num_bands, 2 * num_images, 1), dtype=float)
     for b in range(num_bands):
-        if debug_mode: print(f"Processing band {b} for {num_images} images")
+        if debug_logs: print(f"Processing band {b} for {num_images} images")
 
         A, y, tot_overlap = [], [], 0
         for i in range(num_images):
@@ -176,7 +176,7 @@ def global_regression(
         A_arr = np.asarray(A)
         y_arr = np.asarray(y)
         res = least_squares(lambda p: np.asarray(A) @ p - np.asarray(y), [1, 0] * num_images)
-        if debug_mode:
+        if debug_logs:
             overlap_pairs = overlapping_pairs
             _print_constraint_system(
                 constraint_matrix=A_arr,
@@ -199,7 +199,7 @@ def global_regression(
         out_path = os.path.join(output_image_folder, f"{base}{output_global_basename}.tif")
         out_paths.append(str(out_path))
 
-        if debug_mode: print(f"Apply adjustments and saving results for {base}")
+        if debug_logs: print(f"Apply adjustments and saving results for {base}")
         with rasterio.open(img_path) as src:
             meta = src.meta.copy()
             meta.update({"count": num_bands, "nodata": nodata_val})
@@ -233,7 +233,7 @@ def global_regression(
                                         b0,
                                         nodata_val,
                                         calculation_dtype_precision,
-                                        debug_mode,
+                                        debug_logs,
                                         )
                             for w in windows
                         ]
@@ -248,7 +248,7 @@ def global_regression(
                                 a,
                                 b0,
                                 nodata_val,
-                                debug_mode,
+                                debug_logs,
                             )
                             dst.write(buf.astype(meta["dtype"]), b + 1, window=win)
                 if parallel:
@@ -264,7 +264,7 @@ def _process_tile_global(
     b: float,
     nodata: int | float,
     calculation_dtype_precision: str,
-    debug_mode: bool,
+    debug_logs: bool,
     ):
     """
     Applies a global linear transformation (scale and offset) to a raster tile.
@@ -276,13 +276,13 @@ def _process_tile_global(
         b (float): Additive offset for normalization.
         nodata (int | float): NoData value to ignore during processing.
         calculation_dtype_precision (str): Data type to cast the block for computation.
-        debug_mode (bool): If True, prints processing information.
+        debug_logs (bool): If True, prints processing information.
 
     Returns:
         Tuple[Window, np.ndarray]: Window and the adjusted data block.
     """
 
-    if debug_mode: print(f"Processing band: {band_idx}, window: {window}")
+    if debug_logs: print(f"Processing band: {band_idx}, window: {window}")
     ds = _worker_dataset_cache["ds"]
     block = ds.read(band_idx + 1, window=window).astype(calculation_dtype_precision)
 
@@ -397,7 +397,7 @@ def _calculate_overlap_stats(
     nodata_j: int | float,
     vector_mask_path: str=None,
     window_size: tuple = None,
-    debug_mode: bool =False,
+    debug_logs: bool =False,
     ):
     """
     Calculates mean, standard deviation, and valid pixel count for overlapping regions between two images.
@@ -414,7 +414,7 @@ def _calculate_overlap_stats(
         nodata_j (int | float): NoData value for the second image.
         vector_mask_path (str, optional): Optional path to a vector mask for clipping. Defaults to None.
         window_size (tuple, optional): Optional tile size for chunked processing. Defaults to None.
-        debug_mode (bool, optional): If True, prints debug information. Defaults to False.
+        debug_logs (bool, optional): If True, prints debug information. Defaults to False.
 
     Returns:
         dict: Nested dictionary of overlap statistics indexed by image ID and band.
@@ -437,7 +437,7 @@ def _calculate_overlap_stats(
         y_min = max(bound_i.bottom, bound_j.bottom)
         y_max = min(bound_i.top, bound_j.top)
 
-        if debug_mode: print(f"Overlap bounds: x: {x_min:.2f} to {x_max:.2f}, y: {y_min:.2f} to {y_max:.2f}")
+        if debug_logs: print(f"Overlap bounds: x: {x_min:.2f} to {x_max:.2f}, y: {y_min:.2f} to {y_max:.2f}")
 
         if x_min >= x_max or y_min >= y_max:
             return stats
@@ -450,7 +450,7 @@ def _calculate_overlap_stats(
         height = min(row_max_i - row_min_i, row_max_j - row_min_j)
         width = min(col_max_i - col_min_i, col_max_j - col_min_j)
 
-        if debug_mode:
+        if debug_logs:
             print(f"For overlap {os.path.basename(input_image_path_i)} with {os.path.basename(input_image_path_j)}:")
             print(f" - Pixel window {os.path.basename(input_image_path_i)}: cols: {col_min_i} to {col_max_i} ({col_max_i - col_min_i}), rows: {row_min_i} to {row_max_i} ({row_max_i - row_min_i})")
             print(f" - Pixel window {os.path.basename(input_image_path_j)}: cols: {col_min_j} to {col_max_j} ({col_max_j - col_min_j}), rows: {row_min_j} to {row_max_j} ({row_max_j - row_min_j})")

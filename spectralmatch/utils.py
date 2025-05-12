@@ -9,14 +9,14 @@ from rasterio.windows import Window
 
 def _check_raster_requirements(
     input_image_paths: list,
-    debug_mode: bool,
+    debug_logs: bool,
     ) -> bool:
     """
     Validates a list of raster image paths to ensure they are compatible for processing.
 
     Args:
         input_image_paths (list[str]): Paths to input raster images.
-        debug_mode (bool): If True, prints debug messages.
+        debug_logs (bool): If True, prints debug messages.
 
     Returns:
         bool: True if all input images meet geospatial and metadata consistency checks.
@@ -25,7 +25,7 @@ def _check_raster_requirements(
         ValueError: If any image lacks a geotransform, has a mismatched CRS, band count, or nodata value.
     """
 
-    if debug_mode: print(f"Found {len(input_image_paths)} images")
+    if debug_logs: print(f"Found {len(input_image_paths)} images")
     datasets = []
     for path in input_image_paths:
         data_in = rasterio.open(path)
@@ -45,7 +45,7 @@ def _check_raster_requirements(
         for b in range(ds.count):
             if ds.nodata != ref_nodata[b]:
                 raise ValueError(f"Fail: Image {i}, band {b+1} has different nodata value.")
-    if debug_mode: print("Input data checks passed: geotransform are present, CRS match, band count match, nodata match")
+    if debug_logs: print("Input data checks passed: geotransform are present, CRS match, band count match, nodata match")
     return True
 
 
