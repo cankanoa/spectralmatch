@@ -2,12 +2,17 @@ import os
 import rasterio
 import geopandas as gpd
 import numpy as np
+import fiona
 
 from rasterio.enums import Resampling
 from rasterio.transform import from_origin
 from omnicloudmask import predict_from_array
 from rasterio.features import shapes
 from osgeo import gdal, ogr, osr
+from .handlers import _write_vector
+from shapely.geometry import shape
+from shapely.ops import unary_union
+from rasterio.mask import raster_geometry_mask
 
 def create_cloud_mask_with_omnicloudmask(
     input_image_path,
@@ -81,6 +86,7 @@ def create_cloud_mask_with_omnicloudmask(
 
 def post_process_raster_cloud_mask_to_vector(
     input_image_path: str,
+    output_vector_path: str,
     minimum_mask_size_percentile: float = None,
     polygon_buffering_in_map_units: dict = None,
     value_mapping: dict = None
@@ -90,15 +96,13 @@ def post_process_raster_cloud_mask_to_vector(
 
     Args:
         input_image_path (str): Path to the input cloud mask raster.
+        output_vector_path (str): Path to the output vector layer.
         minimum_mask_size_percentile (float, optional): Percentile threshold to filter small polygons by area.
         polygon_buffering_in_map_units (dict, optional): Mapping of raster values to buffer distances.
         value_mapping (dict, optional): Mapping of original raster values to new values before vectorization.
 
-    Returns:
-        ogr.DataSource: In-memory vector layer with merged and filtered polygons.
-
     Outputs:
-        Returns an OGR DataSource containing post-processed vector features.
+        Saves a vector layer to the output path.
     """
 
     with rasterio.open(input_image_path) as src:
@@ -191,41 +195,46 @@ def post_process_raster_cloud_mask_to_vector(
         mem_layer.CreateFeature(feat)
         feat = None
 
-    return mem_ds
+    _write_vector(mem_ds, output_vector_path)
+
+    return output_vector_path
 
 
 def create_ndvi_mask(
     input_image_path: str,
     output_image_path: str,
-    nir_band: int=4,
-    red_band: int=3,
-    )-> str:
+    nir_band: int,
+    red_band: int,
+    ) -> str:
     """
-    Computes NDVI from a multi-band image and saves the result as a VRT raster.
+    Computes NDVI from a multi-band image and saves the result as a GeoTIFF.
 
     Args:
         input_image_path (str): Path to the input image with NIR and red bands.
-        output_image_path (str): Path to save the NDVI output as a VRT file.
-        nir_band (int, optional): Band index for NIR. Defaults to 4.
-        red_band (int, optional): Band index for red. Defaults to 3.
+        output_image_path (str): Path to save the NDVI output GeoTIFF.
+        nir_band (int): Band index for NIR (1-based).
+        red_band (int): Band index for red (1-based).
 
     Returns:
         str: Path to the saved NDVI output.
     """
+    if not os.path.exists(os.path.dirname(output_image_path)): os.makedirs(os.path.dirname(output_image_path), exist_ok=True)
 
-    ds = gdal.Open(input_image_path)
-    nir = ds.GetRasterBand(nir_band).ReadAsArray().astype(np.float32)
-    red = ds.GetRasterBand(red_band).ReadAsArray().astype(np.float32)
-    ndvi = (nir - red) / (nir + red + 1e-9)  # avoid division by zero
+    with rasterio.open(input_image_path) as src:
+        nir = src.read(nir_band).astype(np.float32)
+        red = src.read(red_band).astype(np.float32)
+        ndvi = (nir - red) / (nir + red + 1e-9)
 
-    mem_drv = gdal.GetDriverByName("MEM")
-    mem_ds = mem_drv.Create("", ds.RasterXSize, ds.RasterYSize, 1, gdal.GDT_Float32)
-    mem_ds.SetGeoTransform(ds.GetGeoTransform())
-    mem_ds.SetProjection(ds.GetProjection())
-    mem_ds.GetRasterBand(1).WriteArray(ndvi)
+        print("NIR min/max:", np.nanmin(nir), np.nanmax(nir))
+        print("Red min/max:", np.nanmin(red), np.nanmax(red))
+        print("NDVI min/max:", np.nanmin(ndvi), np.nanmax(ndvi))
 
-    gdal.GetDriverByName("VRT").CreateCopy(output_image_path, mem_ds)
-    ds, mem_ds = None, None
+        profile = src.profile
+        profile.update(dtype=rasterio.float32, count=1)
+
+        with rasterio.open(output_image_path, 'w', **profile) as dst:
+            dst.write(ndvi, 1)
+
     return output_image_path
 
 
@@ -285,3 +294,65 @@ def post_process_threshold_to_vector(
     gdal.Polygonize(mem_ds.GetRasterBand(1), mem_ds.GetRasterBand(1), out_lyr, 0, [])
     ds, mem_ds, out_ds = None, None, None
     return output_vector_path
+
+
+def mask_image_with_vector(
+    input_image_path: str,
+    input_vector_path: str,
+    output_image_path: str,
+    exclude_features: dict[any, any] = {},
+    invert_mask: bool = False
+    ) -> str:
+    """
+    Masks a raster using vector geometries within the raster's bounds.
+
+    Args:
+        input_image_path: Path to input raster.
+        input_vector_path: Path to vector file (e.g., .shp, .gpkg).
+        output_image_path: Path to save masked raster.
+        exclude_features: Dict of attribute filters to exclude (e.g., {"class": "water"}).
+        invert_mask: If True, keeps only areas inside vector geometries.
+
+    Returns:
+        Path to the masked raster file.
+    """
+    if not os.path.exists(os.path.dirname(output_image_path)): os.makedirs(os.path.dirname(output_image_path), exist_ok=True)
+
+    with rasterio.open(input_image_path) as src:
+        image_crs = src.crs
+
+        with fiona.open(input_vector_path, 'r') as vector:
+            filtered_geoms = []
+            for feature in vector:
+                if exclude_features:
+                    match = all(feature['properties'].get(k) != v for k, v in exclude_features.items())
+                else:
+                    match = True
+
+                if match:
+                    geom = shape(feature['geometry'])
+                    filtered_geoms.append(geom)
+
+        if not filtered_geoms:
+            return output_image_path
+
+        geom_union = unary_union(filtered_geoms)
+        geometries = [geom_union.__geo_interface__]
+
+        mask, transform, window = raster_geometry_mask(
+            src,
+            geometries,
+            invert=invert_mask,
+            crop=False,
+            pad=False,
+            all_touched=False
+        )
+
+        data = src.read()
+        data[:, mask] = src.nodata if src.nodata is not None else 0
+
+        out_meta = src.meta.copy()
+        with rasterio.open(output_image_path, 'w', **out_meta) as dst:
+            dst.write(data)
+
+    return output_image_path

@@ -11,7 +11,7 @@ from rasterio.warp import aligned_target, reproject
 from rasterio.enums import Resampling
 from .utils import _create_windows
 
-def write_vector(
+def _write_vector(
     mem_ds: ogr.DataSource,
     output_vector_path: str
     ) -> None:
@@ -82,7 +82,7 @@ def merge_rasters(
     resampling_method: Literal["nearest", "bilinear", "cubic"] = "nearest",
     tap: bool = False,
     resolution: Literal["highest", "lowest"] = "highest",
-    tile_width_and_height_tuple: Optional[Tuple[int, int]] = None,
+    window_size: Optional[Tuple[int, int]] = None,
     debug_logs: bool = False,
     ):
     """
@@ -94,7 +94,7 @@ def merge_rasters(
         resampling_method (Literal["nearest", "bilinear", "cubic"], optional): Resampling method. Defaults to "nearest".
         tap (bool, optional): Align output bounds to target-aligned pixels. Defaults to False.
         resolution (Literal["highest", "lowest"], optional): Use resolution of highest or lowest input. Defaults to "highest".
-        tile_width_and_height_tuple (tuple[int, int], optional): Tile size for block-wise processing. Defaults to None.
+        window_size (tuple[int, int], optional): Tile size for block-wise processing. Defaults to None.
         debug_logs (bool, optional): If True, prints debug messages. Defaults to False.
 
     Outputs:
@@ -148,8 +148,8 @@ def merge_rasters(
     }
 
     with rasterio.open(data_out, "w", **out_meta) as data_out:
-        if tile_width_and_height_tuple:
-            windows = _create_windows(width, height, *tile_width_and_height_tuple)
+        if window_size:
+            windows = _create_windows(width, height, *window_size)
         else:
             windows = [Window(0, 0, width, height)]
 
