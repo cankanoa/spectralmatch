@@ -14,7 +14,6 @@ from rasterio.crs import CRS
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Tuple, Optional, List, Literal, Union
 from multiprocessing import Lock
-import objgraph
 from multiprocessing import shared_memory
 
 from ..utils import _check_raster_requirements, _get_nodata_value, _create_windows, _choose_context
