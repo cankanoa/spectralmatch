@@ -33,10 +33,9 @@ def local_block_adjustment(
     calculation_dtype_precision: str = "float32",
     output_dtype: str = "float32",
     debug_logs: bool = False,
-    window_size: Optional[Tuple[int, int] | Literal["block"]] | None = None,
+    window_size: int | Tuple[int, int] | None | Literal["block"] = None,
     correction_method: Literal["gamma", "linear"] = "gamma",
-    parallel: bool = False,
-    max_workers: int | None = None,
+    parallel_workers: Literal["cpu"] | int | None = None,
     save_intermediate_result: bool = False,
     pre_computed_block_map_paths: Optional[Tuple[str, List[str]]] = None
     )-> list:
@@ -53,10 +52,9 @@ def local_block_adjustment(
         calculation_dtype_precision (str, optional): Precision for internal calculations. Defaults to "float32".
         output_dtype (str, optional): Data type for output rasters. Defaults to "float32".
         debug_logs (bool, optional): If True, prints progress. Defaults to False.
-        window_size (Tuple[int, int], optional): Tile size for block-wise correction. Defaults to None.
+        window_size (int | Tuple[int, int] | None | Literal["block"]): Tile size for processing: int for square tiles, (width, height) for custom size, None for full image, or "block" to set as the size of the block map. Defaults to None.
         correction_method (Literal["gamma", "linear"], optional): Local correction method. Defaults to "gamma".
-        parallel (bool, optional): If True, enables multiprocessing. Defaults to False.
-        max_workers (int | None, optional): Max number of parallel workers. Defaults to number of CPUs.
+        parallel_workers (Literal["cpu"] | int | None): If set, enables multiprocessing. "cpu" = all cores, int = specific count, None = no parallel processing. Defaults to None.
         save_intermediate_result (bool, optional): If True, saves intermediate results for examination or to start midway through with block maps. Defaults to False.
         pre_computed_block_map_paths (Optional[Tuple[str, List[str]]]):
             A tuple containing:
@@ -75,6 +73,7 @@ def local_block_adjustment(
     print("Start local block adjustment")
     _check_raster_requirements(input_image_paths, debug_logs)
     if not os.path.exists(output_image_folder): os.makedirs(output_image_folder)
+    if isinstance(window_size, int): window_size = (window_size, window_size)
 
     # Load data from precomputed block maps if set
     if pre_computed_block_map_paths:
@@ -157,8 +156,15 @@ def local_block_adjustment(
 
     # block_local_mean = _smooth_array(block_local_mean, nodata_value=global_nodata_value)
 
-    if parallel and max_workers is None:
+    if parallel_workers == "cpu":
+        parallel = True
         max_workers = mp.cpu_count()
+    elif isinstance(parallel_workers, int) and parallel_workers > 0:
+        parallel = True
+        max_workers = parallel_workers
+    else:
+        parallel = False
+        max_workers = None
 
     out_paths: List[str] = []
     for img_idx, img_path in enumerate(input_image_paths):

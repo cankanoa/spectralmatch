@@ -6,7 +6,7 @@ import numpy as np
 import sys
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Literal
 
 from numpy import ndarray
 from scipy.optimize import least_squares
@@ -45,11 +45,10 @@ def global_regression(
     custom_std_factor: float = 1.0,
     output_global_basename: str = "_global",
     vector_mask_path: Optional[str] = None,
-    window_size: Optional[Tuple[int, int]] = None,
+    window_size: int | Tuple[int, int] | None = None,
     debug_logs: bool = False,
     custom_nodata_value: float | None = None,
-    parallel: bool = False,
-    max_workers: int | None = None,
+    parallel_workers: Literal["cpu"] | int | None = None,
     calculation_dtype_precision: str = "float32",
     ) -> list:
     """
@@ -62,11 +61,10 @@ def global_regression(
         custom_std_factor (float, optional): Weight for standard deviation constraints in regression. Defaults to 1.0.
         output_global_basename (str, optional): Suffix for output filenames. Defaults to "_global".
         vector_mask_path (Optional[str], optional): Optional mask to limit stats to specific areas. Defaults to None.
-        window_size (Optional[Tuple[int, int]], optional): Tile size for block-wise processing. Defaults to None.
+        window_size (int | Tuple[int, int] | None): Tile size for processing: int for square tiles, (width, height) for custom size, or None for full image. Defaults to None.
         debug_logs (bool, optional): If True, prints debug information and constraint matrices. Defaults to False.
         custom_nodata_value (float | None, optional): Overrides detected NoData value. Defaults to None.
-        parallel (bool, optional): Enables parallel tile processing. Defaults to False.
-        max_workers (int | None, optional): Number of worker processes. Defaults to CPU count.
+        parallel_workers (Literal["cpu"] | int | None): If set, enables multiprocessing. "cpu" = all cores, int = specific count, None = no parallel processing. Defaults to None.
         calculation_dtype_precision (str, optional): Data type used for internal calculations. Defaults to "float32".
 
     Returns:
@@ -76,6 +74,7 @@ def global_regression(
     print("Start global regression")
 
     _check_raster_requirements(input_image_paths, debug_logs)
+    if isinstance(window_size, int): window_size = (window_size, window_size)
 
     nodata_val = _get_nodata_value(input_image_paths, custom_nodata_value)
 
@@ -191,8 +190,15 @@ def global_regression(
     if not os.path.exists(output_image_folder): os.makedirs(output_image_folder)
     out_paths: List[str] = []
 
-    if parallel and max_workers is None:
+    if parallel_workers == "cpu":
+        parallel = True
         max_workers = mp.cpu_count()
+    elif isinstance(parallel_workers, int) and parallel_workers > 0:
+        parallel = True
+        max_workers = parallel_workers
+    else:
+        parallel = False
+        max_workers = None
 
     for img_idx, img_path in enumerate(input_image_paths):
         base = os.path.splitext(os.path.basename(img_path))[0]

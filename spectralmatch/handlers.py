@@ -82,7 +82,7 @@ def merge_rasters(
     resampling_method: Literal["nearest", "bilinear", "cubic"] = "nearest",
     tap: bool = False,
     resolution: Literal["highest", "lowest"] = "highest",
-    window_size: Optional[Tuple[int, int]] = None,
+    window_size: int | Tuple[int, int] | None = None,
     debug_logs: bool = False,
     ):
     """
@@ -94,7 +94,7 @@ def merge_rasters(
         resampling_method (Literal["nearest", "bilinear", "cubic"], optional): Resampling method. Defaults to "nearest".
         tap (bool, optional): Align output bounds to target-aligned pixels. Defaults to False.
         resolution (Literal["highest", "lowest"], optional): Use resolution of highest or lowest input. Defaults to "highest".
-        window_size (tuple[int, int], optional): Tile size for block-wise processing. Defaults to None.
+        window_size (int | Tuple[int, int] | None): Tile size for processing: int for square tiles, (width, height) for custom size, or None for full image. Defaults to None.
         debug_logs (bool, optional): If True, prints debug messages. Defaults to False.
 
     Outputs:
@@ -102,6 +102,7 @@ def merge_rasters(
     """
 
     if not os.path.exists(os.path.dirname(data_out)): os.makedirs(os.path.dirname(data_out))
+    if isinstance(window_size, int): window_size = (window_size, window_size)
 
     srcs = [rasterio.open(path) for path in data_in]
     resampling_enum = {"nearest": Resampling.nearest, "bilinear": Resampling.bilinear, "cubic": Resampling.cubic}[resampling_method]
