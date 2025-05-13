@@ -4,6 +4,7 @@ import os
 import numpy as np
 import rasterio
 import traceback
+import gc
 
 from osgeo import gdal
 from scipy.ndimage import map_coordinates, gaussian_filter
@@ -13,8 +14,11 @@ from rasterio.crs import CRS
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Tuple, Optional, List, Literal, Union
 from multiprocessing import Lock
+from multiprocessing import shared_memory
 
 from ..utils import _check_raster_requirements, _get_nodata_value, _create_windows, _choose_context
+
+# Multiprocessing setup
 _worker_dataset_cache = {}
 file_lock = Lock()
 
@@ -177,69 +181,81 @@ def local_block_adjustment(
                 np.nan
             )
 
-            with rasterio.open(out_path, "w", **meta) as dst:
+            if isinstance(window_size, tuple):
+                tw, th = window_size
+                windows = list(_create_windows(src.width, src.height, tw, th))
+            elif window_size == "block":
+                block_width_geo = (bounds_canvas_coords[2] - bounds_canvas_coords[0]) / num_col
+                block_height_geo = (bounds_canvas_coords[3] - bounds_canvas_coords[1]) / num_row
+                res_x = abs(src.transform.a)
+                res_y = abs(src.transform.e)
+                tile_width = max(1, int(round(block_width_geo / res_x)))
+                tile_height = max(1, int(round(block_height_geo / res_y)))
+                windows = list(_create_windows(src.width, src.height, tile_width, tile_height))
+            elif window_size is None:
+                windows = [Window(0, 0, src.width, src.height)]
+            if debug_logs: print(f"BandIDWindowID[xStart:yStart xSizeXySize] ({len(windows)} windows): ", end="")
 
-                if isinstance(window_size, tuple):
-                    tw, th = window_size
-                    windows = list(_create_windows(src.width, src.height, tw, th))
-                elif window_size == "block":
-                    # Compute block size in projected units
-                    block_width_geo = (bounds_canvas_coords[2] - bounds_canvas_coords[0]) / num_col
-                    block_height_geo = (bounds_canvas_coords[3] - bounds_canvas_coords[1]) / num_row
+            if parallel:
+                ctx = _choose_context(prefer_fork=True)
 
-                    # Convert geographic block size to pixel size using image resolution
-                    res_x = abs(src.transform.a)
-                    res_y = abs(src.transform.e)
+                ref_shm = shared_memory.SharedMemory(create=True, size=block_reference_mean.nbytes)
+                ref_array = np.ndarray(block_reference_mean.shape, dtype=block_reference_mean.dtype, buffer=ref_shm.buf)
+                ref_array[:] = block_reference_mean[:]
 
-                    tile_width = max(1, int(round(block_width_geo / res_x)))
-                    tile_height = max(1, int(round(block_height_geo / res_y)))
+                loc_shm = shared_memory.SharedMemory(create=True, size=block_local_means[img_idx].nbytes)
+                loc_array = np.ndarray(block_local_means[img_idx].shape, dtype=block_local_means[img_idx].dtype, buffer=loc_shm.buf)
+                loc_array[:] = block_local_means[img_idx][:]
 
-                    windows = list(_create_windows(src.width, src.height, tile_width, tile_height))
-                elif window_size is None:
-                    windows = [Window(0, 0, src.width, src.height)]
-                if debug_logs: print(f"BandIDWindowID[xStart:yStart xSizeXySize] ({len(windows)} windows): ", end="")
+                pool = ProcessPoolExecutor(
+                    max_workers=max_workers,
+                    mp_context=ctx,
+                    initializer=_init_worker,
+                    initargs=(img_path, ref_shm.name, loc_shm.name, block_reference_mean.shape, block_local_means[img_idx].shape, block_reference_mean.dtype.name),
+                )
 
-                if parallel:
-                    ctx = _choose_context(prefer_fork=True)
-
-                    pool = ProcessPoolExecutor(
-                        max_workers=max_workers,
-                        mp_context=ctx,
-                        initializer=_init_worker,
-                        initargs=(img_path,),
-                    )
-
-                    futures = [
-                        pool.submit(_compute_tile_local,
-                                    w,
-                                    b,
-                                    num_row,
-                                    num_col,
-                                    bounds_canvas_coords,
-                                    bounds_images_coords[img_idx],
-                                    block_reference_mean_masked,
-                                    block_local_means[img_idx],
-                                    nodata_val,
-                                    alpha,
-                                    correction_method,
-                                    calculation_dtype_precision,
-                                    debug_logs,
-                                    w_id,
-                                    output_image_folder,
-                                    out_name,
-                                    projection,
-                                    num_bands,
-                                    save_intermediate_result,
-                                    )
-                        for b in range(num_bands)
-                        for w_id, w in enumerate(windows)
-                    ]
-                    for fut in as_completed(futures):
-                        win, b_idx, buf = fut.result()
-                        dst.write(buf.astype(output_dtype), b_idx + 1, window=win)
-                    pool.shutdown()
-                else:
-                    _init_worker(img_path)
+                try:
+                    with rasterio.open(out_path, "w", **meta) as dst:
+                        futures = [
+                            pool.submit(_compute_tile_local,
+                                        w,
+                                        b,
+                                        num_row,
+                                        num_col,
+                                        bounds_canvas_coords,
+                                        bounds_images_coords[img_idx],
+                                        block_reference_mean_masked,
+                                        block_local_means[img_idx],
+                                        nodata_val,
+                                        alpha,
+                                        correction_method,
+                                        calculation_dtype_precision,
+                                        debug_logs,
+                                        w_id,
+                                        output_image_folder,
+                                        out_name,
+                                        projection,
+                                        num_bands,
+                                        save_intermediate_result,
+                                        )
+                            for b in range(num_bands)
+                            for w_id, w in enumerate(windows)
+                        ]
+                        for fut in as_completed(futures):
+                            win, b_idx, buf = fut.result()
+                            dst.write(buf.astype(output_dtype), b_idx + 1, window=win)
+                            del buf, win
+                finally:
+                    pool.shutdown(wait=True)
+                    ref_shm.close()
+                    loc_shm.close()
+                    ref_shm.unlink()
+                    loc_shm.unlink()
+            else:
+                with rasterio.open(out_path, "w", **meta) as dst:
+                    _worker_dataset_cache["ds"] = rasterio.open(img_path, "r")
+                    _worker_dataset_cache["block_ref_mean"] = block_reference_mean
+                    _worker_dataset_cache["block_loc_mean"] = block_local_means[img_idx]
 
                     for b in range(num_bands):
                         for w_id, win in enumerate(windows):
@@ -265,7 +281,17 @@ def local_block_adjustment(
                                 save_intermediate_result,
                             )
                             dst.write(buf.astype(output_dtype), b_idx + 1, window=win_)
-                if debug_logs: print()
+                            del buf, win_
+            if debug_logs: print()
+            if not parallel:
+                if "ds" in _worker_dataset_cache:
+                    _worker_dataset_cache["ds"].close()
+                    del _worker_dataset_cache["ds"]
+                _worker_dataset_cache.pop("block_ref_mean", None)
+                _worker_dataset_cache.pop("block_loc_mean", None)
+
+            del block_reference_mean_masked, windows
+            gc.collect()
     print("Finished local block adjustment")
     return out_paths
 
@@ -481,10 +507,10 @@ def _compute_tile_local(
         )
 
         ref = _weighted_bilinear_interpolation(
-            block_ref_mean[:, :, band_idx], col_f[vc], row_f[vr]
+            _worker_dataset_cache["block_ref_mean"][:, :, band_idx], col_f[vc], row_f[vr]
         )
         loc = _weighted_bilinear_interpolation(
-            block_loc_mean[:, :, band_idx], col_f[vc], row_f[vr]
+            _worker_dataset_cache["block_loc_mean"][:, :, band_idx], col_f[vc], row_f[vr]
         )
 
         if correction_method == "gamma":
@@ -505,21 +531,21 @@ def _compute_tile_local(
             arr_out[mask] = arr_in[mask] * gammas
         else: raise ValueError('Invalid correction method')
 
-        if save_intermediate_result:
-            gammas_array = np.full((*arr_in.shape, num_bands), np.nan, dtype=calculation_dtype_precision)
-            gammas_array[..., band_idx][mask] = gammas
-            _download_block_map(
-                gammas_array,
-                bounding_rect_image,
-                os.path.join(output_image_folder, "Gamma", out_name + f"_Gamma.tif"),
-                projection,
-                calculation_dtype_precision,
-                nodata_val,
-                arr_in.shape[1],
-                arr_in.shape[0],
-                (band_idx,),
-                window,
-            )
+        # if save_intermediate_result:
+        #     gammas_array = np.full((*arr_in.shape, num_bands), np.nan, dtype=calculation_dtype_precision)
+        #     gammas_array[..., band_idx][mask] = gammas
+        #     _download_block_map(
+        #         gammas_array,
+        #         bounding_rect_image,
+        #         os.path.join(output_image_folder, "Gamma", out_name + f"_Gamma.tif"),
+        #         projection,
+        #         calculation_dtype_precision,
+        #         nodata_val,
+        #         arr_in.shape[1],
+        #         arr_in.shape[0],
+        #         (band_idx,),
+        #         window,
+        #     )
 
         return window, band_idx, arr_out
     except Exception as e:
@@ -1049,17 +1075,26 @@ def _smooth_array(
     return smoothed_normalized
 
 
-def _init_worker(img_path: str):
-    """
-    Initializes a global dataset cache for a worker process by opening a raster file.
+def _init_worker(
+    img_path: str,
+    ref_shm_name: str,
+    loc_shm_name: str,
+    ref_shape: tuple,
+    loc_shape: tuple,
+    dtype_name: str
+    ):
 
-    Args:
-        img_path (str): Path to the image file to be opened and cached.
-
-    Returns:
-        None
-    """
-
-    import rasterio
     global _worker_dataset_cache
     _worker_dataset_cache["ds"] = rasterio.open(img_path, "r")
+
+    dtype = np.dtype(dtype_name)
+
+    # Store SharedMemory objects to prevent premature GC
+    ref_shm = shared_memory.SharedMemory(name=ref_shm_name)
+    loc_shm = shared_memory.SharedMemory(name=loc_shm_name)
+
+    _worker_dataset_cache["ref_shm"] = ref_shm
+    _worker_dataset_cache["loc_shm"] = loc_shm
+
+    _worker_dataset_cache["block_ref_mean"] = np.ndarray(ref_shape, dtype=dtype, buffer=ref_shm.buf)
+    _worker_dataset_cache["block_loc_mean"] = np.ndarray(loc_shape, dtype=dtype, buffer=loc_shm.buf)
