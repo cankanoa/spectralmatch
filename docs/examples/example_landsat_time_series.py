@@ -6,7 +6,6 @@
 
 # %% Setup
 import os
-import os
 import importlib
 
 from spectralmatch.match.global_regression import global_regression

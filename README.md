@@ -88,8 +88,9 @@ Before installing, ensure you have the following system-level prerequisites:
 
 An easy way to install these dependancies is to use [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install#quickstart-install-instructions):
 ```bash
-conda create -n spectralmatch python>=3.10 gdal>=3.6 proj>=9.3 -c conda-forge
+conda create -n spectralmatchtest python=3.10 "gdal=3.10.2" "proj>=9.3" -c conda-forge
 conda activate spectralmatch
+pip install spectralmatch
 ```
 
 #### 2. Install spectralmatch

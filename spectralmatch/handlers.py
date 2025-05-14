@@ -157,7 +157,7 @@ def merge_rasters(
         "transform": transform,
         "nodata": nodata_value or None
     }
-    if debug_logs: print(f"xStart:yStart xSizeXySize ({len(windows)} windows): ", end="")
+    # if debug_logs: print(f"xStart:yStart xSizeXySize ({len(windows)} windows): ", end="")
     with rasterio.open(output_image_path, 'w', **profile) as dst:
         for window in windows:
             win_transform = rasterio.windows.transform(window, transform)
@@ -198,7 +198,7 @@ def merge_rasters(
                             print(f"Skipping {path} in window {window} due to error: {e}")
 
             dst.write(merged_data, window=window)
-            if debug_logs: print(f"{window.col_off}:{window.row_off} {window.width}x{window.height}, ", end="", flush=True)
+            # if debug_logs: print(f"{window.col_off}:{window.row_off} {window.width}x{window.height}, ", end="", flush=True)
     if debug_logs:
         print()
         print("Done merging")

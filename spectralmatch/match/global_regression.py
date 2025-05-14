@@ -133,7 +133,7 @@ def global_regression(
 
     all_params = np.zeros((num_bands, 2 * num_images, 1), dtype=float)
     for b in range(num_bands):
-        if debug_logs: print(f"Processing band {b} for {num_images} images")
+        # if debug_logs: print(f"Processing band {b} for {num_images} images")
 
         A, y, tot_overlap = [], [], 0
         for i in range(num_images):
@@ -288,7 +288,7 @@ def _process_tile_global(
         Tuple[Window, np.ndarray]: Window and the adjusted data block.
     """
 
-    if debug_logs: print(f"Processing band: {band_idx}, window: {window}")
+    # if debug_logs: print(f"Processing band: {band_idx}, window: {window}")
     ds = _worker_dataset_cache["ds"]
     block = ds.read(band_idx + 1, window=window).astype(calculation_dtype_precision)
 
@@ -458,8 +458,8 @@ def _calculate_overlap_stats(
 
         if debug_logs:
             print(f"For overlap {os.path.basename(input_image_path_i)} with {os.path.basename(input_image_path_j)}:")
-            print(f" - Pixel window {os.path.basename(input_image_path_i)}: cols: {col_min_i} to {col_max_i} ({col_max_i - col_min_i}), rows: {row_min_i} to {row_max_i} ({row_max_i - row_min_i})")
-            print(f" - Pixel window {os.path.basename(input_image_path_j)}: cols: {col_min_j} to {col_max_j} ({col_max_j - col_min_j}), rows: {row_min_j} to {row_max_j} ({row_max_j - row_min_j})")
+            print(f"    Pixel window {os.path.basename(input_image_path_i)}: cols: {col_min_i} to {col_max_i} ({col_max_i - col_min_i}), rows: {row_min_i} to {row_max_i} ({row_max_i - row_min_i})")
+            print(f"    Pixel window {os.path.basename(input_image_path_j)}: cols: {col_min_j} to {col_max_j} ({col_max_j - col_min_j}), rows: {row_min_j} to {row_max_j} ({row_max_j - row_min_j})")
 
         for band in range(num_bands):
             if window_size:

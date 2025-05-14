@@ -1,6 +1,7 @@
 # %% Worldview Mosaic
-# This file demonstrates how to preprocess Worldview3 imagery into a mosaic. Starting from two overlapping Worldview3 images in reflectance, the process includes global matching, local matching, starting from saved block maps (optional for demonstration purposes), generating seamlines, and marging images, and and before vs after statistics.
-# This script is setup to perform matching on all tif files from a folder within the working directory called "Input" e.g. working_directory/Input/*.tif.
+# This file demonstrates how to preprocess Worldview3 imagery into a mosaic using spectralmatch.
+# Starting from two overlapping Worldview3 images in reflectance, the process includes global matching, local matching, starting from saved block maps (optional for demonstration purposes), generating seamlines, and marging images, and before vs after statistics.
+# This script is set up to perform matching on all .tif files from a folder within the working directory called "Input" e.g. working_directory/Input/*.tif.
 
 # %% Setup
 import os
@@ -11,95 +12,97 @@ from spectralmatch.match.local_block_adjustment import local_block_adjustment
 from spectralmatch.handlers import merge_rasters, mask_rasters
 from spectralmatch.voronoi_center_seamline import voronoi_center_seamline
 
-working_directory = os.path.join(os.getcwd(), "data_worldview3")
-# This script is setup to perform matching on all tif files from a folder within the working directory called "input" e.g. working_directory/input/*.tif.
-
-vector_mask_path = working_directory + "/Input/Masks.gpkg"
+working_directory = os.path.join(os.getcwd(), "data_worldview3") # If this does not automatically find the correct CWD, manually copy the path to the data_worldview3 folder
+print(working_directory)
 
 input_folder = os.path.join(working_directory, "Input")
 global_folder = os.path.join(working_directory, "GlobalMatch")
 local_folder = os.path.join(working_directory, "LocalMatch")
+clipped_images = os.path.join(working_directory, "ClippedImages")
+
+window_size = 128
+num_workers = 5
 
 
 # %% Global matching
-input_image_paths_array = [os.path.join(input_folder, f) for f in os.listdir(input_folder) if f.lower().endswith(".tif")]
+input_image_paths = [os.path.join(input_folder, f) for f in os.listdir(input_folder) if f.lower().endswith(".tif")]
 
-matched_global_images_paths = global_regression(
-    input_image_paths_array,
+global_regression(
+    input_image_paths,
     global_folder,
     custom_mean_factor = 3, # Defualt 1; 3 often works better to 'move' the spectral mean of images closer together
-    custom_std_factor = 1,
-    # vector_mask_path=vector_mask_path,
     debug_logs=True,
-    window_size=128,
-    parallel_workers=4
+    window_size=window_size,
+    parallel_workers=num_workers
     )
 
-
 # %% Local matching
-global_image_paths_array = [os.path.join(global_folder, f) for f in os.listdir(global_folder) if f.lower().endswith(".tif")]
+input_image_paths = [os.path.join(global_folder, f) for f in os.listdir(global_folder) if f.lower().endswith(".tif")]
 
-matched_local_images_paths = local_block_adjustment(
-    global_image_paths_array,
+local_block_adjustment(
+    input_image_paths,
     local_folder,
     number_of_blocks=100,
     debug_logs=True,
-    window_size=128,
-    parallel_workers="cpu",
+    window_size=window_size,
+    parallel_workers=num_workers,
+    save_block_maps=True,
     )
 
+# %% Start from saved block maps (optional)
+input_image_paths = [os.path.join(global_folder, f) for f in os.listdir(global_folder) if f.lower().endswith(".tif")]
 
-# %% Start from saved block maps
-saved_reference_path = os.path.join(local_folder, "BlockReferenceMean", "BlockReferenceMean.tif")
-saved_local_folder_path = os.path.join(local_folder, "BlockLocalMean")
-saved_local_paths = [os.path.join(saved_local_folder_path, f) for f in os.listdir(saved_local_folder_path) if f.lower().endswith(".tif")]
+old_local_folder = os.path.join(working_directory, "LocalMatch")
+new_local_folder = os.path.join(working_directory, "LocalMatch_New")
 
-new_local_folder = os.path.join(working_directory, "New_LocalMatch")
+saved_reference_block_path = os.path.join(old_local_folder, "BlockReferenceMean", "BlockReferenceMean.tif")
+saved_local_block_paths = [os.path.join(os.path.join(old_local_folder, "BlockLocalMean"), f) for f in os.listdir(os.path.join(old_local_folder, "BlockLocalMean")) if f.lower().endswith(".tif")]
 
-matched_local_images_paths = local_block_adjustment(
-    global_image_paths_array,
+local_block_adjustment(
+    input_image_paths,
     new_local_folder,
     number_of_blocks=100,
     debug_logs=True,
-    window_size=512,
-    parallel_workers="cpu",
-    pre_computed_block_map_paths=(saved_reference_path, saved_local_paths)
+    window_size=window_size,
+    parallel_workers=num_workers,
+    load_block_maps=(saved_reference_block_path, saved_local_block_paths)
     )
 
 
 # %% Generate seamlines
-input_image_paths_array = [os.path.join(local_folder, f) for f in os.listdir(local_folder) if f.lower().endswith(".tif")]
-output_vector_mask = os.path.join(working_directory, "ImageMasks.gpkg")
+input_image_paths = [os.path.join(local_folder, f) for f in os.listdir(local_folder) if f.lower().endswith(".tif")]
+output_vector_mask = os.path.join(working_directory, "ImageClips.gpkg")
 
 voronoi_center_seamline(
-    input_image_paths_array,
+    input_image_paths,
     output_vector_mask,
+    image_field_name='image',
+    debug_logs=True,
     )
 
 
-# %% Mask and merge
-input_image_paths_array = sorted([os.path.join(local_folder, f) for f in os.listdir(local_folder) if f.lower().endswith(".tif")])
-output_folder = os.path.join(working_directory, "MaskedImages")
-masked_image_paths = sorted([os.path.join(output_folder, os.path.splitext(os.path.basename(path))[0] + "_MaskedImages.tif") for path in input_image_paths_array])
-input_vector_mask_path = os.path.join(working_directory, "ImageMasks.gpkg")
+# %% Clip and merge
+input_image_paths = sorted([os.path.join(local_folder, f) for f in os.listdir(local_folder) if f.lower().endswith(".tif")])
+output_clipped_image_paths = sorted([os.path.join(clipped_images, os.path.splitext(os.path.basename(path))[0] + "_Clipped.tif") for path in input_image_paths])
+
+input_vector_mask_path = os.path.join(working_directory, "ImageClips.gpkg")
 output_merged_image_path = os.path.join(working_directory, "MergedImage.tif")
 
 mask_rasters(
-    input_image_paths_array,
-    masked_image_paths,
+    input_image_paths,
+    output_clipped_image_paths,
     input_vector_mask_path,
     tap=True,
     debug_logs=True,
     split_mask_by_attribute="image",
-    window_size=100,
+    window_size=window_size,
     )
 
 merge_rasters(
-    masked_image_paths,
+    output_clipped_image_paths,
     output_merged_image_path,
-    window_size=100,
+    window_size=window_size,
     debug_logs=True,
 )
 
 # %% Statistics
-# To visually see the difference make sure to merge input images so that their histograms match
