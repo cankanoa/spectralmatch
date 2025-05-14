@@ -28,7 +28,7 @@ install-setup:
 docs-serve:
 	mkdir -p $(MAKEFILE_DIR)docs/images
 	cp -r $(MAKEFILE_DIR)images/* $(MAKEFILE_DIR)docs/images/
-	mkdocs serve -a localhost:8000
+	mkdocs serve -a localhost:8006
 
 docs-build:
 	mkdir -p $(MAKEFILE_DIR)docs/images
@@ -78,5 +78,5 @@ clean:
 	       $(MAKEFILE_DIR).pytest_cache \
 	       $(MAKEFILE_DIR)docs/examples/example_data/Output \
 	       $(MAKEFILE_DIR)site
-	find $(MAKEFILE_DIR)docs/examples/data_landsat -mindepth 1 ! -name Input -exec rm -rf {} +
-	find $(MAKEFILE_DIR)docs/examples/data_worldview3 -mindepth 1 ! -name Input -exec rm -rf {} +
+	find $(MAKEFILE_DIR)docs/examples/data_landsat -mindepth 1 ! -path "*/Input*" -exec rm -rf {} +
+	find $(MAKEFILE_DIR)docs/examples/data_worldview3 -mindepth 1 ! -path "*/Input*" -exec rm -rf {} +
