@@ -236,6 +236,7 @@ def mask_rasters(
     Outputs:
         Saved masked raster files to output_image_paths.
     """
+    if debug_logs: print(f'Masking {len(input_image_paths)} rasters')
 
     gdf = gpd.read_file(vector_mask_path)
 
@@ -263,6 +264,7 @@ def mask_rasters(
         target_res = resolutions_array.max(axis=0)
     else:
         target_res = resolutions_array.mean(axis=0)
+    if debug_logs: print(f'Resolution: {target_res}')
 
     temp_dir = tempfile.mkdtemp()
     tapped_paths = []
