@@ -4,6 +4,7 @@ import fiona
 import os
 import numpy as np
 import sys
+import json
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import List, Optional, Tuple, Literal
@@ -16,6 +17,7 @@ from rasterio.features import geometry_mask
 from rasterio.coords import BoundingBox
 
 from ..utils import _create_windows, _check_raster_requirements, _get_nodata_value, _choose_context
+from ..handlers import _resolve_input_output_paths
 _worker_dataset_cache = {}
 
 # def _mask_tile(
@@ -38,34 +40,38 @@ _worker_dataset_cache = {}
 #     return tile * mask_arr.astype(tile.dtype)
 
 def global_regression(
-    input_image_paths: List[str],
-    output_image_folder: str,
+    input_images: str | List[str],
+    output_images: Tuple[str, str] | List[str],
     *,
     custom_mean_factor: float = 1.0,
     custom_std_factor: float = 1.0,
-    output_global_basename: str = "_global",
     vector_mask_path: Optional[str] = None,
     window_size: int | Tuple[int, int] | None = None,
     debug_logs: bool = False,
     custom_nodata_value: float | None = None,
     parallel_workers: Literal["cpu"] | int | None = None,
     calculation_dtype_precision: str = "float32",
+    specify_model_images: Tuple[Literal["exclude", "include"], List[str]] | None = None,
+    save_adjustments: str | None = None,
+    load_adjustments: str | None = None,
     ) -> list:
     """
     Performs global radiometric normalization across overlapping images using least squares regression.
 
     Args:
-        input_image_paths (List[str]): List of input raster image paths.
-        output_image_folder (str): Folder to save normalized output images.
+        input_images (str | List[str]): A folder path containing `.tif` files to search for or a list of input image paths.
+        output_images (Tuple[str, str] | List[str]): Either a tuple of (output_folder, suffix) to generate output paths from, or a list of output image paths. If a list is provided, its length must match the number of input images.
         custom_mean_factor (float, optional): Weight for mean constraints in regression. Defaults to 1.0.
         custom_std_factor (float, optional): Weight for standard deviation constraints in regression. Defaults to 1.0.
-        output_global_basename (str, optional): Suffix for output filenames. Defaults to "_global".
         vector_mask_path (Optional[str], optional): Optional mask to limit stats to specific areas. Defaults to None.
         window_size (int | Tuple[int, int] | None): Tile size for processing: int for square tiles, (width, height) for custom size, or None for full image. Defaults to None.
         debug_logs (bool, optional): If True, prints debug information and constraint matrices. Defaults to False.
         custom_nodata_value (float | None, optional): Overrides detected NoData value. Defaults to None.
         parallel_workers (Literal["cpu"] | int | None): If set, enables multiprocessing. "cpu" = all cores, int = specific count, None = no parallel processing. Defaults to None.
         calculation_dtype_precision (str, optional): Data type used for internal calculations. Defaults to "float32".
+        specify_model_images (Tuple[Literal["exclude", "include"], List[str]] | None ): First item in tuples sets weather to 'include' or 'exclude' the listed images from model building statistics. Second item is the list of image names (without their extension) to apply criteria to. For example, if this param is only set to 'include' one image, all other images will be matched to that one image. Defaults to no exclusion.
+        save_adjustments (str | None, optional): The output path of a .json file to save adjustments parameters. Defaults to not saving.
+        load_adjustments (str | None, optional): If set, loads saved whole and overlapping statistics only for images that exist in the .json file. Other images will still have their statistics calculated. Defaults to None.
 
     Returns:
         List[str]: Paths to the globally adjusted output raster images.
@@ -73,122 +79,237 @@ def global_regression(
 
     print("Start global regression")
 
-    _check_raster_requirements(input_image_paths, debug_logs)
+    input_image_paths, output_image_paths = _resolve_input_output_paths(input_images, output_images)
+    input_image_names = list(input_image_paths.keys())
+    num_input_images = len(input_image_paths)
+
+
+    _check_raster_requirements(list(input_image_paths.values()), debug_logs)
+
     if isinstance(window_size, int): window_size = (window_size, window_size)
+    nodata_val = _get_nodata_value(list(input_image_paths.values()), custom_nodata_value)
 
-    nodata_val = _get_nodata_value(input_image_paths, custom_nodata_value)
+    # Find loaded and input files if load adjustments
+    loaded_model = {}
+    if load_adjustments:
+        with open(load_adjustments, "r") as f:
+            loaded_model = json.load(f)
+        _validate_adjustment_model_structure(loaded_model)
+        loaded_names = set(loaded_model.keys())
+        input_names = set(input_image_names)
+    else:
+        loaded_names = set([])
+        input_names = set(input_image_names)
 
+    matched = input_names & loaded_names
+    only_loaded = loaded_names - input_names
+    only_input = input_names - loaded_names
+    if debug_logs:
+        print(f"Total images: input images: {len(input_names)}, loaded images {len(loaded_names)}: ")
+        print(f"    Matched adjustments (to override) ({len(matched)}):", sorted(matched))
+        print(f"    Only in loaded adjustments (to add) ({len(only_loaded)}):", sorted(only_loaded))
+        print(f"    Only in input (to calculate) ({len(only_input)}):", sorted(only_input))
+
+    # Find images to include in model
+    included_names = list(matched | only_loaded | only_input)
+    if specify_model_images:
+        mode, names = specify_model_images
+        name_set = set(names)
+        if mode == "include":
+            included_names = [n for n in input_image_names if n in name_set]
+        elif mode == "exclude":
+            included_names = [n for n in input_image_names if n not in name_set]
+        excluded_names = [n for n in input_image_names if n not in included_names]
+    if debug_logs:
+        print("Images to influence the model:")
+        print(f"    Included in model ({len(included_names)}): {sorted(included_names)}")
+        if specify_model_images: print(f"    Excluded from model ({len(excluded_names)}): {sorted(excluded_names)}")
+        else: print(f"    Excluded from model (0): []")
+
+    # Calculate stats
     if debug_logs: print("Calculating statistics")
-    with rasterio.open(input_image_paths[0]) as src: num_bands = src.count
-    num_images = len(input_image_paths)
+    with rasterio.open(list(input_image_paths.values())[0]) as src: num_bands = src.count
 
+    # Get images bounds
     all_bounds = {}
-    for idx, p in enumerate(input_image_paths):
-        with rasterio.open(p) as ds:
-            all_bounds[idx] = ds.bounds
+    for name, path in input_image_paths.items():
+        with rasterio.open(path) as ds:
+            all_bounds[name] = ds.bounds
 
+    # Calculate overlap stats
     overlapping_pairs = _find_overlaps(all_bounds)
 
     all_overlap_stats = {}
-    for id_i, id_j in overlapping_pairs:
+    for name_i, name_j in overlapping_pairs:
+
+        # if name_i in loaded_model and name_j in loaded_model[name_i].get("overlap_stats", {}): # Check for this specific overlap
+        if name_i in loaded_model:
+            continue
+
         stats = _calculate_overlap_stats(
             num_bands,
-            input_image_paths[id_i],
-            input_image_paths[id_j],
-            id_i,
-            id_j,
-            all_bounds[id_i],
-            all_bounds[id_j],
+            input_image_paths[name_i],
+            input_image_paths[name_j],
+            name_i,
+            name_j,
+            all_bounds[name_i],
+            all_bounds[name_j],
             nodata_val,
             nodata_val,
             vector_mask_path=vector_mask_path,
             window_size=window_size,
             debug_logs=debug_logs,
         )
-        all_overlap_stats.update(
-            {
-                k_i: {
-                    **all_overlap_stats.get(k_i, {}),
-                    **{
-                        k_j: {**all_overlap_stats.get(k_i, {}).get(k_j, {}), **s}
-                        for k_j, s in v.items()
-                    },
-                }
-                for k_i, v in stats.items()
+
+        for k_i, v in stats.items():
+            all_overlap_stats[k_i] = {
+                **all_overlap_stats.get(k_i, {}),
+                **{
+                    k_j: {**all_overlap_stats.get(k_i, {}).get(k_j, {}), **s}
+                    for k_j, s in v.items()
+                },
             }
-        )
 
+
+    # Add loaded image stats to model
+    if load_adjustments:
+        for name_i, model_entry in loaded_model.items():
+            if name_i not in input_image_paths:
+                continue
+
+            for name_j, bands in model_entry.get("overlap_stats", {}).items():
+                if name_j not in input_image_paths:
+                    continue
+
+                all_overlap_stats.setdefault(name_i, {})[name_j] = {
+                    int(k.split("_")[1]): {
+                        "mean": bands[k]["mean"],
+                        "std": bands[k]["std"],
+                        "size": bands[k]["size"]
+                    } for k in bands
+                }
+
+    # Calculate whole stats
     all_whole_stats = {}
-    for idx, path in enumerate(input_image_paths):
-        all_whole_stats.update(
-            _calculate_whole_stats(
-                input_image_path=path,
-                nodata=nodata_val,
-                num_bands=num_bands,
-                image_id=idx,
-                vector_mask_path=vector_mask_path,
-                window_size=window_size,
+    for name, path in input_image_paths.items():
+        if name in loaded_model:
+            all_whole_stats[name] = {
+                int(k.split("_")[1]): {
+                    "mean": loaded_model[name]["whole_stats"][k]["mean"],
+                    "std": loaded_model[name]["whole_stats"][k]["std"],
+                    "size": loaded_model[name]["whole_stats"][k]["size"]
+                }
+                for k in loaded_model[name]["whole_stats"]
+            }
+        else:
+            all_whole_stats.update(
+                _calculate_whole_stats(
+                    input_image_path=path,
+                    nodata=nodata_val,
+                    num_bands=num_bands,
+                    image_name=name,
+                    vector_mask_path=vector_mask_path,
+                    window_size=window_size,
+                )
             )
-        )
 
-    all_params = np.zeros((num_bands, 2 * num_images, 1), dtype=float)
+    all_image_names = list(dict.fromkeys(input_image_names + list(loaded_model.keys())))
+    num_total = len(all_image_names)
+
+    # Print model sources
+    if debug_logs:
+        print(f"\nCreating model for {len(all_image_names)} total images from {len(included_names)} included:")
+        print(f"{'ID':<4}\t{'Source':<6}\t{'Inclusion':<8}\tName")
+        for i, name in enumerate(all_image_names):
+            source = "load" if name in (matched | only_loaded) else "calc"
+            included = "incl" if name in included_names else "excl"
+            print(f"{i:<4}\t{source:<6}\t{included:<8}\t{name}")
+
+    all_params = np.zeros((num_bands, 2 * num_total, 1), dtype=float)
+    image_names_with_id = [(i, name) for i, name in enumerate(all_image_names)]
     for b in range(num_bands):
-        # if debug_logs: print(f"Processing band {b} for {num_images} images")
+        if debug_logs: print(f"\nProcessing band {b}:")
 
         A, y, tot_overlap = [], [], 0
-        for i in range(num_images):
-
-            for j in range(i + 1, num_images):
-                stat = all_overlap_stats.get(i, {}).get(j)
+        for i, name_i in image_names_with_id:
+            for j, name_j in image_names_with_id[i + 1:]:
+                stat = all_overlap_stats.get(name_i, {}).get(name_j)
                 if stat is None:
                     continue
+
+                if name_i not in included_names and name_j not in included_names:
+                    continue
+
                 s = stat[b]["size"]
                 m1, v1 = stat[b]["mean"], stat[b]["std"]
                 m2, v2 = (
-                    all_overlap_stats[j][i][b]["mean"],
-                    all_overlap_stats[j][i][b]["std"],
+                    all_overlap_stats[name_j][name_i][b]["mean"],
+                    all_overlap_stats[name_j][name_i][b]["std"],
                 )
-                row_m = [0] * (2 * num_images)
-                row_s = [0] * (2 * num_images)
-                row_m[2 * i : 2 * i + 2] = [m1, 1]
-                row_m[2 * j : 2 * j + 2] = [-m2, -1]
+
+                row_m = [0] * (2 * num_total)
+                row_s = [0] * (2 * num_total)
+                row_m[2 * i: 2 * i + 2] = [m1, 1]
+                row_m[2 * j: 2 * j + 2] = [-m2, -1]
                 row_s[2 * i], row_s[2 * j] = v1, -v2
-                A.extend(
-                    [
-                        [v * s * custom_mean_factor for v in row_m],
-                        [v * s * custom_std_factor for v in row_s],
-                    ]
-                )
+
+                A.extend([
+                    [v * s * custom_mean_factor for v in row_m],
+                    [v * s * custom_std_factor for v in row_s],
+                ])
                 y.extend([0, 0])
                 tot_overlap += s
-        pjj = 1.0 if tot_overlap == 0 else tot_overlap / (2.0 * num_images)
-        for j in range(num_images):
-            mj = all_whole_stats[j][b]["mean"]
-            vj = all_whole_stats[j][b]["std"]
-            row_m = [0] * (2 * num_images)
-            row_s = [0] * (2 * num_images)
-            row_m[2 * j : 2 * j + 2] = [mj * pjj, 1 * pjj]
-            row_s[2 * j] = vj * pjj
+
+        pjj = 1.0 if tot_overlap == 0 else tot_overlap / (2.0 * num_total)
+
+        for name in included_names:
+            mj = all_whole_stats[name][b]["mean"]
+            vj = all_whole_stats[name][b]["std"]
+            j_idx = all_image_names.index(name)
+            row_m = [0] * (2 * num_total)
+            row_s = [0] * (2 * num_total)
+            row_m[2 * j_idx: 2 * j_idx + 2] = [mj * pjj, 1 * pjj]
+            row_s[2 * j_idx] = vj * pjj
             A.extend([row_m, row_s])
             y.extend([mj * pjj, vj * pjj])
 
+        for name in input_image_names:
+            if name in included_names:
+                continue
+            j_idx = all_image_names.index(name)
+            row = [0] * (2 * num_total)
+            A.append(row.copy())
+            y.append(0)
+            A.append(row.copy())
+            y.append(0)
+
         A_arr = np.asarray(A)
         y_arr = np.asarray(y)
-        res = least_squares(lambda p: np.asarray(A) @ p - np.asarray(y), [1, 0] * num_images)
+        res = least_squares(lambda p: A_arr @ p - y_arr, [1, 0] * num_total)
+
         if debug_logs:
-            overlap_pairs = overlapping_pairs
             _print_constraint_system(
                 constraint_matrix=A_arr,
                 adjustment_params=res.x,
                 observed_values_vector=y_arr,
-                overlap_pairs=overlap_pairs,
-                num_images=num_images,
+                overlap_pairs=overlapping_pairs,
+                image_names_with_id=image_names_with_id,
+
             )
 
-        all_params[b] = res.x.reshape((2 * num_images, 1))
+        all_params[b] = res.x.reshape((2 * num_total, 1))
 
-    if not os.path.exists(output_image_folder): os.makedirs(output_image_folder)
-    out_paths: List[str] = []
+    # Save adjustments
+    if save_adjustments:
+        _save_adjustments(
+            save_path=save_adjustments,
+            input_image_names=list(input_image_paths.keys()),
+            all_params=all_params,
+            all_whole_stats=all_whole_stats,
+            all_overlap_stats=all_overlap_stats,
+            num_bands=num_bands,
+            calculation_dtype_precision=calculation_dtype_precision
+        )
 
     if parallel_workers == "cpu":
         parallel = True
@@ -200,12 +321,13 @@ def global_regression(
         parallel = False
         max_workers = None
 
-    for img_idx, img_path in enumerate(input_image_paths):
-        base = os.path.splitext(os.path.basename(img_path))[0]
-        out_path = os.path.join(output_image_folder, f"{base}{output_global_basename}.tif")
-        out_paths.append(str(out_path))
+    out_paths: List[str] = []
+    for idx, (name, img_path) in enumerate(input_image_paths.items()):
+        out_path = output_image_paths[name]
+        out_paths.append(out_path)
+        if not os.path.exists(os.path.dirname(out_path)): os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
-        if debug_logs: print(f"Apply adjustments and saving results for {base}")
+        if debug_logs: print(f"Apply adjustments and saving results for {name}")
         with rasterio.open(img_path) as src:
             meta = src.meta.copy()
             meta.update({"count": num_bands, "nodata": nodata_val})
@@ -227,8 +349,8 @@ def global_regression(
                     )
 
                 for b in range(num_bands):
-                    a = all_params[b, 2 * img_idx, 0]
-                    b0 = all_params[b, 2 * img_idx + 1, 0]
+                    a = float(all_params[b, 2 * idx, 0])
+                    b0 = float(all_params[b, 2 * idx + 1, 0])
 
                     if parallel:
                         futs = [
@@ -262,6 +384,149 @@ def global_regression(
 
     print("Finished global regression")
     return out_paths
+
+
+def _save_adjustments(
+    save_path: str,
+    input_image_names: List[str],
+    all_params: np.ndarray,
+    all_whole_stats: dict,
+    all_overlap_stats: dict,
+    num_bands: int,
+    calculation_dtype_precision: str
+    ) -> None:
+    """
+    Saves adjustment parameters, whole-image stats, and overlap stats in a nested JSON format.
+
+    Args:
+        save_path (str): Output JSON path.
+        input_image_names (List[str]): List of input image names.
+        all_params (np.ndarray): Adjustment parameters, shape (bands, 2 * num_images, 1).
+        all_whole_stats (dict): Per-image stats (keyed by image name).
+        all_overlap_stats (dict): Per-pair overlap stats (keyed by image name).
+        num_bands (int): Number of bands.
+        calculation_dtype_precision (str): Precision for saving values (e.g., "float32").
+    """
+    cast = lambda x: float(np.dtype(calculation_dtype_precision).type(x))
+
+    full_model = {}
+    for i, name in enumerate(input_image_names):
+        full_model[name] = {
+            "adjustments": {
+                f"band_{b}": {
+                    "scale": cast(all_params[b, 2 * i, 0]),
+                    "offset": cast(all_params[b, 2 * i + 1, 0])
+                } for b in range(num_bands)
+            },
+            "whole_stats": {
+                f"band_{b}": {
+                    "mean": cast(all_whole_stats[name][b]["mean"]),
+                    "std": cast(all_whole_stats[name][b]["std"]),
+                    "size": int(all_whole_stats[name][b]["size"])
+                } for b in range(num_bands)
+            },
+            "overlap_stats": {}
+        }
+
+    for name_i, j_stats in all_overlap_stats.items():
+        for name_j, band_stats in j_stats.items():
+            if name_j not in full_model[name_i]["overlap_stats"]:
+                full_model[name_i]["overlap_stats"][name_j] = {}
+            for b, stats in band_stats.items():
+                full_model[name_i]["overlap_stats"][name_j][f"band_{b}"] = {
+                    "mean": cast(stats["mean"]),
+                    "std": cast(stats["std"]),
+                    "size": int(stats["size"])
+                }
+
+    with open(save_path, "w") as f:
+        json.dump(full_model, f, indent=2)
+
+def _validate_adjustment_model_structure(model: dict) -> None:
+    """
+    Validates the structure of a loaded adjustment model dictionary.
+
+    Ensures that:
+    - Each top-level key is an image name mapping to a dictionary.
+    - Each image has 'adjustments' and 'whole_stats' with per-band keys like 'band_0'.
+    - Each band entry in 'adjustments' contains 'scale' and 'offset'.
+    - Each band entry in 'whole_stats' contains 'mean', 'std', and 'size'.
+    - If present, 'overlap_stats' maps to other image names with valid per-band statistics.
+
+    The expected model structure is a dictionary with this format:
+
+    {
+        "image_name_1": {
+            "adjustments": {
+                "band_0": {"scale": float, "offset": float},
+                "band_1": {"scale": float, "offset": float},
+                ...
+            },
+            "whole_stats": {
+                "band_0": {"mean": float, "std": float, "size": int},
+                "band_1": {"mean": float, "std": float, "size": int},
+                ...
+            },
+            "overlap_stats": {
+                "image_name_2": {
+                    "band_0": {"mean": float, "std": float, "size": int},
+                    "band_1": {"mean": float, "std": float, "size": int},
+                    ...
+                },
+                ...
+            }
+        },
+        ...
+    }
+
+    - Keys are image basenames (without extension).
+    - Band keys are of the form "band_0", "band_1", etc.
+    - All numerical values are stored as floats (except 'size', which is an int).
+
+    Args:
+        model (dict): Parsed JSON adjustment model.
+
+    Raises:
+        ValueError: If any structural issues or missing keys are detected.
+    """
+    for image_name, image_data in model.items():
+        if not isinstance(image_data, dict):
+            raise ValueError(f"'{image_name}' must map to a dictionary.")
+
+        adjustments = image_data.get("adjustments")
+        if not isinstance(adjustments, dict):
+            raise ValueError(f"'{image_name}' is missing 'adjustments' dictionary.")
+
+        for band_key, band_vals in adjustments.items():
+            if not band_key.startswith("band_"):
+                raise ValueError(f"Invalid band key '{band_key}' in adjustments for '{image_name}'.")
+            if not {"scale", "offset"} <= band_vals.keys():
+                raise ValueError(f"Missing 'scale' or 'offset' in adjustments[{band_key}] for '{image_name}'.")
+
+        whole_stats = image_data.get("whole_stats")
+        if not isinstance(whole_stats, dict):
+            raise ValueError(f"'{image_name}' is missing 'whole_stats' dictionary.")
+
+        for band_key, stat_vals in whole_stats.items():
+            if not band_key.startswith("band_"):
+                raise ValueError(f"Invalid band key '{band_key}' in whole_stats for '{image_name}'.")
+            if not {"mean", "std", "size"} <= stat_vals.keys():
+                raise ValueError(f"Missing 'mean', 'std', or 'size' in whole_stats[{band_key}] for '{image_name}'.")
+
+        overlap_stats = image_data.get("overlap_stats", {})
+        if not isinstance(overlap_stats, dict):
+            raise ValueError(f"'overlap_stats' for '{image_name}' must be a dictionary if present.")
+
+        for other_image, bands in overlap_stats.items():
+            if not isinstance(bands, dict):
+                raise ValueError(f"'overlap_stats[{other_image}]' for '{image_name}' must be a dictionary.")
+            for band_key, stat_vals in bands.items():
+                if not band_key.startswith("band_"):
+                    raise ValueError(f"Invalid band key '{band_key}' in overlap_stats[{other_image}] for '{image_name}'.")
+                if not {"mean", "std", "size"} <= stat_vals.keys():
+                    raise ValueError(f"Missing 'mean', 'std', or 'size' in overlap_stats[{other_image}][{band_key}] for '{image_name}'.")
+    print("Loaded adjustments structure passed validation")
+
 
 def _process_tile_global(
     window: Window,
@@ -298,12 +563,12 @@ def _process_tile_global(
 
 
 def _print_constraint_system(
-    constraint_matrix: ndarray,
-    adjustment_params: ndarray,
-    observed_values_vector: ndarray,
+    constraint_matrix: np.ndarray,
+    adjustment_params: np.ndarray,
+    observed_values_vector: np.ndarray,
     overlap_pairs: tuple,
-    num_images: int,
-    ):
+    image_names_with_id: list[tuple[int, str]],
+) -> None:
     """
     Prints the constraint matrix system with labeled rows and columns for debugging regression inputs.
 
@@ -312,12 +577,11 @@ def _print_constraint_system(
         adjustment_params (ndarray): Solved adjustment parameters (regression output).
         observed_values_vector (ndarray): Target values in the regression system.
         overlap_pairs (tuple): Pairs of overlapping image indices used in constraints.
-        num_images (int): Total number of images in the system.
+        image_names_with_id (list of tuple): List of (ID, name) pairs corresponding to each image's position in the system.
 
     Returns:
         None
     """
-
     np.set_printoptions(
         suppress=True,
         precision=3,
@@ -327,31 +591,33 @@ def _print_constraint_system(
 
     print("constraint_matrix with labels:")
 
+    name_to_id = {n: i for i, n in image_names_with_id}
+
     # Build row labels
     row_labels = []
     for i, j in overlap_pairs:
-        row_labels.append(f"Overlap({i}-{j}) Mean Diff")
-        row_labels.append(f"Overlap({i}-{j}) Std Diff")
+        row_labels.append(f"Overlap({name_to_id[i]}-{name_to_id[j]}) Mean Diff")
+        row_labels.append(f"Overlap({name_to_id[i]}-{name_to_id[j]}) Std Diff")
 
-    for img_idx in range(num_images):
-        row_labels.append(f"Image {img_idx} Mean Cnstr")
-        row_labels.append(f"Image {img_idx} Std Cnstr")
+    for i, name in image_names_with_id:
+        row_labels.append(f"[{i}] Mean Cnstr")
+        row_labels.append(f"[{i}] Std Cnstr")
 
     # Build column labels
     col_labels = []
-    for i in range(num_images):
+    for i, name in image_names_with_id:
         col_labels.append(f"a{i}")
         col_labels.append(f"b{i}")
 
     # Print column headers
-    header = " " * 24  # extra space for row label
+    header = f"{'':<30}"
     for lbl in col_labels:
         header += f"{lbl:>18}"
     print(header)
 
     # Print matrix rows
     for row_label, row in zip(row_labels, constraint_matrix):
-        line = f"{row_label:>24}"  # adjust the width
+        line = f"{row_label:<30}"
         for val in row:
             line += f"{val:18.3f}"
         print(line)
@@ -362,31 +628,32 @@ def _print_constraint_system(
     print("\nobserved_values_vector:")
     np.savetxt(sys.stdout, observed_values_vector, fmt="%18.3f")
 
+
 def _find_overlaps(
-    image_bounds_dict: dict,
-    ):
+    image_bounds_dict: dict[str, rasterio.coords.BoundingBox]
+    ) -> tuple[tuple[str, str], ...]:
     """
-    Finds all pairs of images with overlapping spatial bounds.
+    Finds all pairs of image names with overlapping spatial bounds.
 
     Args:
-        image_bounds_dict (dict): Dictionary mapping image indices to their rasterio bounds.
+        image_bounds_dict (dict): Dictionary mapping image names to their rasterio bounds.
 
     Returns:
-        Tuple[Tuple[int, int], ...]: Pairs of image indices with overlapping extents.
+        Tuple[Tuple[str, str], ...]: Pairs of image names with overlapping extents.
     """
-
     overlaps = []
 
-    for key1, bounds1 in image_bounds_dict.items():
-        for key2, bounds2 in image_bounds_dict.items():
-            if key1 < key2:  # Avoid duplicate and self-comparison
-                if (
-                    bounds1.left < bounds2.right
-                    and bounds1.right > bounds2.left
-                    and bounds1.bottom < bounds2.top
-                    and bounds1.top > bounds2.bottom
-                ):
-                    overlaps.append((key1, key2))
+    keys = sorted(image_bounds_dict)
+    for i in range(len(keys)):
+        for j in range(i + 1, len(keys)):
+            k1, k2 = keys[i], keys[j]
+            b1, b2 = image_bounds_dict[k1], image_bounds_dict[k2]
+
+            if (
+                b1.left < b2.right and b1.right > b2.left and
+                b1.bottom < b2.top and b1.top > b2.bottom
+            ):
+                overlaps.append((k1, k2))
 
     return tuple(overlaps)
 
@@ -543,7 +810,7 @@ def _calculate_whole_stats(
     input_image_path: str,
     nodata: int | float,
     num_bands: int,
-    image_id: int,
+    image_name: str,
     vector_mask_path: str=None,
     window_size: tuple = None,
     ):
@@ -554,7 +821,7 @@ def _calculate_whole_stats(
         input_image_path (str): Path to the input raster image.
         nodata (int | float): NoData value to ignore during calculations.
         num_bands (int): Number of bands to process.
-        image_id (int): Unique ID for the image, used as a key in the output.
+        image_name (str): Unique name for the image, used as a key in the output.
         vector_mask_path (str, optional): Optional vector mask path to restrict statistics to masked regions. Defaults to None.
         window_size (tuple, optional): Optional tile size for block-wise processing. Defaults to None.
 
@@ -562,7 +829,7 @@ def _calculate_whole_stats(
         dict: Dictionary with image ID as key and per-band statistics as sub-dictionary.
     """
 
-    stats = {image_id: {}}
+    stats = {image_name: {}}
 
     with rasterio.open(input_image_path) as data:
         # Load geometries once if needed
@@ -611,7 +878,7 @@ def _calculate_whole_stats(
                 mean = 0.0
                 std = 0.0
 
-            stats[image_id][band_idx] = {
+            stats[image_name][band_idx] = {
                 "mean": float(mean),
                 "std": float(std),
                 "size": count,

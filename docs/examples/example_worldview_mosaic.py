@@ -25,15 +25,16 @@ num_workers = 5
 
 
 # %% Global matching
-input_image_paths = [os.path.join(input_folder, f) for f in os.listdir(input_folder) if f.lower().endswith(".tif")]
+saved_adjustments_path = os.path.join(global_folder, "GlobalAdjustments.json")
 
 global_regression(
-    input_image_paths,
-    global_folder,
+    input_folder,
+    (global_folder, "_global"),
     custom_mean_factor = 3, # Defualt 1; 3 often works better to 'move' the spectral mean of images closer together
     debug_logs=True,
     window_size=window_size,
-    parallel_workers=num_workers
+    parallel_workers=num_workers,
+    save_adjustments=saved_adjustments_path,
     )
 
 # %% Local matching
