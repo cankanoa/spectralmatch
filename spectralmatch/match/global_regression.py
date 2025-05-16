@@ -1,4 +1,6 @@
 import multiprocessing as mp
+import warnings
+
 import rasterio
 import fiona
 import os
@@ -142,8 +144,7 @@ def global_regression(
     all_overlap_stats = {}
     for name_i, name_j in overlapping_pairs:
 
-        # if name_i in loaded_model and name_j in loaded_model[name_i].get("overlap_stats", {}): # Check for this specific overlap
-        if name_i in loaded_model:
+        if name_i in loaded_model and name_j in loaded_model[name_i].get("overlap_stats", {}):
             continue
 
         stats = _calculate_overlap_stats(
@@ -225,6 +226,7 @@ def global_regression(
             included = "incl" if name in included_names else "excl"
             print(f"{i:<4}\t{source:<6}\t{included:<8}\t{name}")
 
+    # Build model
     all_params = np.zeros((num_bands, 2 * num_total, 1), dtype=float)
     image_names_with_id = [(i, name) for i, name in enumerate(all_image_names)]
     for b in range(num_bands):
@@ -237,6 +239,7 @@ def global_regression(
                 if stat is None:
                     continue
 
+                # This condition ensures that only overlaps involving at least one included image contribute constraints, allowing external images to be calibrated against the model without influencing it.
                 if name_i not in included_names and name_j not in included_names:
                     continue
 
@@ -276,7 +279,6 @@ def global_regression(
         for name in input_image_names:
             if name in included_names:
                 continue
-            j_idx = all_image_names.index(name)
             row = [0] * (2 * num_total)
             A.append(row.copy())
             y.append(0)
