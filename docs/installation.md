@@ -12,7 +12,7 @@
 
 ---
 
-## Installation as a Python Library for use in Code
+## Installation as a Python Library for use in Code (Recommended)
 
 ### 1. System requirements
 Before installing, ensure you have the following system-level prerequisites:
@@ -20,24 +20,25 @@ Before installing, ensure you have the following system-level prerequisites:
 - Python ≥ 3.10
 - PROJ ≥ 9.3
 - GDAL ≥ 3.6
+- pip
 
 An easy way to install these dependancies is to use [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install#quickstart-install-instructions):
 ```bash
-conda create -n spectralmatchtest python=3.10 "gdal>=3.6" "proj>=9.3" -c conda-forge
+conda create -n spectralmatch python=3.10 "gdal>=3.6" "proj>=9.3" -c conda-forge
 conda activate spectralmatch
 ```
 
 ### 2. Install spectralmatch
 
-The recommended way to install is via [PyPI](https://pypi.org/). (this method installs only the core code as a library):
+You can automatically install the library via [PyPI](https://pypi.org/). (this method installs only the core code as a library):
 
 ```bash
 pip install spectralmatch
 ```
 
-### 3. Run example code and modify for use (optional)
+### 3. Run an example and modify for your use (optional)
 
-Example scripts are provided to verify a successful installation and help you get started quickly at [`/docs/examples`](https://github.com/spectralmatch/spectralmatch/blob/main/docs/examples/)
+Example scripts are provided to verify a successful installation and help you get started quickly in the repository at [`/docs/examples`](https://github.com/spectralmatch/spectralmatch/blob/main/docs/examples/) and downloadable via this [`link`](https://download-directory.github.io/?url=https://github.com/spectralmatch/spectralmatch/tree/main/docs/examples&filename=spectralmatch_examples).
 
 ---
 
@@ -60,18 +61,17 @@ Before installing, ensure you have the following system-level prerequisites:
 
 An easy way to install these dependancies is to use [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install#quickstart-install-instructions):
 ```bash
-conda create -n spectralmatchtest python=3.10 "gdal=3.10.2" "proj>=9.3" -c conda-forge
+conda create -n spectralmatch python=3.10 "gdal=3.10.2" "proj>=9.3" -c conda-forge
 conda activate spectralmatch
-pip install spectralmatch
 ```
 
 ### 3. Install Dependancies (Optional Dev and Docs Dependancies)
 The `pyproject.toml` defines **core** dependancies to run the library and optional **dev**, and **docs** dependancies.
 
 ```bash
-pip install . # code dependencies
+pip install . # normal dependencies
 pip install -e ".[dev]"   # developer dependencies
 pip install -e ".[docs]"  # documentation dependencies
 ```
 
-### 3. Read the [Contributing Guide](https://spectralmatch.github.io/spectralmatch/contributing/) if you aim to contribute
+### 4. Read the [Contributing Guide](https://spectralmatch.github.io/spectralmatch/contributing/) if you aim to contribute

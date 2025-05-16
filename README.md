@@ -2,8 +2,7 @@
 
 [![Your-License-Badge](https://img.shields.io/badge/License-MIT-green)](#)
 [![codecov](https://codecov.io/gh/cankanoa/spatialmatch/graph/badge.svg?token=OKAM0BUUNS)](https://codecov.io/gh/cankanoa/spatialmatch)
-[![Open in Cloud Shell](https://img.shields.io/badge/Launch-Google_Cloud_Shell-blue?logo=googlecloud)](https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/spectralmatch/spectralmatch&cloudshell_working_dir=.&cloudshell_open_in_editor=docs/examples/example_global_to_local.py)
-
+[![Open in Cloud Shell](https://img.shields.io/badge/Launch-Google_Cloud_Shell-blue?logo=googlecloud)](https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/spectralmatch/spectralmatch&cloudshell_working_dir=.)
 > [!IMPORTANT]
 > This library is experimental and still under heavy development.
  
@@ -67,43 +66,19 @@ However, global correction alone cannot capture intra-image variability so a sec
 
 ---
 ## Installation
-> Other installation instructions are available in the [docs](https://spectralmatch.github.io/spectralmatch/installation/).
+> Detailed installation instructions are available in the [docs](https://spectralmatch.github.io/spectralmatch/installation/).
 
 ### Installation as a QGIS Plugin
-
-#### 1. [Download](https://qgis.org/download/) and install QGIS
-#### 2.	Open QGIS
-#### 3.	Go to Plugins → Manage and Install Plugins…
-#### 4.	Find spectralmatch in the list, install, and enable it
-#### 5.	Find the plugin in the Processing Toolbox
+Install the spectralmatch plugin in [QGIS](https://qgis.org/download/) and use it in the Processing Toolbox.
 
 ### Installation as a Python Library
 
-#### 1. System requirements
-Before installing, ensure you have the following system-level prerequisites:
+Before installing, ensure you have the following system-level prerequisites: `Python ≥ 3.10`, `pip`, `PROJ ≥ 9.3`, and `GDAL = 3.10.2`. Use this command to install the library:
 
-- Python ≥ 3.10
-- PROJ ≥ 9.3
-- GDAL ≥ 3.6
-
-An easy way to install these dependancies is to use [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install#quickstart-install-instructions):
-```bash
-conda create -n spectralmatchtest python=3.10 "gdal=3.10.2" "proj>=9.3" -c conda-forge
-conda activate spectralmatch
-pip install spectralmatch
-```
-
-#### 2. Install spectralmatch
-
-The recommended way to install is via [PyPI](https://pypi.org/). (this method installs only the core code as a library):
 
 ```bash
 pip install spectralmatch
 ```
-
-#### 3. Run example code and modify for use (optional)
-
-Example scripts are provided to verify a successful installation and help you get started quickly at [`/docs/examples`](https://github.com/spectralmatch/spectralmatch/blob/main/docs/examples/)
 
 ---
 

@@ -8,9 +8,9 @@ This project includes a [Makefile](https://github.com/spectralmatch/spectralmatc
 
 ## Collaboration Instructions
 
-We welcome all contributions the project! To get started:
+We welcome all contributions the project! Please be respectful and work towards improving the library. To get started:
 
-1. [Create an issue](https://github.com/spectralmatch/spectralmatch/issues/new) with the appropriate label describing the feature or improvement. Provide relevant context, desired timeline, any assistance needed, who will be responsible for the work, anticipated results, and any other details.
+1. [Create an issue](https://github.com/spectralmatch/spectralmatch/issues/new) describing the feature or bug or just to ask a question. Provide relevant context, desired timeline, any assistance needed, who will be responsible for the work, anticipated results, and any other details.
 
 2. [Fork the repository](https://github.com/spectralmatch/spectralmatch/fork) and create a new feature branch.
 
@@ -19,6 +19,20 @@ We welcome all contributions the project! To get started:
 4. Open a Pull Request against the main repository.
 
 ---
+
+## Design Guidelines and Philosophy
+- Keep code concise and simple
+- Adapt code for large datasets with windows, multiprocessing, progressive computations, etc
+- Keep code modular and have descriptive names
+- Create docstrings (Google style), tests, and update the docs for new functionality
+- Use similar naming convention and input parameters as other functions
+- Use PEP 8 code formatting 
+
+## File Cleanup
+Temporary generated files can be deleted once they are no longer needed via this command:
+```bash
+make clean
+```
 
 ## Docs
 
@@ -43,7 +57,7 @@ make docs-deploy
 ---
 
 ## Versioning
-Uses git tag to create annotated version tags and push them. This also syncs to Pypi.
+Uses git tag to create annotated version tags and push them. This also syncs to Pypi. New versions will be released when the maintainer determines sufficient new functionality has been added.
 ```bash
 make tag version=1.2.3
 ```

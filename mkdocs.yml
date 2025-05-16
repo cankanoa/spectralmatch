@@ -45,11 +45,9 @@ nav:
     - Contributing Guide: contributing.md
     - File Formats and Input Requirements: formats_and_requirements.md
     - Examples:
-        - "Match: Global to Local": examples/example_global_to_local.py
-        - Create Cloud Mask: examples/mask_cloud.py
-        - Create Vegetation Mask: examples/mask_ndvi.py
-        - Calculate Statistics for Figures: examples/calculate_statistics.py
-        - Benchmark Mulithreading: examples/benchmark.py
+        - WorldView Mosaic: examples/example_worldview_mosaic.py
+        - Landsat Time Series: examples/example_landsat_time_series.py
+        - Benchmark Multithreading: examples/benchmark.py
     - API Reference:
         - Matching Algorithms: api/match.md
         - Create Mask and Pseudo-Invariant Features: api/mask.md

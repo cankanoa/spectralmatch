@@ -309,7 +309,7 @@ def local_block_adjustment(
 def get_pre_computed_block_maps(
     load_block_maps: Tuple[str, List[str]],
     calculation_dtype_precision: str,
-    ):
+    ) -> Tuple[np.ndarray, np.ndarray, int, int, Tuple[float, float, float, float]]:
     """
     Load pre-computed block mean maps from files.
 
@@ -356,10 +356,6 @@ def get_pre_computed_block_maps(
 
 def validate_pre_computed_block_maps(
     block_local_means: np.ndarray,
-    block_reference_mean: np.ndarray,
-    num_row: int,
-    num_col: int,
-    bounds_canvas_coords: Tuple[float, float, float, float],
     input_image_paths: List[str]
     ) -> None:
     """
@@ -367,14 +363,10 @@ def validate_pre_computed_block_maps(
 
     Args:
         block_local_means: Array of shape (num_images, num_row, num_col, num_bands).
-        block_reference_mean: Array of shape (num_row, num_col, num_bands).
-        num_row: Number of block rows.
-        num_col: Number of block columns.
-        bounds_canvas_coords: Bounding box of the canvas (minx, miny, maxx, maxy).
         input_image_paths: List of input image file paths.
 
     Raises:
-        ValueError if any inconsistency is found.
+        ValueError: if any inconsistency is found.
     """
     if len(input_image_paths) != block_local_means.shape[0]:
         raise ValueError("Number of input images does not match number of local block maps.")
