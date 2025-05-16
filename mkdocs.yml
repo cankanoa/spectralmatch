@@ -43,6 +43,7 @@ nav:
     - Changelog: https://github.com/spectralmatch/spectralmatch/releases
     - Report Issues: https://github.com/spectralmatch/spectralmatch/issues
     - Contributing Guide: contributing.md
+    - File Formats and Input Requirements: formats_and_requirements.md
     - Examples:
         - "Match: Global to Local": examples/example_global_to_local.py
         - Create Cloud Mask: examples/mask_cloud.py
