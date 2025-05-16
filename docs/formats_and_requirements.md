@@ -2,12 +2,14 @@
 
 ## Input Raster Requirements
 Input rasters must meet specific criteria to ensure compatibility during processing. These are checked by _check_raster_requirements():
+
 - Have a valid geotransform
 - Share the same coordinate reference system (CRS)
 - Have an identical number of bands
 - Use consistent nodata values
 
 Additionally, all rasters should:
+
  - Have overlap which represents the same data in each raster
  - Have a consistant spectral profile 
 
@@ -50,7 +52,6 @@ This structure is validated by `_validate_adjustment_model_structure()` before u
 Block maps are spatial summaries of raster data, where each block represents the mean values of a group of pixels over a fixed region. They are used to reduce image resolution while preserving local radiometric characteristics, enabling efficient comparison and adjustment across images. Each map is structured as a grid of blocks with values for each spectral band. They can be saved as regular `geotif` files and together store this information: block_local_means, block_reference_mean, num_row, num_col, bounds_canvas_coords. 
 
 There are two types of block maps, although their format is exactly the same:
-
 
  - **Local Block Map:** Each block stores the mean value of all pixels within its boundary for a single image.
  - **Reference Block Map:** Each block is the mean of all images means for its boundary; simply the mean of all local block maps.
