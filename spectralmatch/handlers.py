@@ -18,9 +18,56 @@ from rasterio.transform import from_origin
 from rasterio.coords import BoundingBox
 
 
+def _resolve_input_output_paths(
+    input_images_item: str | List[str],
+    output_images_item: Tuple[str, str] | List[str],
+) -> tuple[dict[str, str], dict[str, str]]:
+    """
+    Resolves input and output image paths to dictionaries keyed by image basename.
+
+    Args:
+        input_images_item (str | List[str]): Input folder to loop through or list of input image paths.
+        output_images_item (Tuple[str, str] | List[str]): Either a tuple of (output folder, suffix) or a list of output paths.
+
+    Returns:
+        Tuple[Dict[str, str], Dict[str, str]]: (input_images, output_images)
+
+    Raises:
+        ValueError: If the number of input and output images does not match.
+    """
+    if isinstance(input_images_item, str):
+        input_paths = [
+            os.path.join(input_images_item, f)
+            for f in os.listdir(input_images_item)
+            if f.lower().endswith(".tif")
+        ]
+    else:
+        input_paths = input_images_item
+
+    input_images = {
+        os.path.splitext(os.path.basename(p))[0]: p for p in input_paths
+    }
+
+    if isinstance(output_images_item, tuple):
+        folder, suffix = output_images_item
+        output_images = {
+            name: os.path.join(folder, f"{name}{suffix}.tif")
+            for name in input_images
+        }
+    else:
+        output_images = {
+            os.path.splitext(os.path.basename(p))[0]: p for p in output_images_item
+        }
+
+    if len(input_images) != len(output_images):
+        raise ValueError(f"Input and output image counts do not match "
+                         f"({len(input_images)} vs {len(output_images)}).")
+
+    return input_images, output_images
+
 
 def _write_vector(
-    mem_ds: ogr.DataSource,
+    mem_ds: ogr.Layer,
     output_vector_path: str
     ) -> None:
     """
