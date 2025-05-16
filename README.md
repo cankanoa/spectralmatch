@@ -1,7 +1,7 @@
 # spectralmatch: A toolkit to perform Relative Radiometric Normalization, with utilities for generating seamlines, cloud masks, Pseudo-Invariant Features, and statistics
 
 [![Your-License-Badge](https://img.shields.io/badge/License-MIT-green)](#)
-[![codecov](https://codecov.io/gh/cankanoa/spatialmatch/graph/badge.svg?token=OKAM0BUUNS)](https://codecov.io/gh/cankanoa/spatialmatch)
+[![codecov](https://codecov.io/gh/spectralmatch/spectralmatch/graph/badge.svg?token=OKAM0BUUNS)](https://codecov.io/gh/spectralmatch/spectralmatch)
 [![Open in Cloud Shell](https://img.shields.io/badge/Launch-Google_Cloud_Shell-blue?logo=googlecloud)](https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/spectralmatch/spectralmatch&cloudshell_working_dir=.)
 > [!IMPORTANT]
 > This library is experimental and still under heavy development.
