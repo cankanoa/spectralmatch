@@ -24,23 +24,25 @@ def _resolve_input_output_paths(
 ) -> tuple[dict[str, str], dict[str, str]]:
     """
     Resolves input and output image paths to dictionaries keyed by image basename.
-
-    Args:
-        input_images_item (str | List[str]): Input folder to loop through or list of input image paths.
-        output_images_item (Tuple[str, str] | List[str]): Either a tuple of (output folder, suffix) or a list of output paths.
-
-    Returns:
-        Tuple[Dict[str, str], Dict[str, str]]: (input_images, output_images)
-
-    Raises:
-        ValueError: If the number of input and output images does not match.
     """
+    if not isinstance(input_images_item, (str, list)):
+        raise TypeError("`input_images_item` must be a string (folder) or list of paths.")
+
+    if not (isinstance(output_images_item, (tuple, list)) and (
+        isinstance(output_images_item, tuple) and len(output_images_item) == 2
+        or isinstance(output_images_item, list)
+    )):
+        raise TypeError("`output_images_item` must be a (folder, suffix) tuple or a list of paths.")
+
     if isinstance(input_images_item, str):
-        input_paths = [
-            os.path.join(input_images_item, f)
-            for f in os.listdir(input_images_item)
-            if f.lower().endswith(".tif")
-        ]
+        try:
+            input_paths = [
+                os.path.join(input_images_item, f)
+                for f in os.listdir(input_images_item)
+                if f.lower().endswith(".tif")
+            ]
+        except Exception as e:
+            raise ValueError(f"Failed to list files in input folder: {e}")
     else:
         input_paths = input_images_item
 
@@ -50,6 +52,8 @@ def _resolve_input_output_paths(
 
     if isinstance(output_images_item, tuple):
         folder, suffix = output_images_item
+        if not isinstance(folder, str) or not isinstance(suffix, str):
+            raise TypeError("Output folder and suffix must be strings.")
         output_images = {
             name: os.path.join(folder, f"{name}{suffix}.tif")
             for name in input_images
@@ -62,6 +66,14 @@ def _resolve_input_output_paths(
     if len(input_images) != len(output_images):
         raise ValueError(f"Input and output image counts do not match "
                          f"({len(input_images)} vs {len(output_images)}).")
+
+    # Create folders
+    folders = []
+    for path in output_images.values():
+        folders.append(os.path.dirname(path))
+    list(set(folders))
+    for folder in folders:
+        if not os.path.exists(folder): os.makedirs(folder, exist_ok=True)
 
     return input_images, output_images
 

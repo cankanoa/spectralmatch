@@ -1,7 +1,7 @@
 # %% Worldview Mosaic
 # This file demonstrates how to preprocess Worldview3 imagery into a mosaic using spectralmatch.
 # Starting from two overlapping Worldview3 images in reflectance, the process includes global matching, local matching, starting from saved block maps (optional for demonstration purposes), generating seamlines, and marging images, and before vs after statistics.
-# This script is set up to perform matching on all .tif files from a folder within the working directory called "Input" e.g. working_directory/Input/*.tif.
+# This script is set up to perform matching on all .tif files from a folder within the working directory called "Input" e.g. working_directory/Input/*.tif. The easiest way to process your own imagery is to move it inside that folder or change the working_directory to another folder with this structure, alternatively, you can pass in custom lists of image paths.
 
 # %% Setup
 import os
@@ -12,7 +12,8 @@ from spectralmatch.match.local_block_adjustment import local_block_adjustment
 from spectralmatch.handlers import merge_rasters, mask_rasters
 from spectralmatch.voronoi_center_seamline import voronoi_center_seamline
 
-working_directory = os.path.join(os.getcwd(), "data_worldview3") # If this does not automatically find the correct CWD, manually copy the path to the data_worldview3 folder
+# Important: If this does not automatically find the correct CWD, manually copy the path to the /data_worldview3 folder
+working_directory = os.path.join(os.getcwd(), "data_worldview3")
 print(working_directory)
 
 input_folder = os.path.join(working_directory, "Input")
@@ -38,16 +39,17 @@ global_regression(
     )
 
 # %% Local matching
-input_image_paths = [os.path.join(global_folder, f) for f in os.listdir(global_folder) if f.lower().endswith(".tif")]
+reference_map_path = os.path.join(local_folder, "ReferenceBlockMap", "ReferenceBlockMap.tif")
+local_maps_path = os.path.join(local_folder, "LocalBlockMap", "_LocalBlockMap.tif")
 
 local_block_adjustment(
-    input_image_paths,
-    local_folder,
+    global_folder,
+    (local_folder, "_local"),
     number_of_blocks=100,
     debug_logs=True,
     window_size=window_size,
     parallel_workers=num_workers,
-    save_block_maps=True,
+    save_block_maps=(reference_map_path, local_maps_path),
     )
 
 # %% Start from saved block maps (optional)
@@ -56,12 +58,12 @@ input_image_paths = [os.path.join(global_folder, f) for f in os.listdir(global_f
 old_local_folder = os.path.join(working_directory, "LocalMatch")
 new_local_folder = os.path.join(working_directory, "LocalMatch_New")
 
-saved_reference_block_path = os.path.join(old_local_folder, "BlockReferenceMean", "BlockReferenceMean.tif")
-saved_local_block_paths = [os.path.join(os.path.join(old_local_folder, "BlockLocalMean"), f) for f in os.listdir(os.path.join(old_local_folder, "BlockLocalMean")) if f.lower().endswith(".tif")]
+saved_reference_block_path = os.path.join(old_local_folder, "ReferenceBlockMap", "ReferenceBlockMap.tif")
+saved_local_block_paths = [os.path.join(os.path.join(old_local_folder, "LocalBlockMap"), f) for f in os.listdir(os.path.join(old_local_folder, "LocalBlockMap")) if f.lower().endswith(".tif")]
 
 local_block_adjustment(
     input_image_paths,
-    new_local_folder,
+    (local_folder, "_local"),
     number_of_blocks=100,
     debug_logs=True,
     window_size=window_size,
@@ -107,3 +109,52 @@ merge_rasters(
 )
 
 # %% Statistics
+from spectralmatch import (
+    compare_spatial_spectral_difference_individual_bands,
+    compare_image_spectral_profiles_pairs,
+    compare_image_spectral_profiles,
+    compare_spatial_spectral_difference_average)
+
+compare_spatial_spectral_difference_individual_bands(
+    (
+    '/image/a.tif',
+    '/image/b.tif'),
+    '/output.png'
+)
+
+
+compare_image_spectral_profiles_pairs(
+    {
+        'Image A': [
+            '/image/before/a.tif',
+            'image/after/a.tif'
+        ],
+        'Image B': [
+            '/image/before/b.tif',
+            '/image/after/b.tif'
+        ]
+    },
+    '/output.png'
+)
+
+
+compare_image_spectral_profiles(
+    {
+        'Image A': 'image/a.tif',
+        'Image B': '/image/b.tif'
+    },
+    "/output.png",
+    "Digital Number Spectral Profile Comparison",
+    'Band',
+    'Digital Number(0-2,047)',
+
+)
+
+
+compare_spatial_spectral_difference_average(
+    [
+        '/image/a.tif',
+        '/image/a.tif'
+     ],
+    '/output.png'
+)

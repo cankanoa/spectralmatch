@@ -89,7 +89,7 @@ Documentation is available at [spectralmatch.github.io/spectralmatch/](https://s
 ---
 ## Contributing Guide
 
-Contributing Guide is available at [spectralmatch.github.io/spectralmatch/development](https://spectralmatch.github.io/spectralmatch/development/).
+Contributing Guide is available at [spectralmatch.github.io/spectralmatch/contributing](https://spectralmatch.github.io/spectralmatch/contributing/).
 
 ---
 

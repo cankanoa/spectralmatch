@@ -327,7 +327,6 @@ def global_regression(
     for idx, (name, img_path) in enumerate(input_image_paths.items()):
         out_path = output_image_paths[name]
         out_paths.append(out_path)
-        if not os.path.exists(os.path.dirname(out_path)): os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
         if debug_logs: print(f"Apply adjustments and saving results for {name}")
         with rasterio.open(img_path) as src:
@@ -409,6 +408,9 @@ def _save_adjustments(
         num_bands (int): Number of bands.
         calculation_dtype_precision (str): Precision for saving values (e.g., "float32").
     """
+
+    if not os.path.exists(os.path.dirname(save_path)): os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
     cast = lambda x: float(np.dtype(calculation_dtype_precision).type(x))
 
     full_model = {}

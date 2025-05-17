@@ -10,8 +10,9 @@ Input rasters must meet specific criteria to ensure compatibility during process
 
 Additionally, all rasters should:
 
+ - Be a `.tif` file
  - Have overlap which represents the same data in each raster
- - Have a consistant spectral profile 
+ - Have a consistent spectral profile 
 
 ## Regression Parameters File
 Regression parameters can be stored in a `json` file which includes:
