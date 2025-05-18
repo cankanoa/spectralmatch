@@ -47,12 +47,13 @@ def global_regression(
     *,
     custom_mean_factor: float = 1.0,
     custom_std_factor: float = 1.0,
-    vector_mask_path: Optional[str] = None,
+    vector_mask_path: str | None = None,
     window_size: int | Tuple[int, int] | None = None,
     debug_logs: bool = False,
-    custom_nodata_value: float | None = None,
+    custom_nodata_value: float | int | None = None,
     parallel_workers: Literal["cpu"] | int | None = None,
-    calculation_dtype_precision: str = "float32",
+    calculation_dtype: str = "float32",
+    output_dtype: str | None = None,
     specify_model_images: Tuple[Literal["exclude", "include"], List[str]] | None = None,
     save_adjustments: str | None = None,
     load_adjustments: str | None = None,
@@ -65,12 +66,13 @@ def global_regression(
         output_images (Tuple[str, str] | List[str]): Either a tuple of (output_folder, suffix) to generate output paths from, or a list of output image paths. If a list is provided, its length must match the number of input images.
         custom_mean_factor (float, optional): Weight for mean constraints in regression. Defaults to 1.0.
         custom_std_factor (float, optional): Weight for standard deviation constraints in regression. Defaults to 1.0.
-        vector_mask_path (Optional[str], optional): Optional mask to limit stats to specific areas. Defaults to None.
+        vector_mask_path (str | None, optional): Optional mask to limit stats to specific areas. Defaults to None for no mask.
         window_size (int | Tuple[int, int] | None): Tile size for processing: int for square tiles, (width, height) for custom size, or None for full image. Defaults to None.
         debug_logs (bool, optional): If True, prints debug information and constraint matrices. Defaults to False.
-        custom_nodata_value (float | None, optional): Overrides detected NoData value. Defaults to None.
+        custom_nodata_value (float | int | None, optional): Overrides detected NoData value. Defaults to None.
         parallel_workers (Literal["cpu"] | int | None): If set, enables multiprocessing. "cpu" = all cores, int = specific count, None = no parallel processing. Defaults to None.
-        calculation_dtype_precision (str, optional): Data type used for internal calculations. Defaults to "float32".
+        calculation_dtype (str, optional): Data type used for internal calculations. Defaults to "float32".
+        output_dtype (str | None, optional): Data type for output rasters. Defaults to input image dtype.
         specify_model_images (Tuple[Literal["exclude", "include"], List[str]] | None ): First item in tuples sets weather to 'include' or 'exclude' the listed images from model building statistics. Second item is the list of image names (without their extension) to apply criteria to. For example, if this param is only set to 'include' one image, all other images will be matched to that one image. Defaults to no exclusion.
         save_adjustments (str | None, optional): The output path of a .json file to save adjustments parameters. Defaults to not saving.
         load_adjustments (str | None, optional): If set, loads saved whole and overlapping statistics only for images that exist in the .json file. Other images will still have their statistics calculated. Defaults to None.
@@ -80,6 +82,23 @@ def global_regression(
     """
 
     print("Start global regression")
+
+    _validate_input_params(
+        input_images,
+        output_images,
+        custom_mean_factor,
+        custom_std_factor,
+        vector_mask_path,
+        window_size,
+        debug_logs,
+        custom_nodata_value,
+        parallel_workers,
+        calculation_dtype,
+        output_dtype,
+        specify_model_images,
+        save_adjustments,
+        load_adjustments,
+    )
 
     input_image_paths, output_image_paths = _resolve_input_output_paths(input_images, output_images)
     input_image_names = list(input_image_paths.keys())
@@ -220,11 +239,11 @@ def global_regression(
     # Print model sources
     if debug_logs:
         print(f"\nCreating model for {len(all_image_names)} total images from {len(included_names)} included:")
-        print(f"{'ID':<4}\t{'Source':<6}\t{'Inclusion':<8}\tName")
+        print(f"    {'ID':<4}\t{'Source':<6}\t{'Inclusion':<8}\tName")
         for i, name in enumerate(all_image_names):
             source = "load" if name in (matched | only_loaded) else "calc"
             included = "incl" if name in included_names else "excl"
-            print(f"{i:<4}\t{source:<6}\t{included:<8}\t{name}")
+            print(f"    {i:<4}\t{source:<6}\t{included:<8}\t{name}")
 
     # Build model
     all_params = np.zeros((num_bands, 2 * num_total, 1), dtype=float)
@@ -310,7 +329,7 @@ def global_regression(
             all_whole_stats=all_whole_stats,
             all_overlap_stats=all_overlap_stats,
             num_bands=num_bands,
-            calculation_dtype_precision=calculation_dtype_precision
+            calculation_dtype=calculation_dtype
         )
 
     if parallel_workers == "cpu":
@@ -323,15 +342,16 @@ def global_regression(
         parallel = False
         max_workers = None
 
+    if debug_logs: print(f"Apply adjustments and saving results for:")
     out_paths: List[str] = []
     for idx, (name, img_path) in enumerate(input_image_paths.items()):
+        if debug_logs: print(f"    {name}")
+
         out_path = output_image_paths[name]
         out_paths.append(out_path)
-
-        if debug_logs: print(f"Apply adjustments and saving results for {name}")
         with rasterio.open(img_path) as src:
             meta = src.meta.copy()
-            meta.update({"count": num_bands, "nodata": nodata_val})
+            meta.update({"count": num_bands, "dtype": output_dtype or src.dtypes[0], "nodata": nodata_val})
             with rasterio.open(out_path, "w", **meta) as dst:
 
                 if window_size:
@@ -361,7 +381,7 @@ def global_regression(
                                         a,
                                         b0,
                                         nodata_val,
-                                        calculation_dtype_precision,
+                                        calculation_dtype,
                                         debug_logs,
                                         )
                             for w in windows
@@ -387,6 +407,88 @@ def global_regression(
     return out_paths
 
 
+def _validate_input_params(
+    input_images,
+    output_images,
+    custom_mean_factor,
+    custom_std_factor,
+    vector_mask_path,
+    window_size,
+    debug_logs,
+    custom_nodata_value,
+    parallel_workers,
+    calculation_dtype,
+    output_dtype,
+    specify_model_images,
+    save_adjustments,
+    load_adjustments,
+    ):
+    """
+    Validates the input parameters provided to the global_regression function.
+
+    Raises:
+        ValueError: If any input parameter is not of the expected type or structure.
+    """
+
+    if not isinstance(input_images, (str, list)):
+        raise ValueError("input_images must be a string or a list of strings.")
+    if isinstance(input_images, list) and not all(isinstance(p, str) for p in input_images):
+        raise ValueError("All elements in input_images list must be strings.")
+
+    if isinstance(output_images, tuple):
+        if len(output_images) != 2 or not all(isinstance(s, str) for s in output_images):
+            raise ValueError("If output_images is a tuple, it must contain exactly two strings (folder, suffix).")
+    elif isinstance(output_images, list):
+        if not all(isinstance(s, str) for s in output_images):
+            raise ValueError("If output_images is a list, it must contain only strings.")
+    else:
+        raise ValueError("output_images must be a tuple of two strings or a list of strings.")
+
+    if not isinstance(custom_mean_factor, (int, float)):
+        raise ValueError("custom_mean_factor must be a number.")
+    if not isinstance(custom_std_factor, (int, float)):
+        raise ValueError("custom_std_factor must be a number.")
+
+    if vector_mask_path is not None and not isinstance(vector_mask_path, str):
+        raise ValueError("vector_mask_path must be a string or None.")
+
+    if window_size is not None:
+        if not isinstance(window_size, (int, tuple)):
+            raise ValueError("window_size must be an int, a tuple of two ints, or None.")
+        if isinstance(window_size, tuple) and (len(window_size) != 2 or not all(isinstance(i, int) for i in window_size)):
+            raise ValueError("window_size tuple must have exactly two integers.")
+
+    if not isinstance(debug_logs, bool):
+        raise ValueError("debug_logs must be a boolean.")
+
+    if custom_nodata_value is not None and not isinstance(custom_nodata_value, (int, float)):
+        raise ValueError("custom_nodata_value must be a number or None.")
+
+    if parallel_workers is not None:
+        if parallel_workers != "cpu" and not isinstance(parallel_workers, int):
+            raise ValueError("parallel_workers must be 'cpu', an integer, or None.")
+
+    if not isinstance(calculation_dtype, str):
+        raise ValueError("calculation_dtype must be a string.")
+
+    if output_dtype is not None and not isinstance(output_dtype, str):
+        raise ValueError("output_dtype must be a string or None.")
+
+    if specify_model_images is not None:
+        if (not isinstance(specify_model_images, tuple) or
+            len(specify_model_images) != 2 or
+            specify_model_images[0] not in {"include", "exclude"} or
+            not isinstance(specify_model_images[1], list) or
+            not all(isinstance(s, str) for s in specify_model_images[1])):
+            raise ValueError("specify_model_images must be a tuple of ('include'|'exclude', list of strings).")
+
+    if save_adjustments is not None and not isinstance(save_adjustments, str):
+        raise ValueError("save_adjustments must be a string or None.")
+
+    if load_adjustments is not None and not isinstance(load_adjustments, str):
+        raise ValueError("load_adjustments must be a string or None.")
+
+
 def _save_adjustments(
     save_path: str,
     input_image_names: List[str],
@@ -394,7 +496,7 @@ def _save_adjustments(
     all_whole_stats: dict,
     all_overlap_stats: dict,
     num_bands: int,
-    calculation_dtype_precision: str
+    calculation_dtype: str
     ) -> None:
     """
     Saves adjustment parameters, whole-image stats, and overlap stats in a nested JSON format.
@@ -406,12 +508,12 @@ def _save_adjustments(
         all_whole_stats (dict): Per-image stats (keyed by image name).
         all_overlap_stats (dict): Per-pair overlap stats (keyed by image name).
         num_bands (int): Number of bands.
-        calculation_dtype_precision (str): Precision for saving values (e.g., "float32").
+        calculation_dtype (str): Precision for saving values (e.g., "float32").
     """
 
     if not os.path.exists(os.path.dirname(save_path)): os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
-    cast = lambda x: float(np.dtype(calculation_dtype_precision).type(x))
+    cast = lambda x: float(np.dtype(calculation_dtype).type(x))
 
     full_model = {}
     for i, name in enumerate(input_image_names):
@@ -538,7 +640,7 @@ def _process_tile_global(
     a: float,
     b: float,
     nodata: int | float,
-    calculation_dtype_precision: str,
+    calculation_dtype: str,
     debug_logs: bool,
     ):
     """
@@ -550,7 +652,7 @@ def _process_tile_global(
         a (float): Multiplicative factor for normalization.
         b (float): Additive offset for normalization.
         nodata (int | float): NoData value to ignore during processing.
-        calculation_dtype_precision (str): Data type to cast the block for computation.
+        calculation_dtype (str): Data type to cast the block for computation.
         debug_logs (bool): If True, prints processing information.
 
     Returns:
@@ -559,7 +661,7 @@ def _process_tile_global(
 
     # if debug_logs: print(f"Processing band: {band_idx}, window: {window}")
     ds = _worker_dataset_cache["ds"]
-    block = ds.read(band_idx + 1, window=window).astype(calculation_dtype_precision)
+    block = ds.read(band_idx + 1, window=window).astype(calculation_dtype)
 
     mask = block != nodata
     block[mask] = a * block[mask] + b

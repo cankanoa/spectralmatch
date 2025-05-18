@@ -28,19 +28,51 @@ num_workers = 5
 # %% Global matching
 saved_adjustments_path = os.path.join(global_folder, "GlobalAdjustments.json")
 
+
 global_regression(
     input_folder,
     (global_folder, "_global"),
-    custom_mean_factor = 3, # Defualt 1; 3 often works better to 'move' the spectral mean of images closer together
+    custom_mean_factor = 3, # Default is 1; 3 often works better to 'move' the spectral mean of images closer together
     debug_logs=True,
     window_size=window_size,
     parallel_workers=num_workers,
+    )
+
+# %% (OPTIONAL) Global matching all input images to the spectral profile of any number of specified images (regression will still be based on overlapping areas, however, only the *included* images statistics will influence the solution)
+new_global_folder = os.path.join(working_directory, "GlobalMatch_New")
+saved_adjustments_path = os.path.join(new_global_folder, "GlobalAdjustments.json")
+
+
+global_regression(
+    input_folder,
+    (new_global_folder, "_global"),
+    custom_mean_factor = 3, # Default is 1; 3 often works better to 'move' the spectral mean of images closer together
+    debug_logs=True,
+    window_size=window_size,
+    parallel_workers=num_workers,
+    specify_model_images=("include", ['worldview3_example_image_right']),
     save_adjustments=saved_adjustments_path,
+    )
+
+# %% (OPTIONAL) Global matching starting from precomputed statistics for images whole and overlap stats
+new_global_folder = os.path.join(working_directory, "GlobalMatch_New")
+saved_adjustments_path = os.path.join(new_global_folder, "GlobalAdjustments.json")
+
+
+global_regression(
+    input_folder,
+    (new_global_folder, "_global"),
+    custom_mean_factor = 3, # Default is 1; 3 often works better to 'move' the spectral mean of images closer together
+    debug_logs=True,
+    window_size=window_size,
+    parallel_workers=num_workers,
+    load_adjustments=saved_adjustments_path,
     )
 
 # %% Local matching
 reference_map_path = os.path.join(local_folder, "ReferenceBlockMap", "ReferenceBlockMap.tif")
 local_maps_path = os.path.join(local_folder, "LocalBlockMap", "_LocalBlockMap.tif")
+
 
 local_block_adjustment(
     global_folder,
@@ -49,28 +81,48 @@ local_block_adjustment(
     debug_logs=True,
     window_size=window_size,
     parallel_workers=num_workers,
+    )
+
+# %% (OPTIONAL) Local match with a larger canvas than images bounds (perhaps to anticipate adding additional imagery so you don't have to recalculate local block maps each rematch)
+input_image_paths = [os.path.join(global_folder, f) for f in os.listdir(global_folder) if f.lower().endswith(".tif")]
+
+old_local_folder = os.path.join(working_directory, "LocalMatch")
+new_local_folder = os.path.join(working_directory, "LocalMatch_New")
+
+reference_map_path = os.path.join(new_local_folder, "ReferenceBlockMap", "ReferenceBlockMap.tif")
+local_maps_path = os.path.join(new_local_folder, "LocalBlockMap", "_LocalBlockMap.tif")
+
+
+local_block_adjustment(
+    input_image_paths,
+    (new_local_folder, "_local"),
+    number_of_blocks=(30,30),
+    debug_logs=True,
+    window_size=window_size,
+    parallel_workers=num_workers,
+    override_bounds_canvas_coords = (193011.1444011169369332, 2184419.3597142999060452, 205679.2836037494416814, 2198309.8632259583100677),
     save_block_maps=(reference_map_path, local_maps_path),
     )
 
-# %% Start from saved block maps (optional)
+# %% (OPTIONAL) Local match from saved block maps (this code just passes in local maps, but if a reference map is passed in, it will match images to the reference map without recomputing it)
 input_image_paths = [os.path.join(global_folder, f) for f in os.listdir(global_folder) if f.lower().endswith(".tif")]
 
 old_local_folder = os.path.join(working_directory, "LocalMatch")
 new_local_folder = os.path.join(working_directory, "LocalMatch_New")
 
 saved_reference_block_path = os.path.join(old_local_folder, "ReferenceBlockMap", "ReferenceBlockMap.tif")
-saved_local_block_paths = [os.path.join(os.path.join(old_local_folder, "LocalBlockMap"), f) for f in os.listdir(os.path.join(old_local_folder, "LocalBlockMap")) if f.lower().endswith(".tif")]
+saved_local_block_paths = [os.path.join(os.path.join(new_local_folder, "LocalBlockMap"), f) for f in os.listdir(os.path.join(new_local_folder, "LocalBlockMap")) if f.lower().endswith(".tif")]
+
 
 local_block_adjustment(
     input_image_paths,
-    (local_folder, "_local"),
+    (new_local_folder, "_local"),
     number_of_blocks=100,
     debug_logs=True,
     window_size=window_size,
     parallel_workers=num_workers,
-    load_block_maps=(saved_reference_block_path, saved_local_block_paths)
+    load_block_maps=(None, saved_local_block_paths)
     )
-
 
 # %% Generate seamlines
 input_image_paths = [os.path.join(local_folder, f) for f in os.listdir(local_folder) if f.lower().endswith(".tif")]

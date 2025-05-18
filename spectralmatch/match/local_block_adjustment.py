@@ -27,13 +27,13 @@ def local_block_adjustment(
     input_images: str | List[str],
     output_images: Tuple[str, str] | List[str],
     *,
-    custom_nodata_value: float | None = None,
+    custom_nodata_value: float | int | None = None,
     number_of_blocks: int | Tuple[int, int] | Literal["coefficient_of_variation"] = 100,
     alpha: float = 1.0,
-    calculation_dtype_precision: str = "float32",
-    output_dtype: str = "int16",
+    calculation_dtype: str = "float32",
+    output_dtype: str | None = None,
     debug_logs: bool = False,
-    window_size: int | Tuple[int, int] | None | Literal["block"] = None,
+    window_size: int | Tuple[int, int] | Literal["block"] | None = None,
     correction_method: Literal["gamma", "linear"] = "gamma",
     parallel_workers: Literal["cpu"] | int | None = None,
     save_block_maps: Tuple[str, str] | None = None,
@@ -46,13 +46,13 @@ def local_block_adjustment(
     Args:
         input_images (str | List[str]): A folder path containing `.tif` files to search for or a list of input image paths.
         output_images (Tuple[str, str] | List[str]): Either a tuple of (output_folder, suffix) to generate output paths from, or a list of output image paths. If a list is provided, its length must match the number of input images.
-        custom_nodata_value (float | None, optional): Overrides detected NoData value. Defaults to None.
+        custom_nodata_value (float | int | None, optional): Overrides detected NoData value. Defaults to None.
         number_of_blocks (int | tuple | Literal["coefficient_of_variation"]): int as a target of blocks per image, tuple to set manually set total blocks width and height, coefficient_of_variation to find the number of blocks based on this metric.
         alpha (float, optional): Blending factor between reference and local means. Defaults to 1.0.
-        calculation_dtype_precision (str, optional): Precision for internal calculations. Defaults to "float32".
-        output_dtype (str, optional): Data type for output rasters. Defaults to "float32".
+        calculation_dtype (str, optional): Precision for internal calculations. Defaults to "float32".
+        output_dtype (str | None, optional): Data type for output rasters. Defaults to input image dtype.
         debug_logs (bool, optional): If True, prints progress. Defaults to False.
-        window_size (int | Tuple[int, int] | None | Literal["block"]): Tile size for processing: int for square tiles, (width, height) for custom size, None for full image, or "block" to set as the size of the block map. Defaults to None.
+        window_size (int | Tuple[int, int] | Literal["block"] | None): Tile size for processing: int for square tiles, (width, height) for custom size, or "block" to set as the size of the block map, None for full image. Defaults to None.
         correction_method (Literal["gamma", "linear"], optional): Local correction method. Defaults to "gamma".
         parallel_workers (Literal["cpu"] | int | None): If set, enables multiprocessing. "cpu" = all cores, int = specific count, None = no parallel processing. Defaults to None.
         save_block_maps (tuple(str, str) | None): If enabled, saves block maps for review, to resume processing later, or to add additional images to the reference map. First str is a path to save the global block map. The second is a path to save the local block maps with the name of each image appended to its basename (because there are multiple local maps).
@@ -76,6 +76,23 @@ def local_block_adjustment(
 
     print("Start local block adjustment")
 
+    _validate_input_params(
+            input_images,
+            output_images,
+            custom_nodata_value,
+            number_of_blocks,
+            alpha,
+            calculation_dtype,
+            output_dtype,
+            debug_logs,
+            window_size,
+            correction_method,
+            parallel_workers,
+            save_block_maps,
+            load_block_maps,
+            override_bounds_canvas_coords,
+    )
+
     input_image_pairs, output_image_pairs = _resolve_input_output_paths(input_images, output_images)
     input_image_names = list(input_image_pairs.keys())
     input_image_paths = list(input_image_pairs.values())
@@ -90,7 +107,7 @@ def local_block_adjustment(
 
     # Load data from precomputed block maps if set
     if load_block_maps:
-        loaded_block_local_means, loaded_block_reference_mean, loaded_num_row, loaded_num_col, loaded_bounds_canvas_coords = _get_pre_computed_block_maps(load_block_maps, calculation_dtype_precision, debug_logs)
+        loaded_block_local_means, loaded_block_reference_mean, loaded_num_row, loaded_num_col, loaded_bounds_canvas_coords = _get_pre_computed_block_maps(load_block_maps, calculation_dtype, debug_logs)
         loaded_names = list(loaded_block_local_means.keys())
         block_reference_mean = loaded_block_reference_mean
 
@@ -110,7 +127,7 @@ def local_block_adjustment(
         block_reference_mean = None
 
     if debug_logs:
-        print(f"Total images: input images: {len(input_image_names)}, loaded local block maps: {len(loaded_names) if load_block_maps else 0}")
+        print(f"Total images: input images: {len(input_image_names)}, loaded local block maps: {len(loaded_names) if load_block_maps else 0}:")
         print(f"    Matched local block maps (to override) ({len(matched)}):", sorted(matched))
         print(f"    Only in loaded local block maps (to use) ({len(only_loaded)}):", sorted(only_loaded))
         print(f"    Only in input (to compute) ({len(only_input)}):", sorted(only_input))
@@ -135,6 +152,9 @@ def local_block_adjustment(
             bounds_canvas_coords = loaded_bounds_canvas_coords
     else:
         bounds_canvas_coords = override_bounds_canvas_coords
+        if load_block_maps:
+            if bounds_canvas_coords != loaded_bounds_canvas_coords:
+                raise ValueError("Override bounds canvas coordinates do not match loaded block maps bounds")
 
     # Calculate the number of blocks
     if not load_block_maps:
@@ -147,7 +167,7 @@ def local_block_adjustment(
     else:
         num_row, num_col = loaded_num_row, loaded_num_col
 
-    if debug_logs: print("Computing local block maps")
+    if debug_logs: print("Computing local block maps:")
 
     # Compute local blocks
     local_blocks_to_calculate = {k: v for k, v in input_image_pairs.items() if k in only_input}
@@ -166,7 +186,7 @@ def local_block_adjustment(
             window_size,
             debug_logs,
             nodata_val,
-            calculation_dtype_precision,
+            calculation_dtype,
         )
         overlap = set(block_local_means) & set(local_blocks_to_load)
         if overlap:
@@ -184,7 +204,7 @@ def local_block_adjustment(
     if block_reference_mean is None:
         block_reference_mean = _compute_reference_blocks(
             block_local_means,
-            calculation_dtype_precision,
+            calculation_dtype,
             )
 
     if save_block_maps:
@@ -193,7 +213,7 @@ def local_block_adjustment(
             bounds_canvas_coords,
             reference_map_path,
             projection,
-            calculation_dtype_precision,
+            calculation_dtype,
             nodata_val,
             num_col,
             num_row,
@@ -204,7 +224,7 @@ def local_block_adjustment(
                 bounds_canvas_coords,
                 os.path.join(os.path.dirname(local_map_path), name + os.path.splitext(os.path.basename(local_map_path))[0] + ".tif"),
                 projection,
-                calculation_dtype_precision,
+                calculation_dtype,
                 nodata_val,
                 num_col,
                 num_row,
@@ -214,7 +234,7 @@ def local_block_adjustment(
             #     bounds_canvas_coords,
             #     os.path.join(output_image_folder, "BlockLocalCount", f"{input_image_name}_BlockLocalCount.tif"),
             #     projection,
-            #     calculation_dtype_precision,
+            #     calculation_dtype,
             #     nodata_val,
             #     num_col,
             #     num_row,
@@ -232,7 +252,7 @@ def local_block_adjustment(
         parallel = False
         max_workers = None
 
-    if debug_logs: print(f"Computing local correction, applying, and saving")
+    if debug_logs: print(f"Computing local correction, applying, and saving:")
     out_paths: List[str] = []
     for name, img_path in input_image_pairs.items():
         in_name = os.path.splitext(os.path.basename(img_path))[0]
@@ -240,10 +260,10 @@ def local_block_adjustment(
         out_name = os.path.splitext(os.path.basename(out_path))[0]
         out_paths.append(str(out_path))
 
-        if debug_logs: print(f"    Processing {in_name}")
+        if debug_logs: print(f"    {in_name}")
         with rasterio.open(img_path) as src:
             meta = src.meta.copy()
-            meta.update({"count": num_bands, "dtype": output_dtype, "nodata": nodata_val})
+            meta.update({"count": num_bands, "dtype": output_dtype or src.dtypes[0], "nodata": nodata_val})
             block_reference_mean_masked = np.where(
                 (np.arange(block_reference_mean.shape[0])[:, None, None] >= bounds_images_block_space[name][0]) &
                 (np.arange(block_reference_mean.shape[0])[:, None, None] < bounds_images_block_space[name][2]) &
@@ -300,7 +320,7 @@ def local_block_adjustment(
                                         nodata_val,
                                         alpha,
                                         correction_method,
-                                        calculation_dtype_precision,
+                                        calculation_dtype,
                                         )
                             for b in range(num_bands)
                             for w_id, w in enumerate(windows)
@@ -332,7 +352,7 @@ def local_block_adjustment(
                                 nodata_val,
                                 alpha,
                                 correction_method,
-                                calculation_dtype_precision,
+                                calculation_dtype,
                             )
                             dst.write(buf.astype(output_dtype), b_idx + 1, window=win_)
                             del buf, win_
@@ -349,9 +369,104 @@ def local_block_adjustment(
     return out_paths
 
 
+def _validate_input_params(
+    input_images,
+    output_images,
+    custom_nodata_value,
+    number_of_blocks,
+    alpha,
+    calculation_dtype,
+    output_dtype,
+    debug_logs,
+    window_size,
+    correction_method,
+    parallel_workers,
+    save_block_maps,
+    load_block_maps,
+    override_bounds_canvas_coords,
+    ):
+    """
+    Validates input parameters for `local_block_adjustment`.
+
+    Raises:
+        TypeError or ValueError with a concise message if any parameter is improperly set.
+    """
+    if not isinstance(input_images, (str, list)):
+        raise TypeError("input_images must be a folder path (str) or list of image paths.")
+    if isinstance(input_images, list) and not all(isinstance(p, str) for p in input_images):
+        raise TypeError("All elements in input_images must be strings.")
+
+    if not (isinstance(output_images, tuple) and len(output_images) == 2 or isinstance(output_images, list)):
+        raise TypeError("output_images must be a list of paths or a tuple (output_folder, suffix).")
+    if isinstance(output_images, list) and not all(isinstance(p, str) for p in output_images):
+        raise TypeError("All elements in output_images must be strings.")
+
+    if custom_nodata_value is not None and not isinstance(custom_nodata_value, (int, float)):
+        raise TypeError("custom_nodata_value must be a number or None.")
+
+    if not (
+        isinstance(number_of_blocks, int) or
+        (isinstance(number_of_blocks, tuple) and len(number_of_blocks) == 2 and all(isinstance(n, int) for n in number_of_blocks)) or
+        number_of_blocks == "coefficient_of_variation"
+    ):
+        raise ValueError("number_of_blocks must be an int, (int, int), or 'coefficient_of_variation'.")
+
+    if not isinstance(alpha, (int, float)):
+        raise TypeError("alpha must be a number.")
+
+    if not isinstance(calculation_dtype, str):
+        raise TypeError("calculation_dtype must be a string.")
+
+    if output_dtype is not None and not isinstance(output_dtype, str):
+        raise TypeError("output_dtype must be a string or None.")
+
+    if not isinstance(debug_logs, bool):
+        raise TypeError("debug_logs must be a boolean.")
+
+    if not (
+        window_size is None or
+        isinstance(window_size, int) or
+        (isinstance(window_size, tuple) and len(window_size) == 2 and all(isinstance(w, int) for w in window_size)) or
+        window_size == "block"
+    ):
+        raise ValueError("window_size must be int, (int, int), 'block', or None.")
+
+    if correction_method not in {"gamma", "linear"}:
+        raise ValueError("correction_method must be 'gamma' or 'linear'.")
+
+    if not (
+        parallel_workers is None or
+        parallel_workers == "cpu" or
+        isinstance(parallel_workers, int)
+    ):
+        raise ValueError("parallel_workers must be None, 'cpu', or an integer.")
+
+    if save_block_maps is not None:
+        if not (isinstance(save_block_maps, tuple) and len(save_block_maps) == 2 and all(isinstance(p, str) for p in save_block_maps)):
+            raise TypeError("save_block_maps must be a tuple of two strings or None.")
+
+    if load_block_maps is not None:
+        if not (
+            isinstance(load_block_maps, tuple) and len(load_block_maps) == 2 and
+            (isinstance(load_block_maps[0], str) or load_block_maps[0] is None) and
+            (isinstance(load_block_maps[1], list) or load_block_maps[1] is None)
+        ):
+            raise TypeError("load_block_maps must be (str, list), (str, None), (None, list), or None.")
+        if isinstance(load_block_maps[1], list) and not all(isinstance(p, str) for p in load_block_maps[1]):
+            raise TypeError("All elements in local block maps list must be strings.")
+
+    if override_bounds_canvas_coords is not None:
+        if not (
+            isinstance(override_bounds_canvas_coords, tuple) and
+            len(override_bounds_canvas_coords) == 4 and
+            all(isinstance(v, (int, float)) for v in override_bounds_canvas_coords)
+        ):
+            raise TypeError("override_bounds_canvas_coords must be a tuple of four numbers or None.")
+
+
 def _get_pre_computed_block_maps(
     load_block_maps: Tuple[Optional[str], Optional[List[str]]],
-    calculation_dtype_precision: str,
+    calculation_dtype: str,
     debug_logs: bool,
 ) -> Tuple[dict[str, np.ndarray], Optional[np.ndarray], Optional[int], Optional[int], Optional[Tuple[float, float, float, float]]]:
     """
@@ -362,7 +477,7 @@ def _get_pre_computed_block_maps(
             - Tuple[str, List[str]]: Load both reference and local block maps.
             - Tuple[str, None]: Load only the reference block map.
             - Tuple[None, List[str]]: Load only the local block maps.
-        calculation_dtype_precision (str): Numpy dtype to use for reading.
+        calculation_dtype (str): Numpy dtype to use for reading.
         debug_logs (bool): To print debug statements or not.
 
     Returns:
@@ -384,7 +499,7 @@ def _get_pre_computed_block_maps(
     # Load reference block map if provided
     if ref_path is not None:
         with rasterio.open(ref_path) as src:
-            ref_data = src.read().astype(calculation_dtype_precision).transpose(1, 2, 0)
+            ref_data = src.read().astype(calculation_dtype).transpose(1, 2, 0)
             nodata_val = src.nodata
             if nodata_val is not None:
                 ref_data[ref_data == nodata_val] = np.nan
@@ -398,7 +513,7 @@ def _get_pre_computed_block_maps(
         for p in local_paths:
             name = os.path.splitext(os.path.basename(p))[0]
             with rasterio.open(p) as src:
-                data = src.read().astype(calculation_dtype_precision).transpose(1, 2, 0)
+                data = src.read().astype(calculation_dtype).transpose(1, 2, 0)
                 nodata_val = src.nodata
                 if nodata_val is not None:
                     data[data == nodata_val] = np.nan
@@ -457,14 +572,14 @@ def get_bounding_rect_images_block_space(
 
 def _compute_reference_blocks(
     block_local_means: dict[str, np.ndarray],
-    calculation_dtype_precision: str,
+    calculation_dtype: str,
 ) -> np.ndarray:
     """
     Computes reference block means across images by averaging non-NaN local block means.
 
     Args:
         block_local_means (dict[str, np.ndarray]): Per-image block mean arrays.
-        calculation_dtype_precision (str): Numpy dtype for output array.
+        calculation_dtype (str): Numpy dtype for output array.
 
     Returns:
         np.ndarray: Reference block map of shape (num_row, num_col, num_bands)
@@ -472,7 +587,9 @@ def _compute_reference_blocks(
     shape = next(iter(block_local_means.values())).shape
     stacked = np.stack(list(block_local_means.values()), axis=0)  # shape: (num_images, H, W, B)
     with np.errstate(invalid='ignore'):
-        ref_block_mean = np.nanmean(stacked, axis=0).astype(calculation_dtype_precision)
+        valid_mask = np.any(~np.isnan(stacked), axis=0)
+        ref_block_mean = np.full(shape, np.nan, dtype=calculation_dtype)
+        ref_block_mean[valid_mask] = np.nanmean(stacked[:, valid_mask], axis=0).astype(calculation_dtype)
     return ref_block_mean
 
 
@@ -485,7 +602,7 @@ def _compute_tile_local(
     nodata_val: float | int,
     alpha: float,
     correction_method: Literal["gamma", "linear"],
-    calculation_dtype_precision: str,
+    calculation_dtype: str,
     ):
     """
     Applies local radiometric correction to a raster tile using bilinear interpolation between global and local block means.
@@ -499,7 +616,7 @@ def _compute_tile_local(
         nodata_val (float | int): NoData value in the raster.
         alpha (float): Weighting factor for blending reference and local statistics.
         correction_method (Literal["gamma", "linear"]): Method of radiometric correction.
-        calculation_dtype_precision (str): Internal computation precision (e.g., "float32").
+        calculation_dtype (str): Internal computation precision (e.g., "float32").
 
     Returns:
         tuple: (Window, band index, corrected tile as np.ndarray)
@@ -508,8 +625,8 @@ def _compute_tile_local(
         # if debug_logs: print(f"b{band_idx}w{w_id}[{window.col_off}:{window.row_off} {window.width}x{window.height}], ", end="", flush=True)
 
         ds = _worker_dataset_cache["ds"]
-        arr_in = ds.read(band_idx + 1, window=window).astype(calculation_dtype_precision)
-        arr_out = np.full_like(arr_in, nodata_val, dtype=calculation_dtype_precision)
+        arr_in = ds.read(band_idx + 1, window=window).astype(calculation_dtype)
+        arr_out = np.full_like(arr_in, nodata_val, dtype=calculation_dtype)
 
         mask = arr_in != nodata_val
         if not np.any(mask):
@@ -560,14 +677,14 @@ def _compute_tile_local(
         else: raise ValueError('Invalid correction method')
 
         # if save_block_maps:
-        #     gammas_array = np.full((*arr_in.shape, num_bands), np.nan, dtype=calculation_dtype_precision)
+        #     gammas_array = np.full((*arr_in.shape, num_bands), np.nan, dtype=calculation_dtype)
         #     gammas_array[..., band_idx][mask] = gammas
         #     _download_block_map(
         #         gammas_array,
         #         bounding_rect_image,
         #         os.path.join(output_image_folder, "Gamma", out_name + f"_Gamma.tif"),
         #         projection,
-        #         calculation_dtype_precision,
+        #         calculation_dtype,
         #         nodata_val,
         #         arr_in.shape[1],
         #         arr_in.shape[0],
@@ -614,7 +731,7 @@ def _compute_mosaic_coefficient_of_variation(
     reference_mean: float = 125.0,
     base_block_size: Tuple[int, int] = (10, 10),
     band_index: int = 1,
-    calculation_dtype_precision="float32",
+    calculation_dtype="float32",
     ) -> Tuple[int, int]:
     """
     Estimates block size for local adjustment using the coefficient of variation across input images.
@@ -626,7 +743,7 @@ def _compute_mosaic_coefficient_of_variation(
         reference_mean (float, optional): Reference mean for comparison. Defaults to 125.0.
         base_block_size (Tuple[int, int], optional): Base block size (rows, cols). Defaults to (10, 10).
         band_index (int, optional): Band index to use for statistics. Defaults to 1.
-        calculation_dtype_precision (str, optional): Data type for computation. Defaults to "float32".
+        calculation_dtype (str, optional): Data type for computation. Defaults to "float32".
 
     Returns:
         Tuple[int, int]: Estimated block size (rows, cols) adjusted based on coefficient of variation.
@@ -640,7 +757,7 @@ def _compute_mosaic_coefficient_of_variation(
         if ds is None:
             continue
         band = ds.GetRasterBand(band_index)
-        arr = band.ReadAsArray().astype(calculation_dtype_precision)
+        arr = band.ReadAsArray().astype(calculation_dtype)
         if nodata_value is not None:
             mask = arr != nodata_value
             arr = arr[mask]
@@ -681,7 +798,7 @@ def _compute_local_blocks(
     window_size: Optional[Tuple[int, int] | Literal["block"]] | None,
     debug_logs: bool,
     nodata_value: float,
-    calculation_dtype_precision: str,
+    calculation_dtype: str,
     valid_pixel_threshold: float = 0.001,
     ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
     """
@@ -699,7 +816,7 @@ def _compute_local_blocks(
             - (width, height): custom tile size in pixels.
         debug_logs (bool): Whether to print debug statements.
         nodata_value (float): Value representing NoData in input rasters.
-        calculation_dtype_precision (str): Numpy dtype string used for internal calculations.
+        calculation_dtype (str): Numpy dtype string used for internal calculations.
         valid_pixel_threshold (float): Minimum fraction of valid pixels required per block (0–1).
 
     Returns:
@@ -717,10 +834,10 @@ def _compute_local_blocks(
     min_required_pixels = valid_pixel_threshold * block_width * block_height
 
     for name, image_path in input_image_pairs.items():
-        if debug_logs: print(f'    Processing: {name}')
+        if debug_logs: print(f'    {name}')
         output_shape = (num_row, num_col, num_bands)
-        block_value_sum[name] = np.zeros(output_shape, dtype=calculation_dtype_precision)
-        block_pixel_count[name] = np.zeros(output_shape, dtype=calculation_dtype_precision)
+        block_value_sum[name] = np.zeros(output_shape, dtype=calculation_dtype)
+        block_pixel_count[name] = np.zeros(output_shape, dtype=calculation_dtype)
 
         with rasterio.open(image_path) as dataset:
             dataset_bounds = dataset.bounds
@@ -756,7 +873,7 @@ def _compute_local_blocks(
 
             for band_index in range(num_bands):
                 for tile_index, (row_idx, col_idx, tile_window) in enumerate(tiles_to_process):
-                    tile_data = dataset.read(band_index + 1, window=tile_window).astype(calculation_dtype_precision)
+                    tile_data = dataset.read(band_index + 1, window=tile_window).astype(calculation_dtype)
 
                     if nodata_value is not None:
                         valid_mask = tile_data != nodata_value
