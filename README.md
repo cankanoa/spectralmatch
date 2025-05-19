@@ -65,8 +65,7 @@ However, global correction alone cannot capture intra-image variability so a sec
 - **Local Adjustments:** Block-level color differences result from the global application of adjustments.
 
 ---
-## Installation
-> Detailed installation instructions are available in the [docs](https://spectralmatch.github.io/spectralmatch/installation/).
+## Quick Installation (Detailed instructions are in the [docs](https://spectralmatch.github.io/spectralmatch/installation/))
 
 ### Installation as a QGIS Plugin
 Install the spectralmatch plugin in [QGIS](https://qgis.org/download/) and use it in the Processing Toolbox.
