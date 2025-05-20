@@ -375,7 +375,6 @@ def local_block_adjustment(
 
             del block_reference_mean_masked, windows
             gc.collect()
-    print("Finished local block adjustment")
     return out_paths
 
 

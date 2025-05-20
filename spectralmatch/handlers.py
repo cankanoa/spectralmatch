@@ -4,18 +4,56 @@ import tempfile
 import rasterio
 import shutil
 import geopandas as gpd
+import pandas as pd
 
-from typing import Tuple, Optional, Literal, List, Optional, Literal, Tuple
+from typing import List, Optional, Literal, Tuple
 from osgeo import ogr
 from rasterio.windows import Window
-from rasterio.transform import from_bounds
-from rasterio.warp import aligned_target, reproject, transform_bounds
+from rasterio.warp import reproject
 from rasterio.enums import Resampling
 from .utils import _create_windows
-from rasterio.mask import mask
 from rasterio.features import geometry_mask
 from rasterio.transform import from_origin
 from rasterio.coords import BoundingBox
+
+
+def merge_vectors(
+    input_vector_paths: List[str],
+    merged_vector_path: str,
+    method: Literal["intersection", "union"],
+    debug_logs: bool = False,
+    ) -> None:
+    """
+    Merge multiple vector files using the specified geometric method.
+
+    Args:
+        input_vector_paths (List[str]): Paths to the input vector files (e.g., GeoJSON, Shapefile).
+        merged_vector_path (str): Output path where the merged vector will be saved.
+        method (Literal["intersection", "union"]): Method of merging geometries.
+            - "union": Combine all geometries into a single layer with union operation.
+            - "intersection": Retain only overlapping areas across all geometries.
+
+    Returns:
+        None
+    """
+
+    if debug_logs: print("start merge rasters")
+    if not os.path.exists(os.path.dirname(merged_vector_path)): os.makedirs(os.path.dirname(merged_vector_path), exist_ok=True)
+
+    geoms = [gpd.read_file(path) for path in input_vector_paths]
+    if method == "union":
+        merged = gpd.GeoDataFrame(pd.concat(geoms, ignore_index=True), crs=geoms[0].crs)
+    elif method == "intersection":
+        merged = geoms[0]
+        for gdf in geoms[1:]:
+            # Drop duplicate column names except 'geometry'
+            shared = set(merged.columns).intersection(gdf.columns) - {"geometry"}
+            gdf = gdf.drop(columns=shared)
+            merged = gpd.overlay(merged, gdf, how="intersection", keep_geom_type=False)
+    else:
+        raise ValueError(f"Unsupported merge method: {method}")
+
+    merged.to_file(merged_vector_path)
 
 
 def _resolve_input_output_paths(

@@ -403,8 +403,6 @@ def global_regression(
                             dst.write(buf.astype(meta["dtype"]), b + 1, window=win)
                 if parallel:
                     pool.shutdown()
-
-    print("Finished global regression")
     return out_paths
 
 

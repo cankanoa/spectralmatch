@@ -37,6 +37,7 @@ def create_cloud_mask_with_omnicloudmask(
         Saves a single-band cloud mask GeoTIFF at the specified path.
     """
 
+    if not os.path.exists(os.path.dirname(output_mask_path)): os.makedirs(os.path.dirname(output_mask_path), exist_ok=True)
     with rasterio.open(input_image_path) as src:
         if down_sample_m is not None:
             # Compute new dimensions based on the image bounds and the desired resolution.
