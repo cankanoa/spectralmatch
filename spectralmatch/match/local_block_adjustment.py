@@ -5,12 +5,14 @@ import numpy as np
 import rasterio
 import traceback
 import gc
+import fiona
 
 from osgeo import gdal
 from scipy.ndimage import map_coordinates, gaussian_filter
 from rasterio.windows import from_bounds, Window
 from rasterio.transform import from_origin
 from rasterio.crs import CRS
+from rasterio.features import geometry_mask
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Tuple, Optional, List, Literal, Union
 from multiprocessing import Lock
@@ -39,6 +41,8 @@ def local_block_adjustment(
     save_block_maps: Tuple[str, str] | None = None,
     load_block_maps: Tuple[str, List[str]] | Tuple[str, None]| Tuple[None, List[str]] | None = None,
     override_bounds_canvas_coords: Tuple[float, float, float, float] | None = None,
+    vector_mask_path: Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None = None,
+    block_valid_pixel_threshold: float = 0.001,
     )-> list:
     """
     Performs local radiometric adjustment on a set of raster images using block-based statistics.
@@ -69,6 +73,8 @@ def local_block_adjustment(
                 - The reference map defines the reference block statistics and the local maps define per-image local block statistics.
                 - Both reference and local maps must have the same canvas extent and dimensions which will be used to set those values.
         override_bounds_canvas_coords (Tuple[float, float, float, float] | None): Manually set (min_x, min_y, max_x, max_y) bounds to override the computed/loaded canvas extent. If you wish to have a larger extent than the current images, you can manually set this, along with setting a fixed number of blocks, to anticipate images will expand beyond the current extent.
+        vector_mask_path (Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None): A mask limiting pixels to include when calculating stats for each block in the format of a tuple with two or three items: literal "include" or "exclude" the mask area, str path to the vector file, optional str of field name in vector file that *includes* (can be substring) input image name to filter geometry by. It is only applied when calculating local blocks, as the reference map is calculated as the mean of all local blocks. Loaded block maps won't have this applied unless it was used when calculating them. The matching solution is still applied to these areas in the output. Defaults to None for no mask.
+        block_valid_pixel_threshold (float): Minimum fraction of valid pixels required to include a block (0–1).
 
     Returns:
         List[str]: Paths to the locally adjusted output raster images.
@@ -77,20 +83,22 @@ def local_block_adjustment(
     print("Start local block adjustment")
 
     _validate_input_params(
-            input_images,
-            output_images,
-            custom_nodata_value,
-            number_of_blocks,
-            alpha,
-            calculation_dtype,
-            output_dtype,
-            debug_logs,
-            window_size,
-            correction_method,
-            parallel_workers,
-            save_block_maps,
-            load_block_maps,
-            override_bounds_canvas_coords,
+        input_images,
+        output_images,
+        custom_nodata_value,
+        number_of_blocks,
+        alpha,
+        calculation_dtype,
+        output_dtype,
+        debug_logs,
+        window_size,
+        correction_method,
+        parallel_workers,
+        save_block_maps,
+        load_block_maps,
+        override_bounds_canvas_coords,
+        vector_mask_path,
+        block_valid_pixel_threshold,
     )
 
     input_image_pairs, output_image_pairs = _resolve_input_output_paths(input_images, output_images)
@@ -187,6 +195,8 @@ def local_block_adjustment(
             debug_logs,
             nodata_val,
             calculation_dtype,
+            vector_mask_path,
+            block_valid_pixel_threshold,
         )
         overlap = set(block_local_means) & set(local_blocks_to_load)
         if overlap:
@@ -384,7 +394,9 @@ def _validate_input_params(
     save_block_maps,
     load_block_maps,
     override_bounds_canvas_coords,
-    ):
+    vector_mask_path,
+    block_valid_pixel_threshold,
+):
     """
     Validates input parameters for `local_block_adjustment`.
 
@@ -462,6 +474,19 @@ def _validate_input_params(
             all(isinstance(v, (int, float)) for v in override_bounds_canvas_coords)
         ):
             raise TypeError("override_bounds_canvas_coords must be a tuple of four numbers or None.")
+
+    if vector_mask_path is not None:
+        if not (
+            isinstance(vector_mask_path, tuple) and
+            len(vector_mask_path) in {2, 3} and
+            vector_mask_path[0] in {"include", "exclude"} and
+            isinstance(vector_mask_path[1], str) and
+            (len(vector_mask_path) == 2 or isinstance(vector_mask_path[2], str))
+        ):
+            raise TypeError("vector_mask_path must be a tuple ('include'|'exclude', path [, field_name]) or None.")
+
+    if not isinstance(block_valid_pixel_threshold, float) or not (0 <= block_valid_pixel_threshold <= 1):
+        raise ValueError("block_valid_pixel_threshold must be a float between 0 and 1.")
 
 
 def _get_pre_computed_block_maps(
@@ -799,8 +824,9 @@ def _compute_local_blocks(
     debug_logs: bool,
     nodata_value: float,
     calculation_dtype: str,
-    valid_pixel_threshold: float = 0.001,
-    ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+    vector_mask_path: Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None,
+    block_valid_pixel_threshold: float,
+) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
     """
     Computes local block-wise mean values and valid pixel counts for each input image.
 
@@ -810,14 +836,12 @@ def _compute_local_blocks(
         num_row (int): Number of block rows in the canvas.
         num_col (int): Number of block columns in the canvas.
         num_bands (int): Number of bands per image.
-        window_size (tuple[int, int] | Literal["block"] | None): Tiling mode for reading:
-            - None: full image,
-            - "block": uses block-aligned windows based on canvas grid,
-            - (width, height): custom tile size in pixels.
+        window_size (tuple[int, int] | Literal["block"] | None): Tiling mode for reading.
         debug_logs (bool): Whether to print debug statements.
         nodata_value (float): Value representing NoData in input rasters.
         calculation_dtype (str): Numpy dtype string used for internal calculations.
-        valid_pixel_threshold (float): Minimum fraction of valid pixels required per block (0–1).
+        vector_mask_path (tuple): mode, path, optional_field (example: "include", "/path/to/mask.gpkg", "image_field").
+        block_valid_pixel_threshold (float): Minimum fraction of valid pixels required per block (0–1).
 
     Returns:
         Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
@@ -831,7 +855,6 @@ def _compute_local_blocks(
     x_min, y_min, x_max, y_max = bounds_canvas_coords
     block_width = (x_max - x_min) / num_col
     block_height = (y_max - y_min) / num_row
-    min_required_pixels = valid_pixel_threshold * block_width * block_height
 
     for name, image_path in input_image_pairs.items():
         if debug_logs: print(f'    {name}')
@@ -840,6 +863,28 @@ def _compute_local_blocks(
         block_pixel_count[name] = np.zeros(output_shape, dtype=calculation_dtype)
 
         with rasterio.open(image_path) as dataset:
+            pixel_size_x, pixel_size_y = abs(dataset.transform.a), abs(dataset.transform.e)
+            min_required_pixels = block_valid_pixel_threshold * (block_width * block_height) / (pixel_size_x * pixel_size_y)
+
+            # Load vector mask if applicable
+            geoms = None
+            invert = None
+            if vector_mask_path:
+                mode, path, *field = vector_mask_path
+                invert = mode == "exclude"
+                field_name = field[0] if field else None
+
+                with fiona.open(path, "r") as vector:
+                    if field_name:
+                        geoms = [
+                            feat["geometry"]
+                            for feat in vector
+                            if field_name in feat["properties"] and name in str(feat["properties"][field_name])
+                        ]
+                    else:
+                        geoms = [feat["geometry"] for feat in vector]
+            if geoms and debug_logs: print("        Applied mask")
+
             dataset_bounds = dataset.bounds
             tiles_to_process: List[Tuple[Optional[int], Optional[int], Window]] = []
 
@@ -875,11 +920,17 @@ def _compute_local_blocks(
                 for tile_index, (row_idx, col_idx, tile_window) in enumerate(tiles_to_process):
                     tile_data = dataset.read(band_index + 1, window=tile_window).astype(calculation_dtype)
 
-                    if nodata_value is not None:
-                        valid_mask = tile_data != nodata_value
-                    else:
-                        valid_mask = np.ones_like(tile_data, dtype=bool)
+                    if geoms:
+                        tile_transform = dataset.window_transform(tile_window)
+                        mask = geometry_mask(
+                            geoms,
+                            transform=tile_transform,
+                            invert=not invert,
+                            out_shape=(int(tile_window.height), int(tile_window.width))
+                        )
+                        tile_data[~mask] = nodata_value
 
+                    valid_mask = tile_data != nodata_value
                     valid_rows, valid_cols = np.where(valid_mask)
                     if valid_rows.size == 0:
                         continue
@@ -907,7 +958,6 @@ def _compute_local_blocks(
             )
 
     return block_mean_result, block_pixel_count
-
 
 
 def _weighted_bilinear_interpolation(

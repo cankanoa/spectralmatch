@@ -47,7 +47,7 @@ def global_regression(
     *,
     custom_mean_factor: float = 1.0,
     custom_std_factor: float = 1.0,
-    vector_mask_path: str | None = None,
+    vector_mask_path: Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None = None,
     window_size: int | Tuple[int, int] | None = None,
     debug_logs: bool = False,
     custom_nodata_value: float | int | None = None,
@@ -66,7 +66,7 @@ def global_regression(
         output_images (Tuple[str, str] | List[str]): Either a tuple of (output_folder, suffix) to generate output paths from, or a list of output image paths. If a list is provided, its length must match the number of input images.
         custom_mean_factor (float, optional): Weight for mean constraints in regression. Defaults to 1.0.
         custom_std_factor (float, optional): Weight for standard deviation constraints in regression. Defaults to 1.0.
-        vector_mask_path (str | None, optional): Optional mask to limit stats to specific areas. Defaults to None for no mask.
+        vector_mask_path (Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None): Mask to limit stats calculation to specific areas in the format of a tuple with two or three items: literal "include" or "exclude" the mask area, str path to the vector file, optional str of field name in vector file that *includes* (can be substring) input image name to filter geometry by. Loaded stats won't have this applied to them. The matching solution is still applied to these areas in the output. Defaults to None for no mask.
         window_size (int | Tuple[int, int] | None): Tile size for processing: int for square tiles, (width, height) for custom size, or None for full image. Defaults to None.
         debug_logs (bool, optional): If True, prints debug information and constraint matrices. Defaults to False.
         custom_nodata_value (float | int | None, optional): Overrides detected NoData value. Defaults to None.
@@ -230,6 +230,7 @@ def global_regression(
                     image_name=name,
                     vector_mask_path=vector_mask_path,
                     window_size=window_size,
+                    debug_logs=debug_logs
                 )
             )
 
@@ -422,7 +423,7 @@ def _validate_input_params(
     specify_model_images,
     save_adjustments,
     load_adjustments,
-    ):
+):
     """
     Validates the input parameters provided to the global_regression function.
 
@@ -449,8 +450,15 @@ def _validate_input_params(
     if not isinstance(custom_std_factor, (int, float)):
         raise ValueError("custom_std_factor must be a number.")
 
-    if vector_mask_path is not None and not isinstance(vector_mask_path, str):
-        raise ValueError("vector_mask_path must be a string or None.")
+    if vector_mask_path is not None:
+        if not isinstance(vector_mask_path, tuple) or len(vector_mask_path) not in {2, 3}:
+            raise ValueError("vector_mask_path must be a tuple of 2 or 3 elements.")
+        if vector_mask_path[0] not in {"include", "exclude"}:
+            raise ValueError("The first element of vector_mask_path must be 'include' or 'exclude'.")
+        if not isinstance(vector_mask_path[1], str):
+            raise ValueError("The second element of vector_mask_path must be a string (path to vector file).")
+        if len(vector_mask_path) == 3 and not isinstance(vector_mask_path[2], str):
+            raise ValueError("The third element of vector_mask_path, if provided, must be a string (field name).")
 
     if window_size is not None:
         if not isinstance(window_size, (int, tuple)):
@@ -768,49 +776,53 @@ def _calculate_overlap_stats(
     num_bands: int,
     input_image_path_i: str,
     input_image_path_j: str,
-    id_i: int,
-    id_j: int,
+    name_i: str,
+    name_j: str,
     bound_i: BoundingBox,
     bound_j: BoundingBox,
     nodata_i: int | float,
     nodata_j: int | float,
-    vector_mask_path: str=None,
+    vector_mask_path: Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str]| None = None,
     window_size: tuple = None,
-    debug_logs: bool =False,
-    ):
+    debug_logs: bool = False,
+):
     """
     Calculates mean, standard deviation, and valid pixel count for overlapping regions between two images.
-
-    Args:
-        num_bands (int): Number of bands in the images.
-        input_image_path_i (str): Path to the first image.
-        input_image_path_j (str): Path to the second image.
-        id_i (int): Index of the first image.
-        id_j (int): Index of the second image.
-        bound_i (BoundingBox): Spatial bounds of the first image.
-        bound_j (BoundingBox): Spatial bounds of the second image.
-        nodata_i (int | float): NoData value for the first image.
-        nodata_j (int | float): NoData value for the second image.
-        vector_mask_path (str, optional): Optional path to a vector mask for clipping. Defaults to None.
-        window_size (tuple, optional): Optional tile size for chunked processing. Defaults to None.
-        debug_logs (bool, optional): If True, prints debug information. Defaults to False.
-
-    Returns:
-        dict: Nested dictionary of overlap statistics indexed by image ID and band.
     """
 
-    stats = {id_i: {id_j: {}}, id_j: {id_i: {}}}
+    stats = {name_i: {name_j: {}}, name_j: {name_i: {}}}
 
     with rasterio.open(input_image_path_i) as src_i, rasterio.open(input_image_path_j) as src_j:
+        # Parse geometry masks separately per image
+        geoms_i = geoms_j = None
+        invert = False
         if vector_mask_path:
-            with fiona.open(vector_mask_path, "r") as vector:
-                geoms = [feat["geometry"] for feat in vector]
-        else:
-            geoms = None
+            mode, path, *field = vector_mask_path
+            invert = mode == "exclude"
+            field_name = field[0] if field else None
 
-        transform_i = src_i.transform
-        transform_j = src_j.transform
+            with fiona.open(path, "r") as vector:
+                features = list(vector)  # Cache all features
 
+                if field_name:
+                    geoms_i = [
+                        feat["geometry"]
+                        for feat in features
+                        if field_name in feat["properties"] and name_i in str(feat["properties"][field_name])
+                    ]
+                    geoms_j = [
+                        feat["geometry"]
+                        for feat in features
+                        if field_name in feat["properties"] and name_j in str(feat["properties"][field_name])
+                    ]
+                else:
+                    geoms_i = geoms_j = [feat["geometry"] for feat in features]
+        if debug_logs:
+            if geoms_i: print(f"        Applied mask to {name_i}")
+            if geoms_j: print(f"        Applied mask to {name_j}")
+
+
+        # Determine overlap bounds
         x_min = max(bound_i.left, bound_j.left)
         x_max = min(bound_i.right, bound_j.right)
         y_min = max(bound_i.bottom, bound_j.bottom)
@@ -821,18 +833,18 @@ def _calculate_overlap_stats(
         if x_min >= x_max or y_min >= y_max:
             return stats
 
-        row_min_i, col_min_i = rowcol(transform_i, x_min, y_max)
-        row_max_i, col_max_i = rowcol(transform_i, x_max, y_min)
-        row_min_j, col_min_j = rowcol(transform_j, x_min, y_max)
-        row_max_j, col_max_j = rowcol(transform_j, x_max, y_min)
+        row_min_i, col_min_i = rowcol(src_i.transform, x_min, y_max)
+        row_max_i, col_max_i = rowcol(src_i.transform, x_max, y_min)
+        row_min_j, col_min_j = rowcol(src_j.transform, x_min, y_max)
+        row_max_j, col_max_j = rowcol(src_j.transform, x_max, y_min)
 
         height = min(row_max_i - row_min_i, row_max_j - row_min_j)
         width = min(col_max_i - col_min_i, col_max_j - col_min_j)
 
         if debug_logs:
-            print(f"For overlap {os.path.basename(input_image_path_i)} with {os.path.basename(input_image_path_j)}:")
-            print(f"    Pixel window {os.path.basename(input_image_path_i)}: cols: {col_min_i} to {col_max_i} ({col_max_i - col_min_i}), rows: {row_min_i} to {row_max_i} ({row_max_i - row_min_i})")
-            print(f"    Pixel window {os.path.basename(input_image_path_j)}: cols: {col_min_j} to {col_max_j} ({col_max_j - col_min_j}), rows: {row_min_j} to {row_max_j} ({row_max_j - row_min_j})")
+            print(f"For overlap {name_i} with {name_j}:")
+            print(f"    Pixel window {name_i}: cols: {col_min_i} to {col_max_i}, rows: {row_min_i} to {row_max_i}")
+            print(f"    Pixel window {name_j}: cols: {col_min_j} to {col_max_j}, rows: {row_min_j} to {row_max_j}")
 
         for band in range(num_bands):
             if window_size:
@@ -851,16 +863,20 @@ def _calculate_overlap_stats(
                 block_i = src_i.read(band + 1, window=offset_to_window_i)
                 block_j = src_j.read(band + 1, window=offset_to_window_j)
 
-                if geoms:
+                if geoms_i:
                     transform_i_win = src_i.window_transform(offset_to_window_i)
-                    transform_j_win = src_j.window_transform(offset_to_window_j)
-
-                    mask_i = geometry_mask(geoms, transform=transform_i_win, invert=True,
-                                           out_shape=(int(offset_to_window_i.height), int(offset_to_window_i.width)))
-                    mask_j = geometry_mask(geoms, transform=transform_j_win, invert=True,
-                                           out_shape=(int(offset_to_window_j.height), int(offset_to_window_j.width)))
-
+                    mask_i = geometry_mask(
+                        geoms_i, transform=transform_i_win, invert=not invert,
+                        out_shape=(int(offset_to_window_i.height), int(offset_to_window_i.width))
+                    )
                     block_i[~mask_i] = nodata_i
+
+                if geoms_j:
+                    transform_j_win = src_j.window_transform(offset_to_window_j)
+                    mask_j = geometry_mask(
+                        geoms_j, transform=transform_j_win, invert=not invert,
+                        out_shape=(int(offset_to_window_j.height), int(offset_to_window_j.width))
+                    )
                     block_j[~mask_j] = nodata_j
 
                 valid = (block_i != nodata_i) & (block_j != nodata_j)
@@ -871,12 +887,12 @@ def _calculate_overlap_stats(
             v_i = np.concatenate(combined_i) if combined_i else np.array([])
             v_j = np.concatenate(combined_j) if combined_j else np.array([])
 
-            stats[id_i][id_j][band] = {
+            stats[name_i][name_j][band] = {
                 "mean": float(np.mean(v_i)) if v_i.size else 0,
                 "std": float(np.std(v_i)) if v_i.size else 0,
                 "size": int(v_i.size),
             }
-            stats[id_j][id_i][band] = {
+            stats[name_j][name_i][band] = {
                 "mean": float(np.mean(v_j)) if v_j.size else 0,
                 "std": float(np.std(v_j)) if v_j.size else 0,
                 "size": int(v_j.size),
@@ -917,9 +933,10 @@ def _calculate_whole_stats(
     nodata: int | float,
     num_bands: int,
     image_name: str,
-    vector_mask_path: str=None,
+    vector_mask_path: Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None = None,
     window_size: tuple = None,
-    ):
+    debug_logs: bool = False,
+):
     """
     Computes mean, standard deviation, and valid pixel count for each band in a single image.
 
@@ -928,8 +945,9 @@ def _calculate_whole_stats(
         nodata (int | float): NoData value to ignore during calculations.
         num_bands (int): Number of bands to process.
         image_name (str): Unique name for the image, used as a key in the output.
-        vector_mask_path (str, optional): Optional vector mask path to restrict statistics to masked regions. Defaults to None.
-        window_size (tuple, optional): Optional tile size for block-wise processing. Defaults to None.
+        vector_mask_path (Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None): ("include"/"exclude", path, optional field_name). Defaults to None.
+        window_size (tuple, optional): Optional tile size for block-wise processing.
+        debug_logs (bool): To output debug logs or not.
 
     Returns:
         dict: Dictionary with image ID as key and per-band statistics as sub-dictionary.
@@ -938,12 +956,23 @@ def _calculate_whole_stats(
     stats = {image_name: {}}
 
     with rasterio.open(input_image_path) as data:
-        # Load geometries once if needed
+        geoms = None
+        invert = False
+
         if vector_mask_path:
-            with fiona.open(vector_mask_path, "r") as vector:
-                geoms = [feat["geometry"] for feat in vector]
-        else:
-            geoms = None
+            mode, path, *field = vector_mask_path
+            invert = mode == "exclude"
+            field_name = field[0] if field else None
+            with fiona.open(path, "r") as vector:
+                if field_name:
+                    geoms = [
+                        feat["geometry"]
+                        for feat in vector
+                        if field_name in feat["properties"] and image_name in str(feat["properties"][field_name])
+                    ]
+                else:
+                    geoms = [feat["geometry"] for feat in vector]
+        if geoms and debug_logs: print("        Applied mask")
 
         for band_idx in range(num_bands):
             mean = 0.0
@@ -963,8 +992,8 @@ def _calculate_whole_stats(
                     mask = geometry_mask(
                         geoms,
                         transform=transform,
-                        invert=True,
-                        out_shape=(int(win.height), int(win.width))
+                        invert=not invert,
+                        out_shape=(int(win.height), int(win.width)),
                     )
                     block[~mask] = nodata
 
