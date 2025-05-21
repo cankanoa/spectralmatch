@@ -5,12 +5,7 @@
 
 # %% Setup
 import os
-import importlib
-
-from spectralmatch.match.global_regression import global_regression
-from spectralmatch.match.local_block_adjustment import local_block_adjustment
-from spectralmatch.handlers import merge_rasters, mask_rasters
-from spectralmatch.voronoi_center_seamline import voronoi_center_seamline
+from spectralmatch import *
 
 # Important: If this does not automatically find the correct CWD, manually copy the path to the /data_worldview3 folder
 working_directory = os.path.join(os.getcwd(), "data_worldview3")
@@ -19,7 +14,6 @@ print(working_directory)
 input_folder = os.path.join(working_directory, "Input")
 global_folder = os.path.join(working_directory, "GlobalMatch")
 local_folder = os.path.join(working_directory, "LocalMatch")
-clipped_images = os.path.join(working_directory, "ClippedImages")
 
 window_size = 128
 num_workers = 5
@@ -31,7 +25,7 @@ saved_adjustments_path = os.path.join(global_folder, "GlobalAdjustments.json")
 
 global_regression(
     input_folder,
-    (global_folder, "_global"),
+    (global_folder, "_Global"),
     custom_mean_factor = 3, # Default is 1; 3 often works better to 'move' the spectral mean of images closer together
     debug_logs=True,
     window_size=window_size,
@@ -76,7 +70,7 @@ local_maps_path = os.path.join(local_folder, "LocalBlockMap", "_LocalBlockMap.ti
 
 local_block_adjustment(
     global_folder,
-    (local_folder, "_local"),
+    (local_folder, "_Local"),
     number_of_blocks=100,
     debug_logs=True,
     window_size=window_size,

@@ -4,18 +4,84 @@ import tempfile
 import rasterio
 import shutil
 import geopandas as gpd
+import glob
+import pandas as pd
 
-from typing import Tuple, Optional, Literal, List, Optional, Literal, Tuple
+from typing import List, Optional, Literal, Tuple
 from osgeo import ogr
 from rasterio.windows import Window
-from rasterio.transform import from_bounds
-from rasterio.warp import aligned_target, reproject, transform_bounds
+from rasterio.warp import reproject
 from rasterio.enums import Resampling
 from .utils import _create_windows
-from rasterio.mask import mask
 from rasterio.features import geometry_mask
 from rasterio.transform import from_origin
 from rasterio.coords import BoundingBox
+
+
+def merge_vectors(
+        input_vector_paths: List[str],
+        merged_vector_path: str,
+        method: Literal["intersection", "union", "keep_all"],
+        debug_logs: bool = False,
+        create_name_attribute: Optional[Tuple[str, str]] = None,
+) -> None:
+    """
+    Merge multiple vector files using the specified geometric method.
+
+    Args:
+        input_vector_paths (List[str]): Paths to input vector files.
+        merged_vector_path (str): Path to save merged output.
+        method (Literal["intersection", "union", "keep_all"]): Merge strategy.
+        debug_logs (bool): If True, print debug information.
+        create_name_attribute (Optional[Tuple[str, str]]): Tuple of (field_name, separator).
+            If set, adds a field with all input filenames (no extension), joined by separator.
+
+    Returns:
+        None
+    """
+    print(f"Start vector merge")
+
+    os.makedirs(os.path.dirname(merged_vector_path), exist_ok=True)
+
+    geoms = []
+    input_names = []
+
+    for path in input_vector_paths:
+        gdf = gpd.read_file(path)
+        if create_name_attribute:
+            name = os.path.splitext(os.path.basename(path))[0]
+            input_names.append(name)
+        geoms.append(gdf)
+
+    # Prepare the full combined name value once
+    combined_name_value = None
+    if create_name_attribute:
+        field_name, sep = create_name_attribute
+        combined_name_value = sep.join(input_names)
+
+    if method == "keep_all":
+        merged = gpd.GeoDataFrame(pd.concat(geoms, ignore_index=True), crs=geoms[0].crs)
+        if create_name_attribute:
+            merged[field_name] = combined_name_value
+
+    elif method == "union":
+        merged = gpd.GeoDataFrame(pd.concat(geoms, ignore_index=True), crs=geoms[0].crs)
+        if create_name_attribute:
+            merged[field_name] = combined_name_value
+
+    elif method == "intersection":
+        merged = geoms[0]
+        for gdf in geoms[1:]:
+            shared_cols = set(merged.columns).intersection(gdf.columns) - {"geometry"}
+            gdf = gdf.drop(columns=shared_cols)
+            merged = gpd.overlay(merged, gdf, how="intersection", keep_geom_type=True)
+        if create_name_attribute:
+            merged[field_name] = combined_name_value
+
+    else:
+        raise ValueError(f"Unsupported merge method: {method}")
+
+    merged.to_file(merged_vector_path)
 
 
 def _resolve_input_output_paths(
@@ -414,3 +480,101 @@ def mask_rasters(
     # Cleanup
     if tap:
         shutil.rmtree(temp_dir)
+
+
+def search_paths(
+    folder_path: str,
+    pattern: str,
+    recursive: bool = False,
+    ) -> List[str]:
+    """
+    Search for files in a folder using a glob pattern.
+
+    Args:
+        folder_path (str): The root folder to search in.
+        pattern (str): A glob pattern (e.g., "*.tif", "**/*.jpg").
+        recursive (bool, optional): Whether to search for files recursively.
+
+    Returns:
+        List[str]: Sorted list of matched file paths.
+    """
+    return sorted(glob.glob(os.path.join(folder_path, pattern), recursive=recursive))
+
+
+def create_paths(
+    output_folder: str,
+    template: str,
+    paths_or_bases: List[str]
+    ) -> List[str]:
+    """
+    Create output paths using a filename template and a list of reference paths or names.
+
+    Args:
+        output_folder (str): Directory to store output files.
+        template (str): Filename template using {base} as placeholder (e.g., "{base}_processed.tif").
+        paths_or_bases (List[str]): List of full paths or bare names to derive {base} from. Inclusion of '/' or '\' indicates a path.
+
+    Returns:
+        List[str]: List of constructed file paths.
+    """
+    output_paths = []
+    for ref in paths_or_bases:
+        base = os.path.splitext(os.path.basename(ref))[0] if ('/' in ref or '\\' in ref) else os.path.splitext(ref)[0]
+        filename = template.replace("{base}", base)
+        output_paths.append(os.path.join(output_folder, filename))
+    return output_paths
+
+
+def match_paths(
+    paths: Tuple[List[str], ...],
+    substrings: bool = False,
+    remove_similar: bool = False,
+    debug_logs: bool = False
+) -> Tuple[List[Optional[str]], ...]:
+    """
+    Match corresponding file paths across multiple lists by filename.
+
+    Args:
+        paths (Tuple[List[str], ...]): Tuple of lists of file paths.
+        substrings (bool): If True, use substring matching to align files.
+        remove_similar (bool): If True, remove common text shared across all names in each list.
+        debug_logs (bool): If True, print matched paths for inspection.
+
+    Returns:
+        Tuple[List[Optional[str]], ...]: Tuple of matched lists. Items with no match are None.
+    """
+    if not paths or len(paths) < 2:
+        raise ValueError("At least two path lists must be provided.")
+
+    def clean_names(names: List[str]) -> List[str]:
+        bases = [os.path.splitext(os.path.basename(p))[0] for p in names]
+        if not remove_similar:
+            return bases
+        common = os.path.commonprefix(bases)
+        return [b.replace(common, '') for b in bases]
+
+    ref_list = paths[0]
+    ref_names = clean_names(ref_list)
+
+    other_lists = paths[1:]
+    other_names = [clean_names(p) for p in other_lists]
+
+    matched_lists = [[None for _ in ref_list] for _ in paths]
+
+    for i, ref_name in enumerate(ref_names):
+        matched_lists[0][i] = ref_list[i]
+        for j, (candidates, full_paths) in enumerate(zip(other_names, other_lists)):
+            match = None
+            for cand_name, cand_path in zip(candidates, full_paths):
+                if (substrings and ref_name in cand_name) or (not substrings and ref_name == cand_name):
+                    match = cand_path
+                    break
+            matched_lists[j + 1][i] = match
+
+    if debug_logs:
+        print("Matched path base names:")
+        for row in zip(*matched_lists):
+            name_row = [os.path.splitext(os.path.basename(p))[0] if p else "None" for p in row]
+            print(" | ".join(name_row))
+
+    return tuple(matched_lists)
