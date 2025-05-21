@@ -64,10 +64,6 @@ global_regression(
     )
 
 # %% Local matching
-reference_map_path = os.path.join(local_folder, "ReferenceBlockMap", "ReferenceBlockMap.tif")
-local_maps_path = os.path.join(local_folder, "LocalBlockMap", "_LocalBlockMap.tif")
-
-
 local_block_adjustment(
     global_folder,
     (local_folder, "_Local"),
@@ -78,17 +74,12 @@ local_block_adjustment(
     )
 
 # %% (OPTIONAL) Local match with a larger canvas than images bounds (perhaps to anticipate adding additional imagery so you don't have to recalculate local block maps each rematch)
-input_image_paths = [os.path.join(global_folder, f) for f in os.listdir(global_folder) if f.lower().endswith(".tif")]
-
-old_local_folder = os.path.join(working_directory, "LocalMatch")
 new_local_folder = os.path.join(working_directory, "LocalMatch_New")
-
 reference_map_path = os.path.join(new_local_folder, "ReferenceBlockMap", "ReferenceBlockMap.tif")
 local_maps_path = os.path.join(new_local_folder, "LocalBlockMap", "_LocalBlockMap.tif")
 
-
 local_block_adjustment(
-    input_image_paths,
+    global_folder,
     (new_local_folder, "_local"),
     number_of_blocks=(30,30),
     debug_logs=True,
@@ -99,17 +90,14 @@ local_block_adjustment(
     )
 
 # %% (OPTIONAL) Local match from saved block maps (this code just passes in local maps, but if a reference map is passed in, it will match images to the reference map without recomputing it)
-input_image_paths = [os.path.join(global_folder, f) for f in os.listdir(global_folder) if f.lower().endswith(".tif")]
 
 old_local_folder = os.path.join(working_directory, "LocalMatch")
 new_local_folder = os.path.join(working_directory, "LocalMatch_New")
-
 saved_reference_block_path = os.path.join(old_local_folder, "ReferenceBlockMap", "ReferenceBlockMap.tif")
 saved_local_block_paths = [os.path.join(os.path.join(new_local_folder, "LocalBlockMap"), f) for f in os.listdir(os.path.join(new_local_folder, "LocalBlockMap")) if f.lower().endswith(".tif")]
 
-
 local_block_adjustment(
-    input_image_paths,
+    global_folder,
     (new_local_folder, "_local"),
     number_of_blocks=100,
     debug_logs=True,
@@ -119,7 +107,7 @@ local_block_adjustment(
     )
 
 # %% Generate seamlines
-input_image_paths = [os.path.join(local_folder, f) for f in os.listdir(local_folder) if f.lower().endswith(".tif")]
+input_image_paths = search_paths(local_folder, ".tif")
 output_vector_mask = os.path.join(working_directory, "ImageClips.gpkg")
 
 voronoi_center_seamline(
@@ -131,9 +119,8 @@ voronoi_center_seamline(
 
 
 # %% Clip and merge
-input_image_paths = sorted([os.path.join(local_folder, f) for f in os.listdir(local_folder) if f.lower().endswith(".tif")])
-output_clipped_image_paths = sorted([os.path.join(clipped_images, os.path.splitext(os.path.basename(path))[0] + "_Clipped.tif") for path in input_image_paths])
-
+input_image_paths = search_paths(local_folder, ".tif")
+output_clipped_image_paths = create_paths(clipped_images, "{base}_Clipped.tif", input_image_paths)
 input_vector_mask_path = os.path.join(working_directory, "ImageClips.gpkg")
 output_merged_image_path = os.path.join(working_directory, "MergedImage.tif")
 
