@@ -21,12 +21,23 @@ We welcome all contributions the project! Please be respectful and work towards 
 ---
 
 ## Design Guidelines and Philosophy
+
+### Remember to: 
+
 - Keep code concise and simple
 - Adapt code for large datasets with windows, multiprocessing, progressive computations, etc
 - Keep code modular and have descriptive names
-- Create docstrings (Google style), tests, and update the docs for new functionality
-- Use similar naming convention and input parameters as other functions
-- Use PEP 8 code formatting 
+- Use PEP 8 code formatting
+- Use functions that are already created when possible
+
+### When building a function:
+
+ - Combine similar params into one multi-value parameter
+ - Start functions by printing "Start {process}"
+ - Use similar naming convention and input parameter format as other functions. For example: vector_mask_path, window_size, debug_logs, custom_nodata_value, parallel_workers, calculation_dtype, etc.
+ - If True, debug_logs param should be used to enable printing info about the process
+ - Create docstrings (Google style), tests, and update the docs for new functionality
+
 
 ## File Cleanup
 Temporary generated files can be deleted once they are no longer needed via this command:

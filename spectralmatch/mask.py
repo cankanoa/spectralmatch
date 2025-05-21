@@ -10,9 +10,12 @@ from omnicloudmask import predict_from_array
 from rasterio.features import shapes
 from osgeo import gdal, ogr, osr
 from .handlers import _write_vector
-from shapely.geometry import shape
+from shapely.geometry import shape, Polygon, MultiPolygon, mapping
 from shapely.ops import unary_union
 from rasterio.mask import raster_geometry_mask
+from typing import Literal, Tuple
+from fiona.crs import from_epsg
+
 
 def create_cloud_mask_with_omnicloudmask(
     input_image_path,
@@ -21,6 +24,8 @@ def create_cloud_mask_with_omnicloudmask(
     nir_band_index, # Blue band can work if nir isnt available
     output_mask_path,
     down_sample_m=None, # Down sample to 10 m if imagery has a spatial resolution < 10 m
+    debug_logs: bool = False,
+    **omnicloud_kwargs,
     ):
     """
     Generates a cloud mask using OmniCloudMask from a multi-band image.
@@ -32,11 +37,14 @@ def create_cloud_mask_with_omnicloudmask(
         nir_band_index (int): Index of the NIR (or substitute blue) band.
         output_mask_path (str): Path to save the output cloud mask GeoTIFF.
         down_sample_m (float, optional): Target resolution (in meters) to downsample the input before processing.
+        debug_logs (bool, optional): Debug logs to console.
+        omnicloud_kwargs: Forwards key word args to OmniCloudMask predict_from_array() function. Repo here: https://github.com/DPIRD-DMA/OmniCloudMask.
 
     Outputs:
         Saves a single-band cloud mask GeoTIFF at the specified path.
     """
 
+    print("Start create omnicloudmask")
     if not os.path.exists(os.path.dirname(output_mask_path)): os.makedirs(os.path.dirname(output_mask_path), exist_ok=True)
     with rasterio.open(input_image_path) as src:
         if down_sample_m is not None:
@@ -69,7 +77,7 @@ def create_cloud_mask_with_omnicloudmask(
         band_array = np.stack([red, green, nir], axis=0)
 
     # Predict the mask (expected shape: (1, height, width))
-    pred_mask = predict_from_array(band_array)
+    pred_mask = predict_from_array(band_array, **omnicloud_kwargs)
     pred_mask = np.squeeze(pred_mask)
 
     # Update metadata for a single-band output.
@@ -106,20 +114,27 @@ def post_process_raster_cloud_mask_to_vector(
         Saves a vector layer to the output path.
     """
 
+    print("Start post-processing raster cloud mask")
     with rasterio.open(input_image_path) as src:
         raster_data = src.read(1)
         transform = src.transform
         crs = src.crs
 
     if value_mapping is not None:
+        include_mask = np.full(raster_data.shape, True, dtype=bool)
         mapped = np.copy(raster_data)
         for orig_value, new_value in value_mapping.items():
-            mapped[raster_data == orig_value] = new_value
+            if new_value is None:
+                include_mask &= raster_data != orig_value  # Exclude from processing
+            else:
+                mapped[raster_data == orig_value] = new_value
         raster_data = mapped
+    else:
+        include_mask = None
 
     results = (
         {'properties': {'value': v}, 'geometry': s}
-        for s, v in shapes(raster_data, transform=transform, connectivity=4)
+        for s, v in shapes(raster_data, mask=include_mask, transform=transform, connectivity=4)
     )
     features = list(results)
     if not features:
@@ -219,6 +234,8 @@ def create_ndvi_mask(
     Returns:
         str: Path to the saved NDVI output.
     """
+
+    print("Start ndvi computation")
     if not os.path.exists(os.path.dirname(output_image_path)): os.makedirs(os.path.dirname(output_image_path), exist_ok=True)
 
     with rasterio.open(input_image_path) as src:
@@ -243,117 +260,145 @@ def post_process_threshold_to_vector(
     input_image_path: str,
     output_vector_path: str,
     threshold_val: float | int,
-    operator_str: str="<=",
+    operator_str: Literal["=", "<=", ">", ">=", "=="] = "<=",
     ) -> str:
     """
-    Converts a thresholded raster mask to a vector layer based on a comparison operator.
+    Converts a thresholded raster mask to a vector layer using Rasterio and Fiona.
 
     Args:
         input_image_path (str): Path to the input single-band raster.
         output_vector_path (str): Path to save the output vector file (GeoPackage).
         threshold_val (float | int): Threshold value to apply.
-        operator_str (str, optional): Comparison operator ('<=', '>=', '<', '>', '=='). Defaults to '<='.
+        operator_str (str): One of the comparison operators.
 
     Returns:
         str: Path to the saved vector file.
-
-    Raises:
-        ValueError: If an unsupported comparison operator is provided.
     """
+    print("Start post process threshold")
 
-    ds = gdal.Open(input_image_path)
-    band = ds.GetRasterBand(1)
-    arr = band.ReadAsArray()
+    with rasterio.open(input_image_path) as src:
+        image = src.read(1)
+        transform = src.transform
+        crs = src.crs
 
-    if operator_str == "<=":
-        mask = arr <= threshold_val
-    elif operator_str == ">=":
-        mask = arr >= threshold_val
-    elif operator_str == "<":
-        mask = arr < threshold_val
-    elif operator_str == ">":
-        mask = arr > threshold_val
-    elif operator_str == "==":
-        mask = arr == threshold_val
-    else:
-        raise ValueError("Unsupported operator")
+        # Apply threshold
+        if operator_str == "<":
+            mask = image < threshold_val
+        elif operator_str == "<=":
+            mask = image <= threshold_val
+        elif operator_str == ">":
+            mask = image > threshold_val
+        elif operator_str == ">=":
+            mask = image >= threshold_val
+        elif operator_str == "==":
+            mask = image == threshold_val
+        else:
+            raise ValueError("Unsupported operator_str")
 
-    mask = mask.astype(np.uint8)
+        mask = mask.astype(np.uint8)
 
-    mem_ds = gdal.GetDriverByName("MEM").Create("", ds.RasterXSize, ds.RasterYSize, 1, gdal.GDT_Byte)
-    mem_ds.SetGeoTransform(ds.GetGeoTransform())
-    mem_ds.SetProjection(ds.GetProjection())
-    mem_ds.GetRasterBand(1).WriteArray(mask)
+        # Generate vector shapes
+        results = []
+        for s, v in shapes(mask, mask=mask, transform=transform):
+            if v != 1:
+                continue
+            geom = shape(s)
+            if isinstance(geom, Polygon):
+                results.append({"properties": {"DN": int(v)}, "geometry": mapping(geom)})
+            elif isinstance(geom, MultiPolygon):
+                for part in geom.geoms:
+                    results.append({"properties": {"DN": int(v)}, "geometry": mapping(part)})
 
-    drv = ogr.GetDriverByName("GPKG")
-    if os.path.exists(output_vector_path):
-        drv.DeleteDataSource(output_vector_path)
-    out_ds = drv.CreateDataSource(output_vector_path)
-    out_lyr = out_ds.CreateLayer("mask", srs=None)
-    out_lyr.CreateField(ogr.FieldDefn("DN", ogr.OFTInteger))
+        schema = {
+            "geometry": "Polygon",
+            "properties": {"DN": "int"},
+        }
 
-    gdal.Polygonize(mem_ds.GetRasterBand(1), mem_ds.GetRasterBand(1), out_lyr, 0, [])
-    ds, mem_ds, out_ds = None, None, None
+        if os.path.exists(output_vector_path):
+            os.remove(output_vector_path)
+
+        with fiona.open(
+            output_vector_path, "w",
+            driver="GPKG",
+            crs=crs,
+            schema=schema,
+            layer="mask"
+        ) as dst:
+            for feat in results:
+                dst.write(feat)
+
     return output_vector_path
 
 
 def mask_image_with_vector(
     input_image_path: str,
-    input_vector_path: str,
+    input_vector_path: str | None,
     output_image_path: str,
-    exclude_features: dict[any, any] = {},
-    invert_mask: bool = False
-    ) -> str:
+    select_features: Tuple[Literal["include", "exclude"], str, any] | None = None,
+) -> str:
     """
-    Masks a raster using vector geometries within the raster's bounds.
+    Masks a raster using vector geometries that match a specific filter.
 
     Args:
         input_image_path: Path to input raster.
-        input_vector_path: Path to vector file (e.g., .shp, .gpkg).
+        input_vector_path: Path to vector file (e.g., .shp, .gpkg), or None to skip masking.
         output_image_path: Path to save masked raster.
-        exclude_features: Dict of attribute filters to exclude (e.g., {"class": "water"}).
-        invert_mask: If True, keeps only areas inside vector geometries.
+        select_features: Optional tuple:
+            - ("include", field, value): Keep only pixels covered by features where field == value.
+            - ("exclude", field, value): Mask out pixels covered by features where field == value.
+            - None: Use all features and mask out covered pixels.
 
     Returns:
         Path to the masked raster file.
     """
-    if not os.path.exists(os.path.dirname(output_image_path)): os.makedirs(os.path.dirname(output_image_path), exist_ok=True)
+    print("Start mask image with vector")
+
+    os.makedirs(os.path.dirname(output_image_path), exist_ok=True)
 
     with rasterio.open(input_image_path) as src:
-        image_crs = src.crs
-
-        with fiona.open(input_vector_path, 'r') as vector:
-            filtered_geoms = []
-            for feature in vector:
-                if exclude_features:
-                    match = all(feature['properties'].get(k) != v for k, v in exclude_features.items())
-                else:
-                    match = True
-
-                if match:
-                    geom = shape(feature['geometry'])
-                    filtered_geoms.append(geom)
-
-        if not filtered_geoms:
+        if input_vector_path is None:
+            print("No vector path provided — writing unmasked copy.")
+            with rasterio.open(output_image_path, 'w', **src.meta) as dst:
+                dst.write(src.read())
             return output_image_path
 
-        geom_union = unary_union(filtered_geoms)
+        with fiona.open(input_vector_path, 'r') as vector:
+            selected_geoms = []
+
+            for feature in vector:
+                include = True
+                if select_features:
+                    mode, field, value = select_features
+                    attr_val = feature["properties"].get(field)
+                    include = attr_val == value
+
+                if include:
+                    selected_geoms.append(shape(feature["geometry"]))
+
+        if not selected_geoms:
+            print("No matching geometries found — writing unmasked copy.")
+            with rasterio.open(output_image_path, 'w', **src.meta) as dst:
+                dst.write(src.read())
+            return output_image_path
+
+        invert = select_features[0] == "include" if select_features else False
+
+        geom_union = unary_union(selected_geoms)
         geometries = [geom_union.__geo_interface__]
 
         mask, transform, window = raster_geometry_mask(
             src,
             geometries,
-            invert=invert_mask,
+            invert=invert,
             crop=False,
             pad=False,
-            all_touched=False
+            all_touched=False,
         )
 
         data = src.read()
         data[:, mask] = src.nodata if src.nodata is not None else 0
 
-        out_meta = src.meta.copy()
-        with rasterio.open(output_image_path, 'w', **out_meta) as dst:
+        with rasterio.open(output_image_path, 'w', **src.meta) as dst:
             dst.write(data)
 
     return output_image_path
