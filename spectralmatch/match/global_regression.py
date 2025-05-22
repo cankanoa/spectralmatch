@@ -19,30 +19,12 @@ from rasterio.features import geometry_mask
 from rasterio.coords import BoundingBox
 
 from ..utils import _create_windows, _check_raster_requirements, _get_nodata_value, _choose_context
-from ..handlers import _resolve_input_output_paths
+from ..handlers import create_paths, search_paths, match_paths
 _worker_dataset_cache = {}
 
-# def _mask_tile(
-#         src,
-#         geoms,
-#         window
-# ):
-#
-#     transform = src.window_transform(window)
-#     shape = (window.height, window.width)
-#
-#     mask_arr = geometry_mask(
-#         geometries=geoms,
-#         transform=transform,
-#         invert=True,
-#         out_shape=shape
-#     )
-#
-#     tile = src.read(window=window)
-#     return tile * mask_arr.astype(tile.dtype)
 
 def global_regression(
-    input_images: str | List[str],
+    input_images: Tuple[str, str] | List[str],
     output_images: Tuple[str, str] | List[str],
     *,
     custom_mean_factor: float = 1.0,
@@ -62,8 +44,14 @@ def global_regression(
     Performs global radiometric normalization across overlapping images using least squares regression.
 
     Args:
-        input_images (str | List[str]): A folder path containing `.tif` files to search for or a list of input image paths.
-        output_images (Tuple[str, str] | List[str]): Either a tuple of (output_folder, suffix) to generate output paths from, or a list of output image paths. If a list is provided, its length must match the number of input images.
+        input_images (Tuple[str, str] | List[str]):
+            Specifies the input images either as:
+            - A tuple with a folder path and glob pattern to search for files (e.g., ("/input/folder", "*.tif")).
+            - A list of full file paths to individual input images.
+        output_images (Tuple[str, str] | List[str]):
+            Specifies how output filenames are generated or provided:
+            - A tuple with an output folder and a filename template using "$" as a placeholder for each input image's basename (e.g., ("/output/folder", "$_GlobalMatch.tif")).
+            - A list of full output paths, which must match the number of input images.
         custom_mean_factor (float, optional): Weight for mean constraints in regression. Defaults to 1.0.
         custom_std_factor (float, optional): Weight for standard deviation constraints in regression. Defaults to 1.0.
         vector_mask_path (Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None): Mask to limit stats calculation to specific areas in the format of a tuple with two or three items: literal "include" or "exclude" the mask area, str path to the vector file, optional str of field name in vector file that *includes* (can be substring) input image name to filter geometry by. Loaded stats won't have this applied to them. The matching solution is still applied to these areas in the output. Defaults to None for no mask.
@@ -100,10 +88,15 @@ def global_regression(
         load_adjustments,
     )
 
-    input_image_paths, output_image_paths = _resolve_input_output_paths(input_images, output_images)
-    input_image_names = list(input_image_paths.keys())
-    num_input_images = len(input_image_paths)
+    if isinstance(input_images, tuple): input_images = search_paths(*input_images)
+    if isinstance(output_images, tuple): output_images = create_paths(*output_images, input_images, create_folders=True)
 
+    if debug_logs: print(f"Input images: {input_images}")
+    if debug_logs: print(f"Output images: {output_images}")
+
+    input_image_names = [os.path.splitext(os.path.basename(p))[0] for p in input_images]
+    input_image_paths = dict(zip(input_image_names, input_images))
+    output_image_paths = dict(zip(input_image_names, output_images))
 
     _check_raster_requirements(list(input_image_paths.values()), debug_logs)
 
@@ -421,7 +414,7 @@ def _validate_input_params(
     specify_model_images,
     save_adjustments,
     load_adjustments,
-):
+    ):
     """
     Validates the input parameters provided to the global_regression function.
 
@@ -429,19 +422,21 @@ def _validate_input_params(
         ValueError: If any input parameter is not of the expected type or structure.
     """
 
-    if not isinstance(input_images, (str, list)):
-        raise ValueError("input_images must be a string or a list of strings.")
-    if isinstance(input_images, list) and not all(isinstance(p, str) for p in input_images):
+    if not isinstance(input_images, (tuple, list)):
+        raise ValueError("input_images must be a tuple (folder, pattern) or a list of strings.")
+    if isinstance(input_images, tuple):
+        if len(input_images) != 2 or not all(isinstance(s, str) for s in input_images):
+            raise ValueError("If input_images is a tuple, it must be (folder_path, pattern).")
+    elif not all(isinstance(p, str) for p in input_images):
         raise ValueError("All elements in input_images list must be strings.")
 
+    if not isinstance(output_images, (tuple, list)):
+        raise ValueError("output_images must be a tuple or a list of strings.")
     if isinstance(output_images, tuple):
         if len(output_images) != 2 or not all(isinstance(s, str) for s in output_images):
-            raise ValueError("If output_images is a tuple, it must contain exactly two strings (folder, suffix).")
-    elif isinstance(output_images, list):
-        if not all(isinstance(s, str) for s in output_images):
-            raise ValueError("If output_images is a list, it must contain only strings.")
-    else:
-        raise ValueError("output_images must be a tuple of two strings or a list of strings.")
+            raise ValueError("If output_images is a tuple, it must be (output_folder, name_template).")
+    elif not all(isinstance(p, str) for p in output_images):
+        raise ValueError("All elements in output_images list must be strings.")
 
     if not isinstance(custom_mean_factor, (int, float)):
         raise ValueError("custom_mean_factor must be a number.")
@@ -454,15 +449,15 @@ def _validate_input_params(
         if vector_mask_path[0] not in {"include", "exclude"}:
             raise ValueError("The first element of vector_mask_path must be 'include' or 'exclude'.")
         if not isinstance(vector_mask_path[1], str):
-            raise ValueError("The second element of vector_mask_path must be a string (path to vector file).")
+            raise ValueError("The second element must be a string (vector file path).")
         if len(vector_mask_path) == 3 and not isinstance(vector_mask_path[2], str):
-            raise ValueError("The third element of vector_mask_path, if provided, must be a string (field name).")
+            raise ValueError("The third element, if provided, must be a string (field name).")
 
     if window_size is not None:
         if not isinstance(window_size, (int, tuple)):
             raise ValueError("window_size must be an int, a tuple of two ints, or None.")
         if isinstance(window_size, tuple) and (len(window_size) != 2 or not all(isinstance(i, int) for i in window_size)):
-            raise ValueError("window_size tuple must have exactly two integers.")
+            raise ValueError("window_size tuple must contain exactly two integers.")
 
     if not isinstance(debug_logs, bool):
         raise ValueError("debug_logs must be a boolean.")
@@ -493,7 +488,6 @@ def _validate_input_params(
 
     if load_adjustments is not None and not isinstance(load_adjustments, str):
         raise ValueError("load_adjustments must be a string or None.")
-
 
 def _save_adjustments(
     save_path: str,

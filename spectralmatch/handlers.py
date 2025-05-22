@@ -6,6 +6,7 @@ import shutil
 import geopandas as gpd
 import glob
 import pandas as pd
+import re
 
 from typing import List, Optional, Literal, Tuple
 from osgeo import ogr
@@ -82,66 +83,6 @@ def merge_vectors(
         raise ValueError(f"Unsupported merge method: {method}")
 
     merged.to_file(merged_vector_path)
-
-
-def _resolve_input_output_paths(
-    input_images_item: str | List[str],
-    output_images_item: Tuple[str, str] | List[str],
-) -> tuple[dict[str, str], dict[str, str]]:
-    """
-    Resolves input and output image paths to dictionaries keyed by image basename.
-    """
-    if not isinstance(input_images_item, (str, list)):
-        raise TypeError("`input_images_item` must be a string (folder) or list of paths.")
-
-    if not (isinstance(output_images_item, (tuple, list)) and (
-        isinstance(output_images_item, tuple) and len(output_images_item) == 2
-        or isinstance(output_images_item, list)
-    )):
-        raise TypeError("`output_images_item` must be a (folder, suffix) tuple or a list of paths.")
-
-    if isinstance(input_images_item, str):
-        try:
-            input_paths = [
-                os.path.join(input_images_item, f)
-                for f in os.listdir(input_images_item)
-                if f.lower().endswith(".tif")
-            ]
-        except Exception as e:
-            raise ValueError(f"Failed to list files in input folder: {e}")
-    else:
-        input_paths = input_images_item
-
-    input_images = {
-        os.path.splitext(os.path.basename(p))[0]: p for p in input_paths
-    }
-
-    if isinstance(output_images_item, tuple):
-        folder, suffix = output_images_item
-        if not isinstance(folder, str) or not isinstance(suffix, str):
-            raise TypeError("Output folder and suffix must be strings.")
-        output_images = {
-            name: os.path.join(folder, f"{name}{suffix}.tif")
-            for name in input_images
-        }
-    else:
-        output_images = {
-            os.path.splitext(os.path.basename(p))[0]: p for p in output_images_item
-        }
-
-    if len(input_images) != len(output_images):
-        raise ValueError(f"Input and output image counts do not match "
-                         f"({len(input_images)} vs {len(output_images)}).")
-
-    # Create folders
-    folders = []
-    for path in output_images.values():
-        folders.append(os.path.dirname(path))
-    list(set(folders))
-    for folder in folders:
-        if not os.path.exists(folder): os.makedirs(folder, exist_ok=True)
-
-    return input_images, output_images
 
 
 def _write_vector(
@@ -325,7 +266,6 @@ def merge_rasters(
             dst.write(merged_data, window=window)
             # if debug_logs: print(f"{window.col_off}:{window.row_off} {window.width}x{window.height}, ", end="", flush=True)
     if debug_logs:
-        print()
         print("Done merging")
 
 
@@ -486,6 +426,8 @@ def search_paths(
     folder_path: str,
     pattern: str,
     recursive: bool = False,
+    match_to_paths: Tuple[List[str], str] | None = None,
+    debug_logs: bool = False,
     ) -> List[str]:
     """
     Search for files in a folder using a glob pattern.
@@ -494,25 +436,39 @@ def search_paths(
         folder_path (str): The root folder to search in.
         pattern (str): A glob pattern (e.g., "*.tif", "**/*.jpg").
         recursive (bool, optional): Whether to search for files recursively.
+        match_to_paths (Tuple[List[str], str], optional): If provided, match `reference_paths` to `input_match_paths` using a regex applied to the basenames of `input_match_paths`. The extracted key must be a substring of the reference filename.
+         - reference_paths (List[str]): List of reference paths to align to.
+         - match_regex (str): Regex applied to basenames of input_match_paths to extract a key to match via *inclusion* in reference_paths (e.g. r"(.*)_LocalMatch\.gpkg$").
+        debug_logs (bool, optional): Whether to print the matched file paths.
 
     Returns:
         List[str]: Sorted list of matched file paths.
     """
-    return sorted(glob.glob(os.path.join(folder_path, pattern), recursive=recursive))
+    input_paths =  sorted(glob.glob(os.path.join(folder_path, pattern), recursive=recursive))
 
+    if match_to_paths:
+        input_paths = match_paths(input_paths, *match_to_paths)
+
+    return input_paths
 
 def create_paths(
     output_folder: str,
     template: str,
-    paths_or_bases: List[str]
+    paths_or_bases: List[str],
+    debug_logs: bool = False,
+    replace_symbol: str = "$",
+    create_folders: bool = False,
     ) -> List[str]:
     """
     Create output paths using a filename template and a list of reference paths or names.
 
     Args:
         output_folder (str): Directory to store output files.
-        template (str): Filename template using {base} as placeholder (e.g., "{base}_processed.tif").
-        paths_or_bases (List[str]): List of full paths or bare names to derive {base} from. Inclusion of '/' or '\' indicates a path.
+        template (str): Filename template using replace_symbol as placeholder (e.g., "$_processed.tif").
+        paths_or_bases (List[str]): List of full paths or bare names to derive replace_symbol from. Inclusion of '/' or '\' indicates a path.
+        debug_logs (bool): Whether to print the created paths.
+        replace_symbol (str): Symbol to replace in the template.
+        create_folders (bool): Whether to create output folders if they don't exist.'
 
     Returns:
         List[str]: List of constructed file paths.
@@ -520,61 +476,65 @@ def create_paths(
     output_paths = []
     for ref in paths_or_bases:
         base = os.path.splitext(os.path.basename(ref))[0] if ('/' in ref or '\\' in ref) else os.path.splitext(ref)[0]
-        filename = template.replace("{base}", base)
-        output_paths.append(os.path.join(output_folder, filename))
+        filename = template.replace(replace_symbol, base)
+        path = os.path.join(output_folder, filename)
+        output_paths.append(path)
+
+    if create_folders:
+        for path in output_paths:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
     return output_paths
 
 
 def match_paths(
-    paths: Tuple[List[str], ...],
-    substrings: bool = False,
-    remove_similar: bool = False,
-    debug_logs: bool = False
-) -> Tuple[List[Optional[str]], ...]:
+    input_match_paths: List[str],
+    reference_paths: List[str],
+    match_regex: str,
+    debug_logs: bool = False,
+    ) -> List[Optional[str]]:
     """
-    Match corresponding file paths across multiple lists by filename.
+    Match `reference_paths` to `input_match_paths` using a regex applied to the basenames of `input_match_paths`. The extracted key must be a substring of the reference filename.
 
     Args:
-        paths (Tuple[List[str], ...]): Tuple of lists of file paths.
-        substrings (bool): If True, use substring matching to align files.
-        remove_similar (bool): If True, remove common text shared across all names in each list.
-        debug_logs (bool): If True, print matched paths for inspection.
+        input_match_paths (List[str]): List of candidate paths to extract keys from.
+        reference_paths (List[str]): List of reference paths to align to.
+        match_regex (str): Regex applied to basenames of input_match_paths to extract a key to match via *inclusion* in reference_paths (e.g. r"(.*)_LocalMatch\.gpkg$").
+        debug_logs (bool): If True, print matched and unmatched file basenames.
 
     Returns:
-        Tuple[List[Optional[str]], ...]: Tuple of matched lists. Items with no match are None.
+        List[Optional[str]]: A list the same length as `reference_paths` where each
+        element is the matched path from `input_match_paths` or None.
+
+    Raises:
+        ValueError: If output list length does not match reference_paths length.
     """
-    if not paths or len(paths) < 2:
-        raise ValueError("At least two path lists must be provided.")
+    pattern = re.compile(match_regex)
+    match_keys = {}
+    used_matches = set()
 
-    def clean_names(names: List[str]) -> List[str]:
-        bases = [os.path.splitext(os.path.basename(p))[0] for p in names]
-        if not remove_similar:
-            return bases
-        common = os.path.commonprefix(bases)
-        return [b.replace(common, '') for b in bases]
+    # Extract keys from input_match_paths
+    for mpath in input_match_paths:
+        basename = os.path.basename(mpath)
+        match = pattern.search(basename)
+        if not match:
+            continue
+        key = match.group(1) if match.groups() else match.group(0)
+        match_keys[key] = mpath
 
-    ref_list = paths[0]
-    ref_names = clean_names(ref_list)
+    # Match each reference path
+    matched_list: List[Optional[str]] = []
+    for rpath in reference_paths:
+        rbase = os.path.basename(rpath)
+        matched = None
+        for key, mpath in match_keys.items():
+            if key in rbase:
+                matched = mpath
+                used_matches.add(mpath)
+                break
+        matched_list.append(matched)
 
-    other_lists = paths[1:]
-    other_names = [clean_names(p) for p in other_lists]
+    # Validate output length
+    if len(matched_list) != len(reference_paths):
+        raise ValueError("Matched list length does not match reference_paths length.")
 
-    matched_lists = [[None for _ in ref_list] for _ in paths]
-
-    for i, ref_name in enumerate(ref_names):
-        matched_lists[0][i] = ref_list[i]
-        for j, (candidates, full_paths) in enumerate(zip(other_names, other_lists)):
-            match = None
-            for cand_name, cand_path in zip(candidates, full_paths):
-                if (substrings and ref_name in cand_name) or (not substrings and ref_name == cand_name):
-                    match = cand_path
-                    break
-            matched_lists[j + 1][i] = match
-
-    if debug_logs:
-        print("Matched path base names:")
-        for row in zip(*matched_lists):
-            name_row = [os.path.splitext(os.path.basename(p))[0] if p else "None" for p in row]
-            print(" | ".join(name_row))
-
-    return tuple(matched_lists)
+    return matched_list

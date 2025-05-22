@@ -5,15 +5,19 @@
 
 # %% Setup
 import os
+
+from fiona.env import local
 from spectralmatch import *
 
 # Important: If this does not automatically find the correct CWD, manually copy the path to the /data_worldview3 folder
-working_directory = os.path.join(os.getcwd(), "data_worldview3")
+working_directory = '/Users/kanoalindiwe/Downloads/Projects/spectralmatch/docs/examples/data_worldview3'
 print(working_directory)
 
 input_folder = os.path.join(working_directory, "Input")
 global_folder = os.path.join(working_directory, "GlobalMatch")
 local_folder = os.path.join(working_directory, "LocalMatch")
+clipped_folder = os.path.join(working_directory, "Clipped")
+stats_folder = os.path.join(working_directory, "Stats")
 
 window_size = 128
 num_workers = 5
@@ -24,8 +28,8 @@ saved_adjustments_path = os.path.join(global_folder, "GlobalAdjustments.json")
 
 
 global_regression(
-    input_folder,
-    (global_folder, "_Global"),
+    (input_folder, "*.tif"),
+    (global_folder, "$_Global.tif"),
     custom_mean_factor = 3, # Default is 1; 3 often works better to 'move' the spectral mean of images closer together
     debug_logs=True,
     window_size=window_size,
@@ -38,8 +42,8 @@ saved_adjustments_path = os.path.join(new_global_folder, "GlobalAdjustments.json
 
 
 global_regression(
-    input_folder,
-    (new_global_folder, "_global"),
+    (input_folder, "*.tif"),
+    (new_global_folder, "$_Global.tif"),
     custom_mean_factor = 3, # Default is 1; 3 often works better to 'move' the spectral mean of images closer together
     debug_logs=True,
     window_size=window_size,
@@ -54,8 +58,8 @@ saved_adjustments_path = os.path.join(new_global_folder, "GlobalAdjustments.json
 
 
 global_regression(
-    input_folder,
-    (new_global_folder, "_global"),
+    (input_folder, "*.tif"),
+    (new_global_folder, "$_Global.tif"),
     custom_mean_factor = 3, # Default is 1; 3 often works better to 'move' the spectral mean of images closer together
     debug_logs=True,
     window_size=window_size,
@@ -65,8 +69,8 @@ global_regression(
 
 # %% Local matching
 local_block_adjustment(
-    global_folder,
-    (local_folder, "_Local"),
+    (global_folder, "*.tif"),
+    (local_folder, "$_Local.tif"),
     number_of_blocks=100,
     debug_logs=True,
     window_size=window_size,
@@ -79,8 +83,8 @@ reference_map_path = os.path.join(new_local_folder, "ReferenceBlockMap", "Refere
 local_maps_path = os.path.join(new_local_folder, "LocalBlockMap", "_LocalBlockMap.tif")
 
 local_block_adjustment(
-    global_folder,
-    (new_local_folder, "_local"),
+    (global_folder, "*.tif"),
+    (new_local_folder, "$_Local.tif"),
     number_of_blocks=(30,30),
     debug_logs=True,
     window_size=window_size,
@@ -97,8 +101,8 @@ saved_reference_block_path = os.path.join(old_local_folder, "ReferenceBlockMap",
 saved_local_block_paths = [os.path.join(os.path.join(new_local_folder, "LocalBlockMap"), f) for f in os.listdir(os.path.join(new_local_folder, "LocalBlockMap")) if f.lower().endswith(".tif")]
 
 local_block_adjustment(
-    global_folder,
-    (new_local_folder, "_local"),
+    (global_folder, "*.tif"),
+    (new_local_folder, "$_Local.tif"),
     number_of_blocks=100,
     debug_logs=True,
     window_size=window_size,
@@ -107,7 +111,7 @@ local_block_adjustment(
     )
 
 # %% Generate seamlines
-input_image_paths = search_paths(local_folder, ".tif")
+input_image_paths = search_paths(local_folder, "*.tif")
 output_vector_mask = os.path.join(working_directory, "ImageClips.gpkg")
 
 voronoi_center_seamline(
@@ -119,8 +123,8 @@ voronoi_center_seamline(
 
 
 # %% Clip and merge
-input_image_paths = search_paths(local_folder, ".tif")
-output_clipped_image_paths = create_paths(clipped_images, "{base}_Clipped.tif", input_image_paths)
+input_image_paths = search_paths(local_folder, "*.tif")
+output_clipped_image_paths = create_paths(clipped_folder, "$_Clipped.tif", input_image_paths)
 input_vector_mask_path = os.path.join(working_directory, "ImageClips.gpkg")
 output_merged_image_path = os.path.join(working_directory, "MergedImage.tif")
 
@@ -141,53 +145,46 @@ merge_rasters(
     debug_logs=True,
 )
 
-# %% Statistics
-from spectralmatch import (
-    compare_spatial_spectral_difference_individual_bands,
-    compare_image_spectral_profiles_pairs,
-    compare_image_spectral_profiles,
-    compare_spatial_spectral_difference_average)
+# %% Pre-coded quick Statistics
 
-compare_spatial_spectral_difference_individual_bands(
-    (
-    '/image/a.tif',
-    '/image/b.tif'),
-    '/output.png'
+# Compare image spectral profiles
+compare_image_spectral_profiles(
+    input_image_dict={
+        os.path.splitext(os.path.basename(p))[0]: p
+        for p in search_paths(local_folder, "*.tif")
+    },
+    output_figure_path=os.path.join(stats_folder,'LocalMatch_CompareImageSpectralProfiles.png'),
+    title="Global to Local Match Comparison of Image Spectral Profiles",
+    xlabel='Band',
+    ylabel='Reflectance(0-10,000)',
 )
 
+# Compare image spectral profiles pairs
+before_paths = search_paths(input_folder, "*.tif")
+after_paths = search_paths(local_folder, "*.tif")
+
+image_pairs = {
+    os.path.splitext(os.path.basename(b))[0]: [b, a]
+    for b, a in zip(sorted(before_paths), sorted(after_paths))
+    }
 
 compare_image_spectral_profiles_pairs(
-    {
-        'Image A': [
-            '/image/before/a.tif',
-            'image/after/a.tif'
-        ],
-        'Image B': [
-            '/image/before/b.tif',
-            '/image/after/b.tif'
-        ]
-    },
-    '/output.png'
-)
+    image_pairs,
+    os.path.join(stats_folder, 'LocalMatch_CompareImageSpectralProfilesPairs.png'),
+    title="Global to Local Match Comparison of Image Spectral Profiles Pairs",
+    xlabel='Band',
+    ylabel='Reflectance(0-10,000)',
+    )
 
+# Compare spatial spectral difference band average
+input_paths = search_paths(input_folder, "*.tif")
+local_paths = search_paths(local_folder, "*.tif")
+before_path, after_path = next(zip(sorted(input_paths), sorted(local_paths)))
 
-compare_image_spectral_profiles(
-    {
-        'Image A': 'image/a.tif',
-        'Image B': '/image/b.tif'
-    },
-    "/output.png",
-    "Digital Number Spectral Profile Comparison",
-    'Band',
-    'Digital Number(0-2,047)',
-
-)
-
-
-compare_spatial_spectral_difference_average(
-    [
-        '/image/a.tif',
-        '/image/a.tif'
-     ],
-    '/output.png'
+compare_spatial_spectral_difference_band_average(
+    input_images=[before_path, after_path],
+    output_image_path=os.path.join(stats_folder, 'LocalMatch_CompareSpatialSpectralDifferenceBandAverage.png'),
+    title="Global to Local Match Comparison of Spatial Spectral Difference Band Average",
+    diff_label="Reflectance Difference (0–10,000)",
+    subtitle=f"Image: {os.path.splitext(os.path.basename(before_path))[0]}",
 )

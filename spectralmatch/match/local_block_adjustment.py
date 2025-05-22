@@ -7,7 +7,6 @@ import traceback
 import gc
 import fiona
 
-from osgeo import gdal
 from scipy.ndimage import map_coordinates, gaussian_filter
 from rasterio.windows import from_bounds, Window
 from rasterio.transform import from_origin
@@ -19,14 +18,14 @@ from multiprocessing import Lock
 from multiprocessing import shared_memory
 
 from ..utils import _check_raster_requirements, _get_nodata_value, _create_windows, _choose_context
-from ..handlers import _resolve_input_output_paths
+from ..handlers import create_paths, search_paths, match_paths
 
 # Multiprocessing setup
 _worker_dataset_cache = {}
 file_lock = Lock()
 
 def local_block_adjustment(
-    input_images: str | List[str],
+    input_images: Tuple[str, str] | List[str],
     output_images: Tuple[str, str] | List[str],
     *,
     custom_nodata_value: float | int | None = None,
@@ -48,8 +47,14 @@ def local_block_adjustment(
     Performs local radiometric adjustment on a set of raster images using block-based statistics.
 
     Args:
-        input_images (str | List[str]): A folder path containing `.tif` files to search for or a list of input image paths.
-        output_images (Tuple[str, str] | List[str]): Either a tuple of (output_folder, suffix) to generate output paths from, or a list of output image paths. If a list is provided, its length must match the number of input images.
+        input_images (Tuple[str, str] | List[str]):
+            Specifies the input images either as:
+            - A tuple with a folder path and glob pattern to search for files (e.g., ("/input/folder", "*.tif")).
+            - A list of full file paths to individual input images.
+        output_images (Tuple[str, str] | List[str]):
+            Specifies how output filenames are generated or provided:
+            - A tuple with an output folder and a filename template using "$" as a placeholder for each input image's basename (e.g., ("/output/folder", "$_LocalMatch.tif")).
+            - A list of full output paths, which must match the number of input images.
         custom_nodata_value (float | int | None, optional): Overrides detected NoData value. Defaults to None.
         number_of_blocks (int | tuple | Literal["coefficient_of_variation"]): int as a target of blocks per image, tuple to set manually set total blocks width and height, coefficient_of_variation to find the number of blocks based on this metric.
         alpha (float, optional): Blending factor between reference and local means. Defaults to 1.0.
@@ -59,14 +64,15 @@ def local_block_adjustment(
         window_size (int | Tuple[int, int] | Literal["block"] | None): Tile size for processing: int for square tiles, (width, height) for custom size, or "block" to set as the size of the block map, None for full image. Defaults to None.
         correction_method (Literal["gamma", "linear"], optional): Local correction method. Defaults to "gamma".
         parallel_workers (Literal["cpu"] | int | None): If set, enables multiprocessing. "cpu" = all cores, int = specific count, None = no parallel processing. Defaults to None.
-        save_block_maps (tuple(str, str) | None): If enabled, saves block maps for review, to resume processing later, or to add additional images to the reference map. First str is a path to save the global block map. The second is a path to save the local block maps with the name of each image appended to its basename (because there are multiple local maps).
+        save_block_maps (tuple(str, str) | None): If enabled, saves block maps for review, to resume processing later, or to add additional images to the reference map.
+            - First str is the path to save the global block map.
+            - Second str is the path to save the local block maps, which must include "$" which will be replaced my the image name (because there are multiple local maps).
         load_block_maps (Tuple[str, List[str]] | Tuple[str, None] | Tuple[None, List[str]] | None, optional):
             Controls loading of precomputed block maps. Can be one of:
                 - Tuple[str, List[str]]: Load both reference and local block maps.
                 - Tuple[str, None]: Load only the reference block map.
                 - Tuple[None, List[str]]: Load only the local block maps.
                 - None: Do not load any block maps.
-
             This supports partial or full reuse of precomputed block maps:
                 - Local block maps will still be computed for each input image that is not linked to a local block map by the images name being *included* in the local block maps name (file name).
                 - The reference block map will only be calculated (mean of all local blocks) if not set.
@@ -101,9 +107,16 @@ def local_block_adjustment(
         block_valid_pixel_threshold,
     )
 
-    input_image_pairs, output_image_pairs = _resolve_input_output_paths(input_images, output_images)
-    input_image_names = list(input_image_pairs.keys())
-    input_image_paths = list(input_image_pairs.values())
+    if isinstance(input_images, tuple): input_images = search_paths(*input_images)
+    if isinstance(output_images, tuple): output_images = create_paths(*output_images, input_images, create_folders=True)
+
+    if debug_logs: print(f"Input images: {input_images}")
+    if debug_logs: print(f"Output images: {output_images}")
+
+    input_image_paths = input_images
+    input_image_names = [os.path.splitext(os.path.basename(p))[0] for p in input_images]
+    input_image_pairs = dict(zip(input_image_names, input_images))
+    output_image_pairs = dict(zip(input_image_names, output_images))
 
     _check_raster_requirements(input_image_paths, debug_logs)
 
@@ -142,8 +155,6 @@ def local_block_adjustment(
 
     # Unpack path to save block maps
     if save_block_maps:
-        if not isinstance(save_block_maps, tuple):
-            raise TypeError("Expected a tuple to save block maps like this: (reference_map_path, local_map_path), where reference_map_path is a normal path and local_map_path will have the names of images prepended to it.")
         reference_map_path, local_map_path = save_block_maps
 
     # Create image bounds dict
@@ -232,7 +243,7 @@ def local_block_adjustment(
             _download_block_map(
                 np.nan_to_num(block_local_mean, nan=nodata_val),
                 bounds_canvas_coords,
-                os.path.join(os.path.dirname(local_map_path), name + os.path.splitext(os.path.basename(local_map_path))[0] + ".tif"),
+                local_map_path.replace("$", name),
                 projection,
                 calculation_dtype,
                 nodata_val,
@@ -402,15 +413,20 @@ def _validate_input_params(
     Raises:
         TypeError or ValueError with a concise message if any parameter is improperly set.
     """
-    if not isinstance(input_images, (str, list)):
-        raise TypeError("input_images must be a folder path (str) or list of image paths.")
-    if isinstance(input_images, list) and not all(isinstance(p, str) for p in input_images):
-        raise TypeError("All elements in input_images must be strings.")
+    if not (
+        isinstance(input_images, tuple) and len(input_images) == 2 and all(isinstance(p, str) for p in input_images)
+        or isinstance(input_images, list) and all(isinstance(p, str) for p in input_images)
+    ):
+        raise TypeError("input_images must be a tuple (folder, pattern) or a list of file paths.")
 
-    if not (isinstance(output_images, tuple) and len(output_images) == 2 or isinstance(output_images, list)):
-        raise TypeError("output_images must be a list of paths or a tuple (output_folder, suffix).")
-    if isinstance(output_images, list) and not all(isinstance(p, str) for p in output_images):
-        raise TypeError("All elements in output_images must be strings.")
+    if not (
+        isinstance(output_images, tuple) and len(output_images) == 2 and all(isinstance(p, str) for p in output_images)
+        or isinstance(output_images, list) and all(isinstance(p, str) for p in output_images)
+    ):
+        raise TypeError("output_images must be a tuple (folder, template) or a list of file paths.")
+
+    if isinstance(output_images, tuple) and "$" not in output_images[1]:
+        raise ValueError("The output filename template must include a '$' placeholder to insert the image name.")
 
     if custom_nodata_value is not None and not isinstance(custom_nodata_value, (int, float)):
         raise TypeError("custom_nodata_value must be a number or None.")
@@ -455,6 +471,8 @@ def _validate_input_params(
     if save_block_maps is not None:
         if not (isinstance(save_block_maps, tuple) and len(save_block_maps) == 2 and all(isinstance(p, str) for p in save_block_maps)):
             raise TypeError("save_block_maps must be a tuple of two strings or None.")
+        if "$" not in save_block_maps[1]:
+            raise ValueError("The local block map path template in save_block_maps must contain a '$' placeholder.")
 
     if load_block_maps is not None:
         if not (
@@ -464,7 +482,7 @@ def _validate_input_params(
         ):
             raise TypeError("load_block_maps must be (str, list), (str, None), (None, list), or None.")
         if isinstance(load_block_maps[1], list) and not all(isinstance(p, str) for p in load_block_maps[1]):
-            raise TypeError("All elements in local block maps list must be strings.")
+            raise TypeError("All elements in the local block maps list must be strings.")
 
     if override_bounds_canvas_coords is not None:
         if not (
@@ -486,7 +504,6 @@ def _validate_input_params(
 
     if not isinstance(block_valid_pixel_threshold, float) or not (0 <= block_valid_pixel_threshold <= 1):
         raise ValueError("block_valid_pixel_threshold must be a float between 0 and 1.")
-
 
 def _get_pre_computed_block_maps(
     load_block_maps: Tuple[Optional[str], Optional[List[str]]],
@@ -748,6 +765,7 @@ def _get_bounding_rectangle(
 
     return (min(x_mins), min(y_mins), max(x_maxs), max(y_maxs))
 
+
 def _compute_mosaic_coefficient_of_variation(
     image_paths: List[str],
     nodata_value: float,
@@ -766,52 +784,44 @@ def _compute_mosaic_coefficient_of_variation(
         reference_std (float, optional): Reference standard deviation for comparison. Defaults to 45.0.
         reference_mean (float, optional): Reference mean for comparison. Defaults to 125.0.
         base_block_size (Tuple[int, int], optional): Base block size (rows, cols). Defaults to (10, 10).
-        band_index (int, optional): Band index to use for statistics. Defaults to 1.
+        band_index (int, optional): Band index to use for statistics (1-based). Defaults to 1.
         calculation_dtype (str, optional): Data type for computation. Defaults to "float32".
 
     Returns:
         Tuple[int, int]: Estimated block size (rows, cols) adjusted based on coefficient of variation.
     """
-
     all_pixels = []
 
-    # Collect pixel values from all images
     for path in image_paths:
-        ds = gdal.Open(path, gdal.GA_ReadOnly)
-        if ds is None:
+        try:
+            with rasterio.open(path) as src:
+                arr = src.read(band_index).astype(calculation_dtype)
+                if nodata_value is not None:
+                    arr = arr[arr != nodata_value]
+                if arr.size > 0:
+                    all_pixels.append(arr)
+        except Exception:
             continue
-        band = ds.GetRasterBand(band_index)
-        arr = band.ReadAsArray().astype(calculation_dtype)
-        if nodata_value is not None:
-            mask = arr != nodata_value
-            arr = arr[mask]
-        all_pixels.append(arr)
-        ds = None
 
-    # If no valid pixels, return defaults
-    if len(all_pixels) == 0:
-        return 0.0, base_block_size[0], base_block_size[1]
+    if not all_pixels:
+        return base_block_size
 
-    # Combine pixel values and compute statistics
     combined = np.concatenate(all_pixels)
     mean_val = np.mean(combined)
     std_val = np.std(combined)
+
     if mean_val == 0:
-        return 0.0, base_block_size[0], base_block_size[1]
+        return base_block_size
 
     catar = std_val / mean_val
     print(f"Mosaic coefficient of variation (CAtar) = {catar:.4f}")
 
-    # Compute reference coefficient and adjustment ratio
     caref = reference_std / reference_mean
     r = catar / caref if caref != 0 else 1.0
 
-    # Adjust block size
     m, n = base_block_size
-    num_row = max(1, int(round(r * m)))
-    num_col = max(1, int(round(r * n)))
+    return max(1, int(round(r * m))), max(1, int(round(r * n)))
 
-    return num_row, num_col
 
 def _compute_local_blocks(
     input_image_pairs: dict[str, str],
