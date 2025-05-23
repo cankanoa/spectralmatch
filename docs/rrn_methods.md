@@ -4,63 +4,40 @@ RRN methods differ not only in the algorithms used to adjust image values but al
 
  - **Matching algorithm:** The core transformation applied to align radiometry between images.
  - **Geometric alignment required:** The level of spatial alignment necessary for the method.
- - **PIF/RCS selection strategies:** How pseudo-invariant features/control sets are identified.
+ - **Pixel selection (PIFs/RCS):** How pseudo-invariant features/control sets are identified.
  - **Adjustment scope:** How corrections are applied to the images.
  - **Overlap:** Whether the method requires overlapping pixels.
  - **Pixel units:** The radiometric units the method is able to operate on.
  - **Bands:** Whether bands relationships are preserved.
  - **Target reference:** What the target image is normalized to.
 
-## The dimensions
+## Matching Algorithms
 
-- Matching algorithm:
-	- Histogram Matching (HM) (lookup table)
-	- Minimum–Maximum Normalization (min-max)
-	- Mean–Standard Deviation Normalization (gain-offset)
-	- CCA/KCCA-Based Normalization (matrix)
-	- Global Linear Regression (gain-offset)
-	- Gamma correction (power function)
-	- Dodging (low-pass brightness correction)
-	- Illumination Equalization (modeled lighting correction)
-- Minimum geometric alignment:
-	- None (no spatial info)
-	- Moderate (A few pixels)
-	- Co-registration (pixel-wise)
--  Pseudo-Invariant Feature (PIFs)/Radiometric Control Sets (RCS) selection strategies:
-    - None
-        - Whole image
-        - Overlapping area
-    - Manual
-        - Manual polygons or pixels
-        - Manual threshold
-    - Statistical
-        - Dark/Bright Set (DB)
-        - Band indexes
-        - No-change  Scattergrams (NC)
-        - Multivariate Alteration Detection (MAD)
-        - Iteratively Reweighted MAD (IR-MAD)
-        - Multi-Rule-Based Normalization
-    - Geometric
-        - Feature-Based (Keypoint) RRN
-        - Location-Independent RRN (LIRRN)
-- Adjustment scope:
-	- Global
-	- Blocks/interpolated blocks
-	- CCA space
-	- Blur
-	- Surface model
-- Overlap:
-	- Required
-	- Not required
-- Pixel units:
-	- Any
-	- Reflectance
-	- Radiance
-	- DN
-- Bands:
-	- Independent
-	- Correlated
-- Target reference:
-	- Single image
-	- Virtual central tendency
-	- Learned distribution
+| Matching algorithm                      | Description                                                                         | Geometric alignment | Adjustment granularity          | Applies                        | Overlap required | Pixel units | Bands                  | Target reference                           | Year introduced | Key papers                                                        | Software                                                                                                      |
+| --------------------------------------- | ----------------------------------------------------------------------------------- | ------------------- | ------------------------------- | ------------------------------ | ---------------- | ----------- | ---------------------- | ------------------------------------------ | --------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Histogram Matching (HM)                 | Matches histogram distributions between images                                      | None                | Global                          | Lookup table                   | no               | Any         | Independent            | Reference histogram                        | 1980s           |                                                                   | ENVI; [Github HistMatch QGIS Plugin](https://github.com/Gustavoohs/HistMatch); ArcGIS Pro; IMAGINE Mosaic Pro |
+| Minimum–Maximum Scale Normalization     | Linearly scales pixel values to match reference min/max                             | None                | Global                          | Min/max                        | No               | Any         | Independent            | Reference min/max                          | 1980s           |                                                                   |                                                                                                               |
+| Mean–Standard Deviation Regression      | Fits linear regression using mean and std dev                                       | None                | Global                          | Gain/offset                    | No               | Any         | Independent/Correlated | Reference mean/std                         | 1980s           |                                                                   | ArcGIS Pro                                                                                                    |
+| Overlaping pixel-wise Linear Regression | Fits linear regression using overlapping pairs of pixels                            | Co-registered       | Global                          | Gain/offset                    | Yes              | Any         | Independent/Correlated | Reference image pixels                     | 1980s           |                                                                   | ArcGIS Pro                                                                                                    |
+| Block adjusted gamma correction         | Adjusts local brightness via block-based gamma scaling                              | Moderate            | Blocks/interpolation resolution | Power function                 | Yes              | Any         | Independent            | Reference block map (mean of local blocks) |                 |                                                                   |                                                                                                               |
+| CCA/KCCA-Based                          | Finding the most correlated combinations between images                             | Co-registered       | CCA space resolution            | Matrix                         | Yes              | Any         | Correlated             | Reference canonical components             |                 |                                                                   |                                                                                                               |
+| Dodging                                 | Smooths brightness using low-pass filtering to reduce lighting artifacts            | Co-registered       | Blur resolution                 | Low-pass brightness correction | Yes              | Any         | Independent            | Blur created brightness values             |                 |                                                                   | ArcGIS Pro; IMAGINE Mosaic Pro                                                                                |
+| Illumination Equalization               | Models and removes large-scale illumination differences across images               | Co-registered       | Surface model resolution        | Modeled lighting correction    | Yes              | Any         | Independent            | Computed illumination values               |                 |                                                                   | IMAGINE Mosaic Pro                                                                                            |
+| Wavelet reconstruction                  | Uses ancillary data to model and reconstruct image values at multiple detail levels | Co-registered       | Ancillary data resolution       | Decomposition/reconstruction   | Yes              | Any         | Correlated             | Ancillary data                             |                 | [(Gan et al., 2021)](https://doi.org/10.1109/JSTARS.2021.3069855) |                                                                                                               |
+
+## Pixel Selection
+
+| Pixel selection (PIFs/RCS)              | Description                                                                                                                                     | Type        | Geometric alignment | Overlap required | Pixel units | Year introduced | Key papers                                                            | Software                                                                 |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ------------------- | ---------------- | ----------- | --------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Whole image                             | Uses all pixels without selection or masking                                                                                                    | None        | None                | No               | Any         |                 |                                                                       |                                                                          |
+| Overlapping area                        | Uses only pixels in the spatial overlap between images                                                                                          | None        | Moderate            | Yes              | Any         |                 |                                                                       |                                                                          |
+| Manual polygons or pixels               | User-defined areas or points chosen as invariant                                                                                                | Manual      | None                | No               | Any         |                 |                                                                       |                                                                          |
+| Manual threshold                        | Selects pixels based on value threshold                                                                                                         | Manual      | None                | No               | Any         |                 |                                                                       |                                                                          |
+| Dark/Bright Set (DB)                    | Selects darkest and brightest pixels assumed to be invariant                                                                                    | Statistical | None                | No               | Any         |                 |                                                                       |                                                                          |
+| Band indexes                            | Uses specific band combinations (e.g., NDVI) to identify invariant pixels                                                                       | Statistical | None                | No               | Any         |                 |                                                                       |                                                                          |
+| No-change  Scattergrams (NC)            | Selects pixels near the scatterplot diagonal where reference and target values match closely                                                    | Statistical | Co-registered       | Yes              | Any         |                 | [(De Carvalho et al., 2013)](https://www.mdpi.com/2072-4292/5/6/2763) |                                                                          |
+| Multivariate Alteration Detection (MAD) | Identifies invariant pixels by transforming image differences into uncorrelated components; selects pixels with minimal change across all bands | Statistical | Co-registered       | Yes              | Any         |                 |                                                                       |                                                                          |
+| Iteratively Reweighted MAD (IR-MAD)     | Refines MAD by reweighting pixels to improve change detection                                                                                   | Statistical | Co-registered       | Yes              | Any         |                 | [(Canty & Nielsen, 2008)](https://doi.org/10.1016/j.rse.2007.07.013)  | [Github MATLAB scripts](https://github.com/SMByC/ArrNorm)                |
+| Multi-Rule-Based Normalization          | Combines several selection rules to identify invariant pixels                                                                                   | Statistical | None                | No               | Any         |                 |                                                                       |                                                                          |
+| Feature-Based (Keypoint) RRN            | Matches distinctive features between images and uses their correspondence to guide normalization                                                | Geometric   | Moderate            | Yes              | Any         |                 |                                                                       |                                                                          |
+| Location-Independent RRN (LIRRN)        | Groups pixels by brightness or spectral similarity, then matches these groups between images to perform group-wise normalization                | Geometric   | Moderate            | Yes              | Any         | 2024            | [(Maghimi et al., 2024)](https://www.mdpi.com/1424-8220/24/7/2272)    | [Github MATLAB scripts](https://github.com/ArminMoghimi/LIRRN/tree/main) |
