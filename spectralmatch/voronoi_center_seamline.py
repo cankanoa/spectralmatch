@@ -4,7 +4,7 @@ import rasterio
 import numpy as np
 from rasterio.features import shapes
 from affine import Affine
-from shapely.geometry import shape, Polygon, LineString, mapping, GeometryCollection, Point
+from shapely.geometry import shape, Polygon, LineString, mapping, GeometryCollection, Point, MultiLineString
 from shapely.ops import split, voronoi_diagram
 import networkx as nx
 import fiona
@@ -19,6 +19,7 @@ def voronoi_center_seamline(
     min_cut_length: float = 0,
     debug_logs: bool = False,
     image_field_name: str = 'image',
+    cutline_out: str | None = None,
     )-> None:
     """
     Generates a Voronoi-based seamline from the centers of edge-matching polygons (EMPs) and saves the result as a vector mask.
@@ -30,6 +31,7 @@ def voronoi_center_seamline(
         min_cut_length (float, optional): Minimum seamline segment length to retain. Defaults to 0.
         debug_logs (bool, optional): If True, enables debug output. Defaults to False.
         image_field_name (str, optional): Field name for the output image. Defaults to 'image'.
+        cutline_out (str | None, optional): Output path for the generated seamline cutline. Defaults to None.
 
     Outputs:
         Writes the seamline vector file to the specified output file.
@@ -55,6 +57,16 @@ def voronoi_center_seamline(
         if not ov.is_empty:
             cut = _compute_centerline(a, b, dist_min, min_cut_length, debug_logs)
             cuts.append(cut)
+
+    # Optionally save cutlines
+    if cutline_out:
+        schema = {'geometry': 'LineString', 'properties': {'pair_id': 'str'}}
+        with fiona.open(cutline_out, 'w', driver='GPKG', crs=crs, schema=schema, layer='cutlines') as dst:
+            for idx, line in enumerate(cuts):
+                dst.write({
+                    'geometry': mapping(line),
+                    'properties': {'pair_id': f'{idx}'},
+                })
 
     segmented: List[Polygon] = []
     for idx, emp in enumerate(emps):
@@ -95,12 +107,25 @@ def _seamline_mask(
 
 
 def _densify_polygon(
-    poly: Polygon,
+    poly: Polygon | GeometryCollection,
     dist: float,
     debug_logs: bool = False
-    ) -> List[Tuple[float, float]]:
+) -> List[Tuple[float, float]]:
+    # Extract coordinates from valid polygon geometries
+    if isinstance(poly, Polygon):
+        geometries = [poly]
+    elif isinstance(poly, GeometryCollection):
+        geometries = [g for g in poly.geoms if isinstance(g, Polygon)]
+    else:
+        raise TypeError(f"Unsupported geometry type: {type(poly)}")
 
-    coords = list(poly.exterior.coords)
+    if not geometries:
+        raise ValueError("No polygon geometry found to densify")
+
+    # Use the largest polygon
+    largest = max(geometries, key=lambda p: p.area)
+    coords = list(largest.exterior.coords)
+
     dense = []
     for (x0, y0), (x1, y1) in zip(coords, coords[1:]):
         d = ((x1 - x0)**2 + (y1 - y0)**2)**0.5
@@ -139,7 +164,7 @@ def _compute_centerline(
     if len(coords) >= 2:
         u, v = coords[0], coords[1]
     else:
-        u, v = max(combinations(pts, 2), key=lambda p: (p[0]-p[1])**2 + (p[1]-p[1])**2)
+        u, v = max(combinations(pts, 2), key=lambda p: (p[0][0] - p[1][0])**2 + (p[0][1] - p[1][1])**2)
     nodes = list(G.nodes())
     if not nodes:
         if debug_logs: print("Empty Voronoi graph, using fallback straight line")
@@ -162,12 +187,30 @@ def _segment_emp(
     cuts: List[LineString],
     debug_logs: bool = False
     ) -> Polygon:
-
+    # sequentially cut EMP by each centerline, choosing the segment containing the EMP centroid
     for i, ln in enumerate(cuts):
-        if emp.intersects(ln):
-            result = split(emp, ln)
-            pieces = list(result.geoms)
-            emp = max(pieces, key=lambda p: p.area)
-        elif debug_logs:
-            print(f"EMP does not intersect cut {i}, skipping")
+        if not emp.intersects(ln):
+            if debug_logs:
+                print(f"Cut {i} does not intersect EMP, skipping")
+            continue
+
+        pieces = list(split(emp, ln).geoms)
+        if not pieces:
+            continue
+
+        # choose the piece that contains the original centroid
+        centroid = emp.centroid
+        chosen = None
+        for p in pieces:
+            if p.contains(centroid):
+                chosen = p
+                break
+        if chosen is None:
+            # fallback to largest area if centroid-based selection fails
+            chosen = max(pieces, key=lambda p: p.area)
+
+        emp = chosen
+        if debug_logs:
+            print(f"After cut {i}: {len(pieces)} pieces, selected piece area={emp.area:.2f}")
+
     return emp
