@@ -54,18 +54,6 @@ def _load_building_masks(mask_paths: List[str]) -> List[Polygon]:
     return masks
 
 
-def _compute_union_polygon(geoms: List[Polygon]) -> Polygon:
-    """Compute the union of multiple polygons.
-
-    Args:
-        geoms (List[Polygon]): List of shapely Polygons.
-
-    Returns:
-        Polygon: A single Polygon representing their union.
-    """
-    return unary_union(geoms)
-
-
 def _generate_triangulation(bounds: Polygon,
                             triangle_size: float) -> List[Polygon]:
     """Generate a Delaunay triangulation over the bounding polygon region.
