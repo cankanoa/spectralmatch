@@ -262,15 +262,16 @@ def _compute_overlap_polygon(footprints: List[Polygon]) -> Polygon:
 
 def markov_random_field_seamline(
     image_paths: List[str],
+    output_vector_path: str,
     building_mask_paths: Optional[List[str]] = None,
     triangle_size: float = 500.0,
     lambda_param: float = 2.0,
-    output_vector_path: Optional[str] = None,
     ) -> MultiLineString:
     """Generate a seamline network from a set of overlapping georeferenced images.
 
     Args:
         image_paths (List[str]): Paths to input orthorectified images.
+        output_vector_path (str): Path to output vector file.
         building_mask_paths (Optional[List[str]]): Optional paths to building mask shapefiles.
         triangle_size (float): Approximate spacing for mesh triangulation.
         lambda_param (float): Smoothing weight parameter.
@@ -279,28 +280,39 @@ def markov_random_field_seamline(
         MultiLineString: Seamlines.
     """
 
+    # Get CRS from first image
     with rasterio.open(image_paths[0]) as src: out_crs = src.crs
 
+    # Load image footprints and optional building masks
     footprints = _load_image_footprints(image_paths)
     masks = _load_building_masks(building_mask_paths) if building_mask_paths else None
 
+    # Compute overlapping region of all images
     overlap_poly = _compute_overlap_polygon(footprints)
     if overlap_poly.is_empty:
         raise ValueError("No overlapping area between images!")
+
+    # Generate triangle mesh within overlap
     triangles = _generate_triangulation(overlap_poly, triangle_size)
 
+    # Build adjacency graph of triangles
     G = _build_adjacency_graph(triangles)
 
+    # Compute image visibility cost per triangle
     data_cost = _compute_data_cost(triangles, footprints)
 
+    # Compute gradient magnitude maps and affine transforms
     grads, transforms = _compute_image_gradients(image_paths)
 
+    # Compute edge weights for graph cut optimization
     edges, weights, smooth_mat = _compute_edge_weights(
         G, list(range(len(image_paths))), grads, transforms, lambda_param, masks)
 
+    # Solve MRF to assign each triangle to an image
     labels = _solve_mrf(data_cost, smooth_mat, edges, weights)
 
+    # Extract seamline edges between differently labeled triangles
     seams = _extract_seamlines(G, triangles, labels)
-    if output_vector_path:
-        _save_seamlines(seams, output_vector_path, out_crs)
-    return seams
+
+    # Save seamlines to vector file
+    _save_seamlines(seams, output_vector_path, out_crs)
