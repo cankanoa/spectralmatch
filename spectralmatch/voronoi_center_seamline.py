@@ -12,26 +12,26 @@ from itertools import combinations
 
 
 def voronoi_center_seamline(
-    paths: List[str],
-    mask_out: str,
+    input_images: Tuple[str, str] | List[str],
+    output_mask: str,
     *,
-    dist_min: float = 10,
+    min_point_spacing: float = 10,
     min_cut_length: float = 0,
     debug_logs: bool = False,
     image_field_name: str = 'image',
-    cutline_out: str | None = None,
+    debug_vectors_path: str | None = None,
     )-> None:
     """
     Generates a Voronoi-based seamline from the centers of edge-matching polygons (EMPs) and saves the result as a vector mask.
 
     Args:
-        paths (List[str]): List of input EMP vector file paths.
-        mask_out (str): Output path for the generated seamline vector mask.
-        dist_min (float, optional): Minimum spacing between Voronoi points. Defaults to 10.
+        input_images (List[str]): List of input EMP vector file paths.
+        output_mask (str): Output path for the generated seamline vector mask.
+        min_point_spacing (float, optional): Minimum spacing between Voronoi points. Defaults to 10.
         min_cut_length (float, optional): Minimum seamline segment length to retain. Defaults to 0.
         debug_logs (bool, optional): If True, enables debug output. Defaults to False.
         image_field_name (str, optional): Field name for the output image. Defaults to 'image'.
-        cutline_out (str | None, optional): Output path for the generated seamline cutline. Defaults to None.
+        debug_vectors_path (str | None, optional): Output path for the generated seamline cutline. Defaults to None.
 
     Outputs:
         Writes the seamline vector file to the specified output file.
@@ -39,7 +39,7 @@ def voronoi_center_seamline(
 
     emps = []
     crs = None
-    for p in paths:
+    for p in input_images:
         mask, transform = _read_mask(p, debug_logs)
         emp = _seamline_mask(mask, transform, debug_logs)
         emps.append(emp)
@@ -55,15 +55,15 @@ def voronoi_center_seamline(
         ov = a.intersection(b)
         if debug_logs: print(f"Overlap {i} area: {ov.area:.2f}")
         if not ov.is_empty:
-            if cutline_out:
-                _save_intersection_points(a, b, cutline_out, crs, f"{i}")
-            cut = _compute_centerline(a, b, dist_min, min_cut_length, debug_logs, crs)
+            if debug_vectors_path:
+                _save_intersection_points(a, b, debug_vectors_path, crs, f"{i}")
+            cut = _compute_centerline(a, b, min_point_spacing, min_cut_length, debug_logs, crs)
             cuts.append(cut)
 
     # Optionally save cutlines
-    if cutline_out:
+    if debug_vectors_path:
         schema = {'geometry': 'LineString', 'properties': {'pair_id': 'str'}}
-        with fiona.open(cutline_out, 'w', driver='GPKG', crs=crs, schema=schema, layer='cutlines') as dst:
+        with fiona.open(debug_vectors_path, 'w', driver='GPKG', crs=crs, schema=schema, layer='cutlines') as dst:
             for idx, line in enumerate(cuts):
                 dst.write({
                     'geometry': mapping(line),
@@ -78,8 +78,8 @@ def voronoi_center_seamline(
         segmented.append(seg)
 
     schema = {'geometry': 'Polygon', 'properties': {image_field_name: 'str'}}
-    with fiona.open(mask_out, 'w', driver='GPKG', crs=crs, schema=schema, layer='seamlines') as dst:
-        for img, poly in zip(paths, segmented):
+    with fiona.open(output_mask, 'w', driver='GPKG', crs=crs, schema=schema, layer='seamlines') as dst:
+        for img, poly in zip(input_images, segmented):
             dst.write({'geometry': mapping(poly), 'properties': {image_field_name: os.path.splitext(os.path.basename(img))[0]}})
 
 
@@ -140,14 +140,14 @@ def _densify_polygon(
 def _compute_centerline(
     a: Polygon,
     b: Polygon,
-    dist_min: float,
+    min_point_spacing: float,
     min_cut_length: float,
     debug_logs: bool = False,
     crs = None,
 ) -> LineString:
 
     voa = a.intersection(b)
-    pts = _densify_polygon(voa, dist_min, debug_logs)
+    pts = _densify_polygon(voa, min_point_spacing, debug_logs)
 
     # Compute intersection and extract both Voronoi and anchor points
     boundary_pts = a.boundary.intersection(b.boundary)
