@@ -17,6 +17,9 @@ from .utils import _create_windows
 from rasterio.features import geometry_mask
 from rasterio.transform import from_origin
 from rasterio.coords import BoundingBox
+from rasterio.warp import calculate_default_transform
+from rasterio.coords import BoundingBox
+from multiprocessing import Pool, cpu_count, get_context
 
 
 def merge_vectors(
@@ -85,122 +88,166 @@ def merge_vectors(
     merged.to_file(merged_vector_path)
 
 
+def _merge_tile(
+    args: Tuple[
+        Window,
+        rasterio.Affine,
+        Tuple[int, int],
+        List[str],
+        int,
+        str,
+        float | int,
+        str,
+    ],
+) -> Tuple[Window, np.ndarray]:
+    window, transform, shape, image_paths, band_count, dtype, nodata, dst_crs = args
+    tile_data = np.full((band_count, shape[1], shape[0]), nodata, dtype=dtype)
+
+    for path in image_paths:
+        with rasterio.open(path) as src:
+            for b in range(band_count):
+                temp = np.full((shape[1], shape[0]), nodata, dtype=dtype)
+                reproject(
+                    source=rasterio.band(src, b + 1),
+                    destination=temp,
+                    src_transform=src.transform,
+                    src_crs=src.crs,
+                    dst_transform=transform,
+                    dst_crs=dst_crs,
+                    resampling=Resampling.nearest,
+                    dst_nodata=nodata,
+                )
+                # Only fill in values where current tile is still nodata
+                mask = (tile_data[b] == nodata) & (temp != nodata)
+                tile_data[b][mask] = temp[mask]
+
+    return window, tile_data
+
+
 def merge_rasters(
     input_images: Tuple[str, str] | List[str],
     output_image_path: str,
     window_size: Optional[int | Tuple[int, int]] = None,
+    parallel_workers: Literal["cpu"] | int | None = None,
     debug_logs: bool = False,
     output_dtype: str | None = None,
     custom_nodata_value: float | int | None = None,
-    ) -> None:
+) -> None:
     """
-    Merges multiple input rasters into a single mosaic file by aligning each image geospatially and writing them in the correct location using tiling.
+    Merge multiple rasters efficiently using tile-based multiprocessing.
 
     Args:
-        input_images (List[str]): Paths to input raster images.
-        output_image_path (str): Path to save the merged output raster.
-        window_size (int | Tuple[int, int] | None, optional): Tile size for memory-efficient processing.
-        debug_logs (bool, optional): Enable debug logging.
-        output_dtype (str | None, optional): Output dtype for output raster. None will default to input raster type.
+        input_images (Tuple[str, str] | List[str]): List or tuple of input paths. Tuple triggers search_paths(*input_images).
+        output_image_path (str): Path to save the merged raster.
+        window_size (int | Tuple[int, int] | None): Tile size (width, height). If None, full image is used.
+        parallel_workers (Literal["cpu"] | int | None): Number of workers. Use "cpu" to use all cores.
+        debug_logs (bool): Enable debug logging.
+        output_dtype (str | None): Output data type. Defaults to first image dtype.
+        custom_nodata_value (float | int | None): Optional nodata override.
 
-    Output:
-        A geospatially aligned, merged raster is saved to `output_image_path`.
+    Returns:
+        None
     """
-    if debug_logs: print('Start merging')
+    print('Start merge')
 
-    if isinstance(input_images, tuple): input_images = search_paths(*input_images)
+    if isinstance(input_images, tuple):
+        input_images = search_paths(*input_images)
 
     os.makedirs(os.path.dirname(output_image_path), exist_ok=True)
 
     if isinstance(window_size, int):
         window_size = (window_size, window_size)
 
-    # Read metadata and calculate combined bounds and resolution
-    all_bounds = []
-    all_res = []
-    crs = None
-    dtype = None
-    count = None
-    nodata_value = None
+    with rasterio.open(input_images[0]) as ref:
+        dst_crs = ref.crs
+        band_count = ref.count
+        ref_dtype = ref.dtypes[0]
+        ref_nodata = ref.nodata
+        output_dtype = output_dtype or ref_dtype
+        nodata = custom_nodata_value if custom_nodata_value is not None else ref_nodata
+
+    if debug_logs:
+        print(f"Calculating output bounds and resolution...")
+
+    # Initialize union bounds
+    dst_bounds = None
+    dst_resolution = None
 
     for path in input_images:
         with rasterio.open(path) as src:
-            all_bounds.append(src.bounds)
-            all_res.append(src.res)
-            if crs is None:
-                crs = src.crs
-                dtype = output_dtype or src.dtypes[0]
-                count = src.count
-                nodata_value = src.nodata
+            transform, width, height = calculate_default_transform(
+                src.crs, dst_crs, src.width, src.height, *src.bounds
+            )
+            bounds = rasterio.transform.array_bounds(height, width, transform)
+            bbox = BoundingBox(*bounds)
+            if dst_bounds is None:
+                dst_bounds = bbox
+            else:
+                dst_bounds = BoundingBox(
+                    left=min(dst_bounds.left, bbox.left),
+                    bottom=min(dst_bounds.bottom, bbox.bottom),
+                    right=max(dst_bounds.right, bbox.right),
+                    top=max(dst_bounds.top, bbox.top),
+                )
+            if dst_resolution is None:
+                dst_resolution = (abs(transform.a), abs(transform.e))
 
-    minx = min(b.left for b in all_bounds)
-    miny = min(b.bottom for b in all_bounds)
-    maxx = max(b.right for b in all_bounds)
-    maxy = max(b.top for b in all_bounds)
+    dst_transform = rasterio.transform.from_origin(dst_bounds.left, dst_bounds.top, *dst_resolution)
+    dst_width = int(np.ceil((dst_bounds.right - dst_bounds.left) / dst_resolution[0]))
+    dst_height = int(np.ceil((dst_bounds.top - dst_bounds.bottom) / dst_resolution[1]))
 
-    res_x, res_y = all_res[0]  # Assume same resolution across rasters
-    width = int(np.ceil((maxx - minx) / res_x))
-    height = int(np.ceil((maxy - miny) / res_y))
-    transform = from_origin(minx, maxy, res_x, res_y)
+    if debug_logs:
+        print(f"Output size: {dst_width}x{dst_height}")
+        print(f"Window size: {window_size}")
 
-    if window_size:
-        windows = list(_create_windows(width, height, *window_size))
-    else:
-        windows = [Window(0, 0, width, height)]
-
-    profile = {
+    meta = {
         "driver": "GTiff",
-        "height": height,
-        "width": width,
-        "count": count,
-        "dtype": dtype,
-        "crs": crs,
-        "transform": transform,
-        "nodata": nodata_value or None
+        "width": dst_width,
+        "height": dst_height,
+        "count": band_count,
+        "dtype": output_dtype,
+        "crs": dst_crs,
+        "transform": dst_transform,
+        "nodata": nodata,
+        "tiled": True,
+        "blockxsize": window_size[0],
+        "blockysize": window_size[1],
+        "compress": "deflate",
     }
-    # if debug_logs: print(f"xStart:yStart xSizeXySize ({len(windows)} windows): ", end="")
-    with rasterio.open(output_image_path, 'w', **profile) as dst:
-        for window in windows:
-            win_transform = rasterio.windows.transform(window, transform)
-            win_bounds = BoundingBox(*rasterio.windows.bounds(window, transform))
-            merged_data = np.zeros((count, window.height, window.width), dtype=dtype)
 
-            for path in input_images:
-                with rasterio.open(path) as src:
-                    src_bounds = src.bounds
-                    if (
-                            src_bounds.right <= win_bounds.left or
-                            src_bounds.left >= win_bounds.right or
-                            src_bounds.top <= win_bounds.bottom or
-                            src_bounds.bottom >= win_bounds.top
-                    ):
-                        continue
-                    try:
-                        src_window = rasterio.windows.from_bounds(
-                            *win_bounds,
-                            transform=src.transform
-                        )
-                        src_data = src.read(
-                            window=src_window,
-                            out_shape=(count, window.height, window.width),
-                            resampling=Resampling.nearest
-                        )
+    def window_grid():
+        for row_off in range(0, dst_height, window_size[1]):
+            for col_off in range(0, dst_width, window_size[0]):
+                win = Window(
+                    col_off=col_off,
+                    row_off=row_off,
+                    width=min(window_size[0], dst_width - col_off),
+                    height=min(window_size[1], dst_height - row_off),
+                )
+                yield (
+                    win,
+                    rasterio.windows.transform(win, dst_transform),
+                    (win.width, win.height),
+                    input_images,
+                    band_count,
+                    output_dtype,
+                    nodata,
+                    dst_crs,
+                )
 
-                        nodata_val = src.nodata
-                        if nodata_val is not None:
-                            mask = ~(np.isclose(src_data, nodata_val))
-                        else:
-                            mask = (src_data != 0)
+    windows = list(window_grid())
 
-                        merged_data = np.where(mask, src_data, merged_data)
+    if debug_logs:
+        print(f"Processing {len(windows)} tiles")
 
-                    except Exception as e:
-                        if debug_logs:
-                            print(f"Skipping {path} in window {window} due to error: {e}")
+    num_workers = cpu_count() if parallel_workers == "cpu" else parallel_workers or 1
 
-            dst.write(merged_data, window=window)
-            # if debug_logs: print(f"{window.col_off}:{window.row_off} {window.width}x{window.height}, ", end="", flush=True)
-    if debug_logs: print("Done merging")
+    with rasterio.open(output_image_path, "w", **meta) as dst:
+        with get_context("spawn").Pool(num_workers) as pool:
+            for win, data in pool.imap(_merge_tile, windows):
+                dst.write(data, window=win)
+
+    if debug_logs: print(f"Saved merged raster: {output_image_path}")
 
 
 def mask_rasters(
