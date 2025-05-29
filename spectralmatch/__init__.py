@@ -4,7 +4,6 @@ from .handlers import merge_rasters, mask_rasters, merge_vectors, search_paths, 
 from .mask.mask import create_cloud_mask_with_omnicloudmask, post_process_raster_cloud_mask_to_vector, create_ndvi_mask, post_process_threshold_to_vector, mask_image_with_vector
 from .statistics import compare_image_spectral_profiles_pairs, compare_image_spectral_profiles, compare_spatial_spectral_difference_band_average
 from .seamline.voronoi_center_seamline import voronoi_center_seamline
-from .seamline.markov_random_field_seamline import markov_random_field_seamline
 
 __all__ = [
     # Match
@@ -20,7 +19,6 @@ __all__ = [
     
     # Seamlines
     "voronoi_center_seamline",
-    "markov_random_field_seamline",
 
     # Handlers
     "merge_rasters",
