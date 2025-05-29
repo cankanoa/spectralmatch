@@ -9,8 +9,8 @@ import os
 from fiona.env import local
 from spectralmatch import *
 
-# Important: If this does not automatically find the correct CWD, manually copy the path to the /data_worldview3 folder
-working_directory = '/Users/kanoalindiwe/Downloads/Projects/spectralmatch/docs/examples/data_worldview3'
+# Important: If this does not automatically find the correct CWD, manually copy the path to the /data_worldview folder
+working_directory = os.path.join(os.getcwd(), "data_landsat")
 print(working_directory)
 
 input_folder = os.path.join(working_directory, "Input")

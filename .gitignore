@@ -1,6 +1,12 @@
 # Example image
-/docs/examples/example_data/*
-!/docs/examples/example_data/Input/
+docs/examples/data_worldview/*
+docs/examples/data_landsat/*
+
+!docs/examples/data_worldview/Input/
+!docs/examples/data_landsat/Input/
+
+!docs/examples/data_worldview/Input/**
+!docs/examples/data_landsat/Input/**
 *.gpkg-shm
 *.gpkg-wal
 
