@@ -136,11 +136,10 @@ voronoi_center_seamline(
     debug_vectors_path=debug_vectors_path,
     )
 
-# %% Clip and merge
+# %% Clip
 input_image_paths = search_paths(aligned_folder, "*.tif")
 output_clipped_image_paths = create_paths(clipped_folder, "$_Clipped.tif", input_image_paths)
 input_vector_mask_path = os.path.join(working_directory, "ImageClips.gpkg")
-output_merged_image_path = os.path.join(working_directory, "MergedImage.tif")
 
 mask_rasters(
     input_image_paths,
@@ -151,8 +150,11 @@ mask_rasters(
     window_size=window_size,
     )
 
+# %% Merge rasters
+output_merged_image_path = os.path.join(working_directory, "MergedImage.tif")
+
 merge_rasters(
-    output_clipped_image_paths,
+    (clipped_folder, "*.tif"),
     output_merged_image_path,
     window_size=window_size,
     debug_logs=True,
