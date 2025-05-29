@@ -24,6 +24,7 @@ from ..handlers import create_paths, search_paths, match_paths
 _worker_dataset_cache = {}
 file_lock = Lock()
 
+
 def local_block_adjustment(
     input_images: Tuple[str, str] | List[str],
     output_images: Tuple[str, str] | List[str],

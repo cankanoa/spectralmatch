@@ -54,27 +54,23 @@ def _load_building_masks(mask_paths: List[str]) -> List[Polygon]:
     return masks
 
 
-def _generate_triangulation(bounds: Polygon,
-                            triangle_size: float) -> List[Polygon]:
-    """Generate a Delaunay triangulation over the bounding polygon region.
-
-    Args:
-        bounds (Polygon): Full coverage area polygon.
-        triangle_size (float): Approximate desired spacing between vertices.
-
-    Returns:
-        List[Polygon]: Triangles inside bounds as shapely Polygons.
-    """
+def _generate_triangulation(bounds: Polygon, triangle_size: float) -> List[Polygon]:
     minx, miny, maxx, maxy = bounds.bounds
-    xs = np.arange(minx, maxx + triangle_size, triangle_size)
-    ys = np.arange(miny, maxy + triangle_size, triangle_size)
+
+    # Compute exact number of steps including last point exactly at max
+    nx = int(np.round((maxx - minx) / triangle_size)) + 1
+    ny = int(np.round((maxy - miny) / triangle_size)) + 1
+
+    xs = np.linspace(minx, maxx, nx)
+    ys = np.linspace(miny, maxy, ny)
     pts = np.array(list(product(xs, ys)))
+
     delaunay = Delaunay(pts)
     triangles = []
     for simplex in delaunay.simplices:
         tri_pts = pts[simplex]
         poly = Polygon(tri_pts)
-        if poly.centroid.within(bounds):
+        if poly.within(bounds):
             triangles.append(poly)
     return triangles
 
@@ -260,59 +256,85 @@ def _compute_overlap_polygon(footprints: List[Polygon]) -> Polygon:
     return unary_union(overlaps)
 
 
+def _save_triangles(
+    triangles: List[Polygon],
+    output_path: str,
+    crs,
+) -> None:
+    """Save triangle polygons to a GeoPackage.
+
+    Args:
+        triangles (List[Polygon]): List of triangle geometries.
+        output_path (str): Path to the output GeoPackage file.
+        crs: Coordinate reference system of the geometries.
+    """
+    gdf = gpd.GeoDataFrame(geometry=triangles, crs=crs)
+    gdf.to_file(output_path, driver="GPKG", layer="triangles")
+
+
 def markov_random_field_seamline(
     image_paths: List[str],
     output_vector_path: str,
     building_mask_paths: Optional[List[str]] = None,
     triangle_size: float = 500.0,
     lambda_param: float = 2.0,
-    ) -> MultiLineString:
-    """Generate a seamline network from a set of overlapping georeferenced images.
-
-    Args:
-        image_paths (List[str]): Paths to input orthorectified images.
-        output_vector_path (str): Path to output vector file.
-        building_mask_paths (Optional[List[str]]): Optional paths to building mask shapefiles.
-        triangle_size (float): Approximate spacing for mesh triangulation.
-        lambda_param (float): Smoothing weight parameter.
-
-    Returns:
-        MultiLineString: Seamlines.
-    """
+) -> MultiLineString:
+    """Generate a seamline network from a set of overlapping georeferenced images."""
 
     # Get CRS from first image
-    with rasterio.open(image_paths[0]) as src: out_crs = src.crs
+    with rasterio.open(image_paths[0]) as src:
+        out_crs = src.crs
+        print(f"[DEBUG] Loaded CRS: {out_crs}")
 
     # Load image footprints and optional building masks
     footprints = _load_image_footprints(image_paths)
+    print(f"[DEBUG] Loaded {len(footprints)} image footprints.")
+
     masks = _load_building_masks(building_mask_paths) if building_mask_paths else None
+    if masks:
+        print(f"[DEBUG] Loaded {len(masks)} building masks.")
 
     # Compute overlapping region of all images
     overlap_poly = _compute_overlap_polygon(footprints)
+    print(f"[DEBUG] Overlap polygon area: {overlap_poly.area}")
     if overlap_poly.is_empty:
         raise ValueError("No overlapping area between images!")
 
     # Generate triangle mesh within overlap
     triangles = _generate_triangulation(overlap_poly, triangle_size)
+    print(f"[DEBUG] Generated {len(triangles)} triangles.")
+    _save_triangles(triangles, '/Users/kanoalindiwe/Downloads/Projects/spectralmatch/docs/examples/data_worldview3/triangles.gpkg', out_crs)  # Reuse same path, different layer
 
     # Build adjacency graph of triangles
     G = _build_adjacency_graph(triangles)
+    print(f"[DEBUG] Graph has {G.number_of_nodes()} nodes and {G.number_of_edges()} edges.")
 
     # Compute image visibility cost per triangle
     data_cost = _compute_data_cost(triangles, footprints)
+    print(f"[DEBUG] Data cost shape: {data_cost.shape}")
 
     # Compute gradient magnitude maps and affine transforms
     grads, transforms = _compute_image_gradients(image_paths)
+    print(f"[DEBUG] Loaded gradients for {len(grads)} images.")
+    for i, grad in enumerate(grads):
+        print(f"[DEBUG] Gradient {i} shape: {grad.shape}")
 
     # Compute edge weights for graph cut optimization
     edges, weights, smooth_mat = _compute_edge_weights(
         G, list(range(len(image_paths))), grads, transforms, lambda_param, masks)
+    print(f"[DEBUG] Computed {len(edges)} edge weights.")
+    print(f"[DEBUG] Smooth matrix shape: {smooth_mat.shape}")
 
     # Solve MRF to assign each triangle to an image
     labels = _solve_mrf(data_cost, smooth_mat, edges, weights)
+    print(f"[DEBUG] MRF labeling done. Label count: {len(labels)}")
 
     # Extract seamline edges between differently labeled triangles
     seams = _extract_seamlines(G, triangles, labels)
+    print(f"[DEBUG] Extracted {len(seams.geoms)} seamline segments.")
 
     # Save seamlines to vector file
     _save_seamlines(seams, output_vector_path, out_crs)
+    print(f"[DEBUG] Saved seamlines to: {output_vector_path}")
+
+    return seams

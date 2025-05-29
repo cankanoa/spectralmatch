@@ -63,7 +63,7 @@ def compare_image_spectral_profiles(
     plt.grid(True)
     plt.savefig(output_figure_path, dpi=300)
     plt.close()
-    print(f"Figure saved to: {output_figure_path}")
+    print(f"Saved: {output_figure_path}")
 
 
 def compare_image_spectral_profiles_pairs(
@@ -125,7 +125,7 @@ def compare_image_spectral_profiles_pairs(
     plt.grid(True)
     plt.savefig(output_figure_path, dpi=300)
     plt.close()
-    print(f"Figure saved to: {output_figure_path}")
+    print(f"Saved: {output_figure_path}")
 
 
 def compare_spatial_spectral_difference_band_average(

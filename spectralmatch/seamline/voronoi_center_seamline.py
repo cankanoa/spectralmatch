@@ -9,7 +9,7 @@ from shapely.ops import split, voronoi_diagram
 import networkx as nx
 import fiona
 from itertools import combinations
-
+from ..handlers import search_paths
 
 def voronoi_center_seamline(
     input_images: Tuple[str, str] | List[str],
@@ -37,6 +37,9 @@ def voronoi_center_seamline(
         Writes the seamline vector file to the specified output file.
     """
 
+    print("Start voronoi center seamline")
+    if isinstance(input_images, tuple): input_images = search_paths(*input_images)
+
     emps = []
     crs = None
     for p in input_images:
@@ -57,7 +60,7 @@ def voronoi_center_seamline(
         if not ov.is_empty:
             if debug_vectors_path:
                 _save_intersection_points(a, b, debug_vectors_path, crs, f"{i}")
-            cut = _compute_centerline(a, b, min_point_spacing, min_cut_length, debug_logs, crs)
+            cut = _compute_centerline(a, b, min_point_spacing, min_cut_length, debug_logs, crs, debug_vectors_path)
             cuts.append(cut)
 
     # Optionally save cutlines
@@ -144,6 +147,7 @@ def _compute_centerline(
     min_cut_length: float,
     debug_logs: bool = False,
     crs = None,
+    debug_vectors_path = None,
 ) -> LineString:
 
     voa = a.intersection(b)
@@ -181,8 +185,8 @@ def _compute_centerline(
 
     multi = voronoi_diagram(GeometryCollection([Point(p) for p in pts]), edges=False)
 
-    if debug_logs and crs:
-        _save_voronoi_cells(multi, '/Users/kanoalindiwe/Downloads/Projects/spectralmatch/docs/examples/data_worldview3/voronoiCells.gpkg', crs, layer_name=f"voronoi_{int(voa.area)}")
+    if debug_vectors_path:
+        _save_voronoi_cells(multi, debug_vectors_path, crs, layer_name=f"voronoi_{int(voa.area)}")
 
     G = nx.Graph()
     for poly in multi.geoms:
