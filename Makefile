@@ -76,7 +76,6 @@ clean:
 	       $(MAKEFILE_DIR)*.egg-info \
 	       $(MAKEFILE_DIR)__pycache__ \
 	       $(MAKEFILE_DIR).pytest_cache \
-	       $(MAKEFILE_DIR)docs/examples/example_data/Output \
 	       $(MAKEFILE_DIR)site
 	find $(MAKEFILE_DIR)docs/examples/data_landsat -mindepth 1 ! -path "*/Input*" -exec rm -rf {} +
-	find $(MAKEFILE_DIR)docs/examples/data_worldview3 -mindepth 1 ! -path "*/Input*" -exec rm -rf {} +
+	find $(MAKEFILE_DIR)docs/examples/data_worldview -mindepth 1 ! -path "*/Input*" -exec rm -rf {} +
