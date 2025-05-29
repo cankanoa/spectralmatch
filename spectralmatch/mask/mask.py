@@ -9,7 +9,6 @@ from rasterio.transform import from_origin
 from omnicloudmask import predict_from_array
 from rasterio.features import shapes
 from osgeo import gdal, ogr, osr
-from .handlers import _write_vector
 from shapely.geometry import shape, Polygon, MultiPolygon, mapping
 from shapely.ops import unary_union
 from rasterio.mask import raster_geometry_mask
@@ -211,7 +210,12 @@ def post_process_raster_cloud_mask_to_vector(
         mem_layer.CreateFeature(feat)
         feat = None
 
-    _write_vector(mem_ds, output_vector_path)
+    driver = ogr.GetDriverByName("GPKG")
+    if os.path.exists(output_vector_path):
+        driver.DeleteDataSource(output_vector_path)
+    out_ds = driver.CreateDataSource(output_vector_path)
+    out_ds.CopyLayer(mem_layer, "post_processed")
+    out_ds = None
 
     return output_vector_path
 

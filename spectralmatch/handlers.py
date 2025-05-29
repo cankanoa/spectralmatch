@@ -85,84 +85,19 @@ def merge_vectors(
     merged.to_file(merged_vector_path)
 
 
-def _write_vector(
-    mem_ds: ogr.Layer,
-    output_vector_path: str
-    ) -> None:
-    """
-    Writes an in-memory OGR DataSource to disk in a supported vector format.
-
-    Args:
-        mem_ds (ogr.DataSource): In-memory vector data source.
-        output_vector_path (str): Output file path (.shp, .geojson, or .gpkg).
-
-    Returns:
-        None
-
-    Raises:
-        RuntimeError: If no suitable driver is found or output creation fails.
-    """
-
-    driver_mapping = {
-        '.shp': 'ESRI Shapefile',
-        '.geojson': 'GeoJSON',
-        '.gpkg': 'GPKG'
-    }
-    ext = os.path.splitext(output_vector_path)[1].lower()
-    driver_name = driver_mapping.get(ext, 'GeoJSON')  # Fallback to GeoJSON if unknown.
-
-    driver = ogr.GetDriverByName(driver_name)
-    if driver is None:
-        raise RuntimeError(f"No driver found for extension: {ext}")
-
-    # If the output file already exists, delete it.
-    if os.path.exists(output_vector_path):
-        driver.DeleteDataSource(output_vector_path)
-
-    out_ds = driver.CreateDataSource(output_vector_path)
-    if out_ds is None:
-        raise RuntimeError(f"Could not create output vector dataset: {output_vector_path}")
-
-    # Loop over every layer in the in-memory datasource and copy it.
-    for i in range(mem_ds.GetLayerCount()):
-        mem_layer = mem_ds.GetLayerByIndex(i)
-        layer_name = mem_layer.GetName()
-        srs = mem_layer.GetSpatialRef()
-        geom_type = mem_layer.GetGeomType()
-
-        out_layer = out_ds.CreateLayer(layer_name, srs, geom_type)
-
-        # Copy field definitions
-        mem_defn = mem_layer.GetLayerDefn()
-        for j in range(mem_defn.GetFieldCount()):
-            field_defn = mem_defn.GetFieldDefn(j)
-            out_layer.CreateField(field_defn)
-
-        # Copy features (including geometry, fields, and feature-level metadata)
-        mem_layer.ResetReading()
-        for feat in mem_layer:
-            out_feat = ogr.Feature(out_layer.GetLayerDefn())
-            out_feat.SetGeometry(feat.GetGeometryRef().Clone())
-            for j in range(mem_defn.GetFieldCount()):
-                field_name = mem_defn.GetFieldDefn(j).GetNameRef()
-                out_feat.SetField(field_name, feat.GetField(j))
-            out_layer.CreateFeature(out_feat)
-            out_feat = None
-    out_ds.Destroy()
-
-
 def merge_rasters(
-    input_image_paths: List[str],
+    input_images: Tuple[str, str] | List[str],
     output_image_path: str,
     window_size: Optional[int | Tuple[int, int]] = None,
     debug_logs: bool = False,
     output_dtype: str | None = None,
+    custom_nodata_value: float | int | None = None,
     ) -> None:
     """
     Merges multiple input rasters into a single mosaic file by aligning each image geospatially and writing them in the correct location using tiling.
 
     Args:
-        input_image_paths (List[str]): Paths to input raster images.
+        input_images (List[str]): Paths to input raster images.
         output_image_path (str): Path to save the merged output raster.
         window_size (int | Tuple[int, int] | None, optional): Tile size for memory-efficient processing.
         debug_logs (bool, optional): Enable debug logging.
@@ -172,8 +107,10 @@ def merge_rasters(
         A geospatially aligned, merged raster is saved to `output_image_path`.
     """
     if debug_logs: print('Start merging')
-    if not os.path.exists(os.path.dirname(output_image_path)):
-        os.makedirs(os.path.dirname(output_image_path))
+
+    if isinstance(input_images, tuple): input_images = search_paths(*input_images)
+
+    os.makedirs(os.path.dirname(output_image_path), exist_ok=True)
 
     if isinstance(window_size, int):
         window_size = (window_size, window_size)
@@ -184,12 +121,9 @@ def merge_rasters(
     crs = None
     dtype = None
     count = None
+    nodata_value = None
 
-    for path in input_image_paths:
-        with rasterio.open(path) as src:
-            nodata_value = src.nodata
-
-    for path in input_image_paths:
+    for path in input_images:
         with rasterio.open(path) as src:
             all_bounds.append(src.bounds)
             all_res.append(src.res)
@@ -197,6 +131,7 @@ def merge_rasters(
                 crs = src.crs
                 dtype = output_dtype or src.dtypes[0]
                 count = src.count
+                nodata_value = src.nodata
 
     minx = min(b.left for b in all_bounds)
     miny = min(b.bottom for b in all_bounds)
@@ -230,7 +165,7 @@ def merge_rasters(
             win_bounds = BoundingBox(*rasterio.windows.bounds(window, transform))
             merged_data = np.zeros((count, window.height, window.width), dtype=dtype)
 
-            for path in input_image_paths:
+            for path in input_images:
                 with rasterio.open(path) as src:
                     src_bounds = src.bounds
                     if (
@@ -265,31 +200,31 @@ def merge_rasters(
 
             dst.write(merged_data, window=window)
             # if debug_logs: print(f"{window.col_off}:{window.row_off} {window.width}x{window.height}, ", end="", flush=True)
-    if debug_logs:
-        print("Done merging")
+    if debug_logs: print("Done merging")
 
 
 def mask_rasters(
     input_image_paths: List[str],
     output_image_paths: List[str],
-    vector_mask_path: str,
+    vector_mask_path: str | None = None,
     split_mask_by_attribute: Optional[str] = None,
     resampling_method: Literal["nearest", "bilinear", "cubic"] = "nearest",
     tap: bool = False,
     resolution: Literal["highest", "average", "lowest"] = "highest",
-    window_size: Optional[int | Tuple[int, int]] = None,
+    window_size: int | Tuple[int, int] | None = None,
     debug_logs: bool = False,
     include_touched_pixels: bool = False,
-    ) -> None:
+) -> None:
     """
     Masks rasters using vector geometries. If `split_mask_by_attribute` is set,
     geometries are filtered by the raster's basename (excluding extension) to allow
-    per-image masking with specific matching features.
+    per-image masking with specific matching features. If no vector is provided,
+    rasters are processed without masking.
 
     Args:
         input_image_paths (List[str]): Paths to input rasters.
         output_image_paths (List[str]): Corresponding output raster paths.
-        vector_mask_path (str): Path to vector mask file (.shp, .gpkg, etc.).
+        vector_mask_path (str | None, optional): Path to vector mask file (.shp, .gpkg, etc.). If None, no masking is applied.
         split_mask_by_attribute (Optional[str]): Attribute to match raster basenames.
         resampling_method (Literal["nearest", "bilinear", "cubic"]): Resampling algorithm.
         tap (bool): Snap output bounds to target-aligned pixels.
@@ -303,11 +238,10 @@ def mask_rasters(
     """
     if debug_logs: print(f'Masking {len(input_image_paths)} rasters')
 
-    gdf = gpd.read_file(vector_mask_path)
+    gdf = gpd.read_file(vector_mask_path) if vector_mask_path else None
 
     if isinstance(window_size, int): window_size = (window_size, window_size)
 
-    # Compute target resolution and bounds
     resolutions = []
     bounds_list = []
     crs_set = set()
@@ -334,7 +268,6 @@ def mask_rasters(
     temp_dir = tempfile.mkdtemp()
     tapped_paths = []
 
-    # Loop 1: Tapping (if enabled)
     for in_path in input_image_paths:
         raster_name = os.path.splitext(os.path.basename(in_path))[0]
         with rasterio.open(in_path) as src:
@@ -381,43 +314,46 @@ def mask_rasters(
             else:
                 tapped_paths.append(in_path)
 
-    # Loop 2: Apply mask
     for in_path, out_path in zip(tapped_paths, output_image_paths):
         raster_name = os.path.splitext(os.path.basename(in_path))[0].replace('_tapped', '')
-        if debug_logs: print(f'Masking: {raster_name}')
+        if debug_logs: print(f'Processing: {raster_name}')
         with rasterio.open(in_path) as src:
-            if split_mask_by_attribute:
-                filtered_gdf = gdf[gdf[split_mask_by_attribute].str.strip() == raster_name.strip()]
-                if filtered_gdf.empty:
-                    if debug_logs: print(f"No matching features")
-                    continue
-                geometries = filtered_gdf.geometry.values
-            else:
-                geometries = gdf.geometry.values
-
             profile = src.profile.copy()
-
-            if window_size: windows = list(_create_windows(src.width, src.height, *window_size))
-            else: windows = [Window(0, 0, src.width, src.height)]
-
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
+
+            if window_size:
+                windows = list(_create_windows(src.width, src.height, *window_size))
+            else:
+                windows = [Window(0, 0, src.width, src.height)]
+
             with rasterio.open(out_path, "w", **profile) as dst:
                 for window in windows:
                     data = src.read(window=window)
-                    transform = src.window_transform(window)
+                    if gdf is not None:
+                        transform = src.window_transform(window)
 
-                    mask_array = geometry_mask(
-                        geometries,
-                        out_shape=(data.shape[1], data.shape[2]),
-                        transform=transform,
-                        invert=True,
-                        all_touched=include_touched_pixels
-                    )
+                        if split_mask_by_attribute:
+                            filtered_gdf = gdf[gdf[split_mask_by_attribute].str.strip() == raster_name.strip()]
+                            if filtered_gdf.empty:
+                                if debug_logs: print(f"No matching features for {raster_name}")
+                                dst.write(data, window=window)
+                                continue
+                            geometries = filtered_gdf.geometry.values
+                        else:
+                            geometries = gdf.geometry.values
 
-                    masked = np.where(mask_array, data, src.nodata)
-                    dst.write(masked, window=window)
+                        mask_array = geometry_mask(
+                            geometries,
+                            out_shape=(data.shape[1], data.shape[2]),
+                            transform=transform,
+                            invert=True,
+                            all_touched=include_touched_pixels
+                        )
 
-    # Cleanup
+                        data = np.where(mask_array, data, src.nodata)
+
+                    dst.write(data, window=window)
+
     if tap:
         shutil.rmtree(temp_dir)
 
