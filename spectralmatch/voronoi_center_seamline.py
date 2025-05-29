@@ -144,17 +144,35 @@ def _compute_centerline(
     min_cut_length: float,
     debug_logs: bool = False,
     crs = None,
-    ) -> LineString:
+) -> LineString:
 
     voa = a.intersection(b)
     pts = _densify_polygon(voa, dist_min, debug_logs)
 
-    # Add snapped endpoints from the actual polygon intersection boundary
+    # Compute intersection and extract both Voronoi and anchor points
     boundary_pts = a.boundary.intersection(b.boundary)
+    coords = []
+
     if isinstance(boundary_pts, Point):
-        pts.extend([(boundary_pts.x, boundary_pts.y)])
+        pt = (boundary_pts.x, boundary_pts.y)
+        pts.append(pt)
+        coords.append(pt)
+    elif isinstance(boundary_pts, LineString):
+        mid = boundary_pts.interpolate(0.5, normalized=True)
+        pt = (mid.x, mid.y)
+        pts.append(pt)
+        coords.append(pt)
     elif hasattr(boundary_pts, "geoms"):
-        pts.extend([(pt.x, pt.y) for pt in boundary_pts.geoms if isinstance(pt, Point)])
+        for geom in boundary_pts.geoms:
+            if isinstance(geom, Point):
+                pt = (geom.x, geom.y)
+            elif isinstance(geom, LineString):
+                mid = geom.interpolate(0.5, normalized=True)
+                pt = (mid.x, mid.y)
+            else:
+                continue
+            pts.append(pt)
+            coords.append(pt)
 
     if debug_logs:
         print(f"Densified {len(pts)} points")
@@ -169,33 +187,29 @@ def _compute_centerline(
     G = nx.Graph()
     for poly in multi.geoms:
         if isinstance(poly, Polygon):
-            coords = list(poly.exterior.coords)
-            for i in range(len(coords) - 1):
-                p1, p2 = coords[i], coords[i + 1]
+            coords_poly = list(poly.exterior.coords)
+            for i in range(len(coords_poly) - 1):
+                p1, p2 = coords_poly[i], coords_poly[i + 1]
                 seg = LineString([p1, p2])
                 if seg.length >= min_cut_length:
                     G.add_edge(p1, p2, weight=seg.length)
-    if debug_logs: print(f"Graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
 
-    boundary_pts = a.boundary.intersection(b.boundary)
-    if isinstance(boundary_pts, Point):
-        coords = [(boundary_pts.x, boundary_pts.y)]
-    elif hasattr(boundary_pts, "geoms"):
-        coords = [(pt.x, pt.y) for pt in boundary_pts.geoms if isinstance(pt, Point)]
-    else:
-        coords = []
+    if debug_logs:
+        print(f"Graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
 
     if len(coords) >= 2:
         u, v = coords[0], coords[1]
     else:
         u, v = max(combinations(pts, 2), key=lambda p: (p[0][0] - p[1][0])**2 + (p[0][1] - p[1][1])**2)
+
     nodes = list(G.nodes())
     if not nodes:
         raise ValueError("Empty Voronoi graph: no centerline could be computed for the overlap")
 
     start = min(nodes, key=lambda n: (n[0]-u[0])**2 + (n[1]-u[1])**2)
     end = min(nodes, key=lambda n: (n[0]-v[0])**2 + (n[1]-v[1])**2)
-    if debug_logs: print(f"Snapped start={start}, end={end}")
+    if debug_logs:
+        print(f"Snapped start={start}, end={end}")
 
     path = nx.shortest_path(G, source=start, target=end, weight='weight')
     return LineString([u] + path + [v])
