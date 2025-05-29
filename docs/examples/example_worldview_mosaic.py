@@ -16,6 +16,7 @@ print(working_directory)
 input_folder = os.path.join(working_directory, "Input")
 global_folder = os.path.join(working_directory, "GlobalMatch")
 local_folder = os.path.join(working_directory, "LocalMatch")
+aligned_folder = os.path.join(working_directory, "Aligned")
 clipped_folder = os.path.join(working_directory, "Clipped")
 stats_folder = os.path.join(working_directory, "Stats")
 
@@ -80,7 +81,7 @@ local_block_adjustment(
 # %% (OPTIONAL) Local match with a larger canvas than images bounds (perhaps to anticipate adding additional imagery so you don't have to recalculate local block maps each rematch)
 new_local_folder = os.path.join(working_directory, "LocalMatch_New")
 reference_map_path = os.path.join(new_local_folder, "ReferenceBlockMap", "ReferenceBlockMap.tif")
-local_maps_path = os.path.join(new_local_folder, "LocalBlockMap", "_LocalBlockMap.tif")
+local_maps_path = os.path.join(new_local_folder, "LocalBlockMap", "$_LocalBlockMap.tif")
 
 local_block_adjustment(
     (global_folder, "*.tif"),
@@ -110,20 +111,33 @@ local_block_adjustment(
     load_block_maps=(None, saved_local_block_paths)
     )
 
-# %% Generate seamlines
+#%% Align rasters
 input_image_paths = search_paths(local_folder, "*.tif")
+output_clipped_image_paths = create_paths(aligned_folder, "$_Aligned.tif", input_image_paths)
+
+mask_rasters(
+    input_image_paths,
+    output_clipped_image_paths,
+    tap=True,
+    resolution='highest',
+    debug_logs=True,
+    window_size=window_size,
+    )
+
+# %% Generate voronoi center seamlines
 output_vector_mask = os.path.join(working_directory, "ImageClips.gpkg")
+debug_vectors_path = os.path.join(working_directory, "DebugVectors.gpkg")
 
 voronoi_center_seamline(
-    input_image_paths,
+    (aligned_folder, "*.tif"),
     output_vector_mask,
     image_field_name='image',
     debug_logs=True,
+    debug_vectors_path=debug_vectors_path,
     )
 
-
 # %% Clip and merge
-input_image_paths = search_paths(local_folder, "*.tif")
+input_image_paths = search_paths(aligned_folder, "*.tif")
 output_clipped_image_paths = create_paths(clipped_folder, "$_Clipped.tif", input_image_paths)
 input_vector_mask_path = os.path.join(working_directory, "ImageClips.gpkg")
 output_merged_image_path = os.path.join(working_directory, "MergedImage.tif")
@@ -131,8 +145,7 @@ output_merged_image_path = os.path.join(working_directory, "MergedImage.tif")
 mask_rasters(
     input_image_paths,
     output_clipped_image_paths,
-    input_vector_mask_path,
-    tap=True,
+    vector_mask_path=input_vector_mask_path,
     debug_logs=True,
     split_mask_by_attribute="image",
     window_size=window_size,
