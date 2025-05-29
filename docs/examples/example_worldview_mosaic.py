@@ -136,17 +136,6 @@ voronoi_center_seamline(
     debug_vectors_path=debug_vectors_path,
     )
 
-# %% Markov random field seamlines
-input_image_paths = search_paths(aligned_folder, "*.tif")
-output_vector_mask = os.path.join(working_directory, "ImageClips_Markov.gpkg")
-
-markov_random_field_seamline(
-    input_image_paths,
-    output_vector_mask,
-    triangle_size=300.0,
-    lambda_param=2.0
-)
-
 # %% Clip and merge
 input_image_paths = search_paths(aligned_folder, "*.tif")
 output_clipped_image_paths = create_paths(clipped_folder, "$_Clipped.tif", input_image_paths)
