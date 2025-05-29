@@ -55,7 +55,9 @@ def voronoi_center_seamline(
         ov = a.intersection(b)
         if debug_logs: print(f"Overlap {i} area: {ov.area:.2f}")
         if not ov.is_empty:
-            cut = _compute_centerline(a, b, dist_min, min_cut_length, debug_logs)
+            if cutline_out:
+                _save_intersection_points(a, b, cutline_out, crs, f"{i}")
+            cut = _compute_centerline(a, b, dist_min, min_cut_length, debug_logs, crs)
             cuts.append(cut)
 
     # Optionally save cutlines
@@ -140,17 +142,39 @@ def _compute_centerline(
     b: Polygon,
     dist_min: float,
     min_cut_length: float,
-    debug_logs: bool = False
+    debug_logs: bool = False,
+    crs = None,
     ) -> LineString:
 
     voa = a.intersection(b)
     pts = _densify_polygon(voa, dist_min, debug_logs)
 
-    multi = voronoi_diagram(GeometryCollection([Point(p) for p in pts]))
+    # Add snapped endpoints from the actual polygon intersection boundary
+    boundary_pts = a.boundary.intersection(b.boundary)
+    if isinstance(boundary_pts, Point):
+        pts.extend([(boundary_pts.x, boundary_pts.y)])
+    elif hasattr(boundary_pts, "geoms"):
+        pts.extend([(pt.x, pt.y) for pt in boundary_pts.geoms if isinstance(pt, Point)])
+
+    if debug_logs:
+        print(f"Densified {len(pts)} points")
+        from shapely.geometry import MultiPoint
+        print(f"Convex hull area: {MultiPoint(pts).convex_hull.area}")
+
+    multi = voronoi_diagram(GeometryCollection([Point(p) for p in pts]), edges=False)
+
+    if debug_logs and crs:
+        _save_voronoi_cells(multi, '/Users/kanoalindiwe/Downloads/Projects/spectralmatch/docs/examples/data_worldview3/voronoiCells.gpkg', crs, layer_name=f"voronoi_{int(voa.area)}")
+
     G = nx.Graph()
-    for seg in multi.geoms:
-        if isinstance(seg, LineString) and seg.length >= min_cut_length:
-            G.add_edge(seg.coords[0], seg.coords[-1], weight=seg.length)
+    for poly in multi.geoms:
+        if isinstance(poly, Polygon):
+            coords = list(poly.exterior.coords)
+            for i in range(len(coords) - 1):
+                p1, p2 = coords[i], coords[i + 1]
+                seg = LineString([p1, p2])
+                if seg.length >= min_cut_length:
+                    G.add_edge(p1, p2, weight=seg.length)
     if debug_logs: print(f"Graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
 
     boundary_pts = a.boundary.intersection(b.boundary)
@@ -167,19 +191,14 @@ def _compute_centerline(
         u, v = max(combinations(pts, 2), key=lambda p: (p[0][0] - p[1][0])**2 + (p[0][1] - p[1][1])**2)
     nodes = list(G.nodes())
     if not nodes:
-        if debug_logs: print("Empty Voronoi graph, using fallback straight line")
-        return LineString([u, v])
+        raise ValueError("Empty Voronoi graph: no centerline could be computed for the overlap")
 
     start = min(nodes, key=lambda n: (n[0]-u[0])**2 + (n[1]-u[1])**2)
     end = min(nodes, key=lambda n: (n[0]-v[0])**2 + (n[1]-v[1])**2)
     if debug_logs: print(f"Snapped start={start}, end={end}")
 
-    try:
-        path = nx.shortest_path(G, source=start, target=end, weight='weight')
-        return LineString(path)
-    except nx.NetworkXNoPath:
-        if debug_logs: print("No path found; fallback straight line used")
-        return LineString([u, v])
+    path = nx.shortest_path(G, source=start, target=end, weight='weight')
+    return LineString([u] + path + [v])
 
 
 def _segment_emp(
@@ -190,9 +209,14 @@ def _segment_emp(
     # sequentially cut EMP by each centerline, choosing the segment containing the EMP centroid
     for i, ln in enumerate(cuts):
         if not emp.intersects(ln):
+            # Force cut if it's close enough (e.g., < 1 unit)
+            dist = emp.distance(ln)
+            if dist > 1e-3:
+                if debug_logs:
+                    print(f"Cut {i} too far (distance={dist:.4f}), skipping")
+                continue
             if debug_logs:
-                print(f"Cut {i} does not intersect EMP, skipping")
-            continue
+                print(f"Cut {i} near EMP (distance={dist:.4f}), forcing split")
 
         pieces = list(split(emp, ln).geoms)
         if not pieces:
@@ -214,3 +238,72 @@ def _segment_emp(
             print(f"After cut {i}: {len(pieces)} pieces, selected piece area={emp.area:.2f}")
 
     return emp
+
+
+import fiona
+from fiona.errors import DriverError
+from shapely.geometry import Polygon, Point, mapping
+
+def _save_intersection_points(
+    a: Polygon,
+    b: Polygon,
+    path: str,
+    crs,
+    pair_id: str,
+) -> None:
+    """Save intersection points between polygon boundaries to a GPKG."""
+    inter = a.boundary.intersection(b.boundary)
+    if isinstance(inter, Point):
+        points = [inter]
+    elif hasattr(inter, "geoms"):
+        points = [g for g in inter.geoms if isinstance(g, Point)]
+    else:
+        points = []
+
+    if not points:
+        return
+
+    schema = {"geometry": "Point", "properties": {"pair_id": "str"}}
+    layer_name = "intersections"
+
+    mode = "a"
+    if not os.path.exists(path) or layer_name not in fiona.listlayers(path):
+        mode = "w"
+
+    with fiona.open(path, mode=mode, driver="GPKG", crs=crs, schema=schema, layer=layer_name) as dst:
+        for pt in points:
+            dst.write({
+                "geometry": mapping(pt),
+                "properties": {"pair_id": pair_id},
+            })
+
+
+def _save_voronoi_cells(
+        voronoi_cells: GeometryCollection,
+        path: str,
+        crs,
+        layer_name: str = "voronoi_cells"
+) -> None:
+    """Save Voronoi polygons as features to a GPKG."""
+    from fiona.errors import DriverError
+
+    schema = {"geometry": "Polygon", "properties": {}}
+
+    # Determine if file and layer exist
+    layer_exists = False
+    if os.path.exists(path):
+        try:
+            with fiona.open(path, mode="r", driver="GPKG") as src:
+                layer_exists = layer_name in src.listlayers() if hasattr(src, "listlayers") else False
+        except DriverError:
+            pass
+
+    mode = "a" if layer_exists else "w"
+
+    with fiona.open(path, mode=mode, driver="GPKG", crs=crs, schema=schema, layer=layer_name) as dst:
+        for geom in voronoi_cells.geoms:
+            if isinstance(geom, Polygon):
+                dst.write({
+                    "geometry": mapping(geom),
+                    "properties": {},
+                })
