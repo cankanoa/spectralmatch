@@ -18,10 +18,7 @@ from rasterio.coords import BoundingBox
 
 from ..utils import _check_raster_requirements, _get_nodata_value
 from ..handlers import create_paths, search_paths, match_paths
-from ..utils_multiprocessing import _create_windows, _choose_context, _resolve_parallel_config, _resolve_windows, _get_executor
-
-# Multiprocessing setup
-_worker_dataset_cache = {}
+from ..utils_multiprocessing import _create_windows, _choose_context, _resolve_parallel_config, _resolve_windows, _get_executor, WorkerContext
 
 
 def global_regression(
@@ -96,6 +93,7 @@ def global_regression(
         load_adjustments,
     )
 
+    # Input and output paths
     if isinstance(input_images, tuple): input_images = search_paths(*input_images)
     if isinstance(output_images, tuple): output_images = create_paths(*output_images, input_images, create_folders=True)
 
@@ -106,6 +104,7 @@ def global_regression(
     input_image_paths = dict(zip(input_image_names, input_images))
     output_image_paths = dict(zip(input_image_names, output_images))
 
+    # Check raster requirements
     _check_raster_requirements(list(input_image_paths.values()), debug_logs)
 
     nodata_val = _get_nodata_value(list(input_image_paths.values()), custom_nodata_value)
@@ -210,11 +209,13 @@ def global_regression(
             futures = [executor.submit(_calculate_overlap_stats, *args) for args in parallel_args]
             for future in as_completed(futures):
                 stats = future.result()
-                all_overlap_stats.update(stats)
+                for outer, inner in stats.items():
+                    all_overlap_stats.setdefault(outer, {}).update(inner)
     else:
         for args in parallel_args:
             stats = _calculate_overlap_stats(*args)
-            all_overlap_stats.update(stats)
+            for outer, inner in stats.items():
+                all_overlap_stats.setdefault(outer, {}).update(inner)
 
     # Load whole stats
     all_whole_stats = {
@@ -360,75 +361,37 @@ def global_regression(
             calculation_dtype=calculation_dtype
         )
 
+    # Apply corrections
     if debug_logs: print(f"Apply adjustments and saving results for:")
-    out_paths: List[str] = []
     for idx, (name, img_path) in enumerate(input_image_paths.items()):
-        if debug_logs: print(f"    {name}")
+        if debug_logs:print(f"    {name}")
 
-        out_path = output_image_paths[name]
-        out_paths.append(out_path)
-        with rasterio.open(img_path) as src:
-            meta = src.meta.copy()
-            meta.update({"count": num_bands, "dtype": output_dtype or src.dtypes[0], "nodata": nodata_val})
-            with rasterio.open(out_path, "w", **meta) as dst:
+        _apply_global_adjustments_for_image(
+            image_name=name,
+            input_image_path=img_path,
+            output_image_path=output_image_paths[name],
+            scale=np.array([all_params[b, 2 * idx, 0] for b in range(num_bands)]),
+            offset=np.array([all_params[b, 2 * idx + 1, 0] for b in range(num_bands)]),
+            num_bands=num_bands,
+            nodata_val=nodata_val,
+            window_size=window_size,
+            calculation_dtype=calculation_dtype,
+            output_dtype=output_dtype,
+            window_parallel=window_parallel,
+            window_backend=window_backend,
+            window_max_workers=window_max_workers,
+            debug_logs=debug_logs,
+        )
 
-                windows = _resolve_windows(src, window_size)
-
-                if parallel:
-                    ctx = _choose_context(prefer_fork=True)
-                    pool = ProcessPoolExecutor(
-                        max_workers=max_workers,
-                        mp_context=ctx,
-                        initializer=_init_worker,
-                        initargs=(img_path,),
-                    )
-
-                for b in range(num_bands):
-                    a = float(all_params[b, 2 * idx, 0])
-                    b0 = float(all_params[b, 2 * idx + 1, 0])
-
-                    if parallel:
-                        futures = [
-                            pool.submit(_process_tile_global,
-                                        window,
-                                        b,
-                                        a,
-                                        b0,
-                                        nodata_val,
-                                        calculation_dtype,
-                                        debug_logs,
-                                        )
-                            for window in windows
-                        ]
-
-                        for future in as_completed(futures):
-                            window, buf = future.result()
-                            dst.write(buf.astype(meta["dtype"]), b + 1, window=window)
-                    else:
-                        _init_worker(img_path)
-                        for window in windows:
-                            _, buf = _process_tile_global(
-                                window,
-                                b,
-                                a,
-                                b0,
-                                nodata_val,
-                                calculation_dtype,
-                                debug_logs,
-                            )
-                            dst.write(buf.astype(meta["dtype"]), b + 1, window=window)
-                        _worker_dataset_cache["ds"].close()
-                if parallel:
-                    pool.shutdown()
-    return out_paths
+    return output_images
 
 
 def _apply_global_adjustments_for_image(
     image_name: str,
     input_image_path: str,
     output_image_path: str,
-    scale: float,
-    offset: float,
+    scale: np.ndarray,
+    offset: np.ndarray,
     num_bands: int,
     nodata_val: int | float,
     window_size: int | Tuple[int, int] | Literal["internal"] | None,
@@ -456,35 +419,40 @@ def _apply_global_adjustments_for_image(
         })
 
         with rasterio.open(output_image_path, "w", **meta) as dst:
-            windows = _resolve_windows(src, window_size)
 
             for band in range(num_bands):
+                windows = _resolve_windows(src, window_size)
                 args = [
                     (
                         window,
                         band,
-                        scale,
-                        offset,
+                        scale[band],
+                        offset[band],
                         nodata_val,
                         calculation_dtype,
                         debug_logs,
-                        input_image_path
+                        image_name
                     )
                     for window in windows
                 ]
 
                 if window_parallel:
-                    with _get_executor(window_backend, window_max_workers) as executor:
+                    with _get_executor(
+                            window_backend,
+                            window_max_workers,
+                            initializer=WorkerContext.init,
+                            initargs=({image_name: ("raster", input_image_path)},)
+                    ) as executor:
                         futures = [executor.submit(_process_tile_global, *arg) for arg in args]
                         for future in as_completed(futures):
-                            window, buf = future.result()
+                            band, window, buf = future.result()
                             dst.write(buf.astype(meta["dtype"]), band + 1, window=window)
                 else:
-                    _init_worker(input_image_path)
+                    WorkerContext.init({image_name: ("raster", input_image_path)})
                     for arg in args:
-                        window, buf = _process_tile_global(*arg)
+                        band, window, buf = _process_tile_global(*arg)
                         dst.write(buf.astype(meta["dtype"]), band + 1, window=window)
-                    _worker_dataset_cache["ds"].close()
+                    WorkerContext.close()
 
     return output_image_path
 
@@ -754,7 +722,8 @@ def _process_tile_global(
     nodata: int | float,
     calculation_dtype: str,
     debug_logs: bool,
-    ):
+    image_name: str,
+):
     """
     Applies a global linear transformation (scale and offset) to a raster tile.
 
@@ -766,18 +735,18 @@ def _process_tile_global(
         nodata (int | float): NoData value to ignore during processing.
         calculation_dtype (str): Data type to cast the block for computation.
         debug_logs (bool): If True, prints processing information.
+        image_name (str): Key to fetch the raster from WorkerContext.
 
     Returns:
         Tuple[Window, np.ndarray]: Window and the adjusted data block.
     """
 
-    # if debug_logs: print(f"Processing band: {band_idx}, window: {window}")
-    ds = _worker_dataset_cache["ds"]
+    ds = WorkerContext.get(image_name)
     block = ds.read(band_idx + 1, window=window).astype(calculation_dtype)
 
     mask = block != nodata
     block[mask] = a * block[mask] + b
-    return window, block
+    return band_idx, window, block
 
 
 def _print_constraint_system(
@@ -1209,19 +1178,3 @@ def _process_window_for_whole_stats(
             block[~mask] = nodata
         valid = block != nodata
         return block[valid] if np.any(valid) else None
-
-
-def _init_worker(img_path: str):
-    """
-    Initializes a global dataset cache for a worker process by opening a raster file.
-
-    Args:
-        img_path (str): Path to the image file to be opened and cached.
-
-    Returns:
-        None
-    """
-
-    import rasterio
-    global _worker_dataset_cache
-    _worker_dataset_cache["ds"] = rasterio.open(img_path, "r")
