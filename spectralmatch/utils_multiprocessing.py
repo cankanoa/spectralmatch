@@ -147,36 +147,65 @@ class WorkerContext:
 
 def _resolve_windows(
     dataset,
-    window_size: int | Tuple[int, int] | Literal["internal"] | None,
-    ) -> List[Window]:
+    window_size: int | Tuple[int, int] | Tuple[int, int, Tuple[float, float, float, float]] | Literal["internal"] | None,
+) -> List[Window]:
     """
-    Generates a list of windows based on the specified tiling strategy.
+    Generates a list of raster windows based on the specified tiling strategy.
 
     Args:
         dataset (rasterio.DatasetReader): Open raster dataset.
-        window_size (int | Tuple[int, int] | Literal["internal"] | None):
-            Tiling strategy to use:
-            - int: square tile size,
-            - (int, int): custom tile width and height,
-            - "internal": uses native tiling of the input raster,
+        window_size (int | Tuple[int, int] | Tuple[int, int, Tuple[float, float, float, float]] | "internal" | None):
+            Tiling strategy:
+            - int: square tiles of (size x size),
+            - (int, int): custom tile width and height in pixels,
+            - (num_rows, num_cols, (minx, miny, maxx, maxy)): block grid with spatial bounds,
+            - "internal": use dataset's native tiling,
             - None: single window covering the full image.
 
     Returns:
-        List[Window]: A list of rasterio Windows covering the dataset.
+        List[Window]: List of rasterio Windows.
     """
-    width = dataset.width
-    height = dataset.height
+    width, height = dataset.width, dataset.height
 
     if window_size == "internal":
-        windows = [win for _, win in dataset.block_windows(1)]
-    elif isinstance(window_size, int):
-        windows = _create_windows(width, height, window_size, window_size)
-    elif isinstance(window_size, tuple):
-        windows = _create_windows(width, height, window_size[0], window_size[1])
-    else:
-        windows = [Window(0, 0, width, height)]
+        return [win for _, win in dataset.block_windows(1)]
 
-    return windows
+    elif isinstance(window_size, int):
+        return _create_windows(width, height, window_size, window_size)
+
+    elif isinstance(window_size, tuple) and len(window_size) == 2:
+        return _create_windows(width, height, window_size[0], window_size[1])
+
+    elif isinstance(window_size, tuple) and len(window_size) == 3:
+        num_row, num_col, bounds_canvas_coords = window_size
+        x_min, y_min, x_max, y_max = bounds_canvas_coords
+        block_width = (x_max - x_min) / num_col
+        block_height = (y_max - y_min) / num_row
+        dataset_bounds = dataset.bounds
+
+        windows = []
+        for row_idx in range(num_row):
+            for col_idx in range(num_col):
+                block_x0 = x_min + col_idx * block_width
+                block_x1 = block_x0 + block_width
+                block_y1 = y_max - row_idx * block_height
+                block_y0 = block_y1 - block_height
+
+                if (block_x1 <= dataset_bounds.left or block_x0 >= dataset_bounds.right or
+                    block_y1 <= dataset_bounds.bottom or block_y0 >= dataset_bounds.top):
+                    continue
+
+                intersected_window = from_bounds(
+                    max(block_x0, dataset_bounds.left),
+                    max(block_y0, dataset_bounds.bottom),
+                    min(block_x1, dataset_bounds.right),
+                    min(block_y1, dataset_bounds.top),
+                    transform=dataset.transform,
+                )
+                windows.append(intersected_window)
+        return windows
+
+    return [Window(0, 0, width, height)]
 
 
 def _create_windows(
