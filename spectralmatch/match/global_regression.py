@@ -59,12 +59,12 @@ def global_regression(
         custom_std_factor (float, optional): Weight for standard deviation constraints in regression. Defaults to 1.0.
         vector_mask_path (Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None): Mask to limit stats calculation to specific areas in the format of a tuple with two or three items: literal "include" or "exclude" the mask area, str path to the vector file, optional str of field name in vector file that *includes* (can be substring) input image name to filter geometry by. Loaded stats won't have this applied to them. The matching solution is still applied to these areas in the output. Defaults to None for no mask.
         window_size (int | Tuple[int, int] | Literal["internal"] | None): Tile size for reading and writing: int for square tiles, tuple for (width, height), "internal" to use raster's native tiling, or None for full image. "internal" enables efficient streaming from COGs.
-        save_as_cog (bool): If True, saves output as a Cloud-Optimized GeoTIFF using proper band and block order
+        save_as_cog (bool): If True, saves output as a Cloud-Optimized GeoTIFF using proper band and block order.
         and input raster's tiling if available.
         debug_logs (bool, optional): If True, prints debug information and constraint matrices. Defaults to False.
         custom_nodata_value (float | int | None, optional): Overrides detected NoData value. Defaults to None.
-        image_parallel_workers (Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None): If provided, uses multiprocessing for image processing. Defaults to None.
-        window_parallel_workers (Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None) : If provided, uses multiprocessing for window processing. Defaults to None.
+        image_parallel_workers (Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None): Parallelization strategy at the image level. Provide a tuple like ("process", "cpu") to use multiprocessing with all available cores, or ("thread", 4) to use 4 threads. Set to None to disable.
+        window_parallel_workers (Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None): Parallelization strategy at the window level within each image. Same format as image_parallel_workers. Enables finer-grained parallelism across image tiles. Set to None to disable.
         calculation_dtype (str, optional): Data type used for internal calculations. Defaults to "float32".
         output_dtype (str | None, optional): Data type for output rasters. Defaults to input image dtype.
         specify_model_images (Tuple[Literal["exclude", "include"], List[str]] | None ): First item in tuples sets weather to 'include' or 'exclude' the listed images from model building statistics. Second item is the list of image names (without their extension) to apply criteria to. For example, if this param is only set to 'include' one image, all other images will be matched to that one image. Defaults to no exclusion.
@@ -77,23 +77,24 @@ def global_regression(
 
     print("Start global regression")
 
-    # _validate_input_params(
-    #     input_images,
-    #     output_images,
-    #     custom_mean_factor,
-    #     custom_std_factor,
-    #     vector_mask_path,
-    #     read_window_size,
-    #     write_window_size,
-    #     debug_logs,
-    #     custom_nodata_value,
-    #     parallel_workers,
-    #     calculation_dtype,
-    #     output_dtype,
-    #     specify_model_images,
-    #     save_adjustments,
-    #     load_adjustments,
-    # )
+    _validate_input_params(
+        input_images,
+        output_images,
+        custom_mean_factor,
+        custom_std_factor,
+        vector_mask_path,
+        window_size,
+        save_as_cog,
+        debug_logs,
+        custom_nodata_value,
+        image_parallel_workers,
+        window_parallel_workers,
+        calculation_dtype,
+        output_dtype,
+        specify_model_images,
+        save_adjustments,
+        load_adjustments,
+    )
 
     if isinstance(input_images, tuple): input_images = search_paths(*input_images)
     if isinstance(output_images, tuple): output_images = create_paths(*output_images, input_images, create_folders=True)
@@ -164,28 +165,57 @@ def global_regression(
     overlapping_pairs = _find_overlaps(all_bounds)
 
     all_overlap_stats = {}
-    for name_i, name_j in overlapping_pairs:
+    if image_parallel:
+        with _get_executor(image_backend, image_max_workers) as executor:
+            futures = []
+            for name_i, name_j in overlapping_pairs:
+                if name_i in loaded_model and name_j in loaded_model[name_i].get("overlap_stats", {}):
+                    continue
+                futures.append(executor.submit(
+                    _calculate_overlap_stats,
+                    window_parallel,
+                    window_max_workers,
+                    window_backend,
+                    num_bands,
+                    input_image_paths[name_i],
+                    input_image_paths[name_j],
+                    name_i,
+                    name_j,
+                    all_bounds[name_i],
+                    all_bounds[name_j],
+                    nodata_val,
+                    nodata_val,
+                    vector_mask_path,
+                    window_size,
+                    debug_logs,
+                ))
 
-        if name_i in loaded_model and name_j in loaded_model[name_i].get("overlap_stats", {}):
-            continue
+            for future in as_completed(futures):
+                stats = future.result()
+                all_overlap_stats.update(stats)
+    else:
+        for name_i, name_j in overlapping_pairs:
+            if name_i in loaded_model and name_j in loaded_model[name_i].get("overlap_stats", {}):
+                continue
 
-        stats = _calculate_overlap_stats(
-            window_parallel,
-            window_max_workers,
-            window_backend,
-            num_bands,
-            input_image_paths[name_i],
-            input_image_paths[name_j],
-            name_i,
-            name_j,
-            all_bounds[name_i],
-            all_bounds[name_j],
-            nodata_val,
-            nodata_val,
-            vector_mask_path,
-            window_size,
-            debug_logs,
-        )
+            stats = _calculate_overlap_stats(
+                window_parallel,
+                window_max_workers,
+                window_backend,
+                num_bands,
+                input_image_paths[name_i],
+                input_image_paths[name_j],
+                name_i,
+                name_j,
+                all_bounds[name_i],
+                all_bounds[name_j],
+                nodata_val,
+                nodata_val,
+                vector_mask_path,
+                window_size,
+                debug_logs,
+            )
+            all_overlap_stats.update(stats)
 
         for k_i, v in stats.items():
             all_overlap_stats[k_i] = {
@@ -426,24 +456,24 @@ def _validate_input_params(
     custom_mean_factor,
     custom_std_factor,
     vector_mask_path,
-    read_window,
-    write_window,
+    window_size,
+    save_as_cog,
     debug_logs,
     custom_nodata_value,
-    parallel_workers,
+    image_parallel_workers,
+    window_parallel_workers,
     calculation_dtype,
     output_dtype,
     specify_model_images,
     save_adjustments,
     load_adjustments,
-    ):
+):
     """
     Validates the input parameters provided to the global_regression function.
 
     Raises:
         ValueError: If any input parameter is not of the expected type or structure.
     """
-
     if not isinstance(input_images, (tuple, list)):
         raise ValueError("input_images must be a tuple (folder, pattern) or a list of strings.")
     if isinstance(input_images, tuple):
@@ -475,7 +505,7 @@ def _validate_input_params(
         if len(vector_mask_path) == 3 and not isinstance(vector_mask_path[2], str):
             raise ValueError("The third element, if provided, must be a string (field name).")
 
-    def _validate_window_param(name, val):
+    def _validate_window_param(val):
         if val is None:
             return
         if isinstance(val, int):
@@ -484,10 +514,12 @@ def _validate_input_params(
             return
         if val == "internal":
             return
-        raise ValueError(f"{name} must be an int, a (width, height) tuple, 'internal', or None.")
+        raise ValueError("window_size must be an int, a (width, height) tuple, 'internal', or None.")
 
-    _validate_window_param("read_window", read_window)
-    _validate_window_param("write_window", write_window)
+    _validate_window_param(window_size)
+
+    if not isinstance(save_as_cog, bool):
+        raise ValueError("save_as_cog must be a boolean.")
 
     if not isinstance(debug_logs, bool):
         raise ValueError("debug_logs must be a boolean.")
@@ -495,9 +527,19 @@ def _validate_input_params(
     if custom_nodata_value is not None and not isinstance(custom_nodata_value, (int, float)):
         raise ValueError("custom_nodata_value must be a number or None.")
 
-    if parallel_workers is not None:
-        if parallel_workers != "cpu" and not isinstance(parallel_workers, int):
-            raise ValueError("parallel_workers must be 'cpu', an integer, or None.")
+    def _validate_parallel_workers(val, name):
+        if val is None:
+            return
+        if not isinstance(val, tuple) or len(val) != 2:
+            raise ValueError(f"{name} must be a tuple of (backend, workers) or None.")
+        backend, workers = val
+        if backend not in {"process", "thread"}:
+            raise ValueError(f"The first element of {name} must be 'process' or 'thread'.")
+        if workers != "cpu" and not isinstance(workers, int):
+            raise ValueError(f"The second element of {name} must be 'cpu' or an integer.")
+
+    _validate_parallel_workers(image_parallel_workers, "image_parallel_workers")
+    _validate_parallel_workers(window_parallel_workers, "window_parallel_workers")
 
     if not isinstance(calculation_dtype, str):
         raise ValueError("calculation_dtype must be a string.")
