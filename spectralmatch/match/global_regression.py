@@ -160,7 +160,7 @@ def global_regression(
         with rasterio.open(path) as ds:
             all_bounds[name] = ds.bounds
 
-    # Calculate overlap stats
+    # Overlap stats
     overlapping_pairs = _find_overlaps(all_bounds)
     all_overlap_stats = {}
 
@@ -421,6 +421,72 @@ def global_regression(
                 if parallel:
                     pool.shutdown()
     return out_paths
+
+
+def _apply_global_adjustments_for_image(
+    image_name: str,
+    input_image_path: str,
+    output_image_path: str,
+    scale: float,
+    offset: float,
+    num_bands: int,
+    nodata_val: int | float,
+    window_size: int | Tuple[int, int] | Literal["internal"] | None,
+    calculation_dtype: str,
+    output_dtype: str | None,
+    window_parallel: bool,
+    window_backend: str,
+    window_max_workers: int,
+    debug_logs: bool = False,
+) -> str:
+    """
+    Applies global normalization adjustments for a single image using per-band scale and offset.
+
+    Returns:
+        str: Path to the written output image.
+    """
+    if debug_logs: print(f"    Processing {image_name}")
+
+    with rasterio.open(input_image_path) as src:
+        meta = src.meta.copy()
+        meta.update({
+            "count": num_bands,
+            "dtype": output_dtype or src.dtypes[0],
+            "nodata": nodata_val
+        })
+
+        with rasterio.open(output_image_path, "w", **meta) as dst:
+            windows = _resolve_windows(src, window_size)
+
+            for band in range(num_bands):
+                args = [
+                    (
+                        window,
+                        band,
+                        scale,
+                        offset,
+                        nodata_val,
+                        calculation_dtype,
+                        debug_logs,
+                        input_image_path
+                    )
+                    for window in windows
+                ]
+
+                if window_parallel:
+                    with _get_executor(window_backend, window_max_workers) as executor:
+                        futures = [executor.submit(_process_tile_global, *arg) for arg in args]
+                        for future in as_completed(futures):
+                            window, buf = future.result()
+                            dst.write(buf.astype(meta["dtype"]), band + 1, window=window)
+                else:
+                    _init_worker(input_image_path)
+                    for arg in args:
+                        window, buf = _process_tile_global(*arg)
+                        dst.write(buf.astype(meta["dtype"]), band + 1, window=window)
+                    _worker_dataset_cache["ds"].close()
+
+    return output_image_path
 
 
 def _validate_input_params(
