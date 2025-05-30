@@ -19,53 +19,48 @@ local_folder = os.path.join(working_directory, "LocalMatch")
 aligned_folder = os.path.join(working_directory, "Aligned")
 clipped_folder = os.path.join(working_directory, "Clipped")
 stats_folder = os.path.join(working_directory, "Stats")
+new_global_folder = os.path.join(working_directory, "GlobalMatch_New")
 
 window_size = 128
 num_workers = 5
 
 
-# %% Global matching
-saved_adjustments_path = os.path.join(global_folder, "GlobalAdjustments.json")
-
+# %% Global matching (minimal parameters)
 
 global_regression(
     (input_folder, "*.tif"),
     (global_folder, "$_Global.tif"),
-    custom_mean_factor = 3, # Default is 1; 3 often works better to 'move' the spectral mean of images closer together
-    debug_logs=True,
-    window_size=window_size,
-    parallel_workers=num_workers,
     )
 
 # %% (OPTIONAL) Global matching all input images to the spectral profile of any number of specified images (regression will still be based on overlapping areas, however, only the *included* images statistics will influence the solution)
-new_global_folder = os.path.join(working_directory, "GlobalMatch_New")
-saved_adjustments_path = os.path.join(new_global_folder, "GlobalAdjustments.json")
-
 
 global_regression(
     (input_folder, "*.tif"),
     (new_global_folder, "$_Global.tif"),
-    custom_mean_factor = 3, # Default is 1; 3 often works better to 'move' the spectral mean of images closer together
     debug_logs=True,
-    window_size=window_size,
-    parallel_workers=num_workers,
     specify_model_images=("include", ['worldview3_example_image_right']),
-    save_adjustments=saved_adjustments_path,
+    save_adjustments=os.path.join(new_global_folder, "GlobalAdjustments.json"),
     )
 
-# %% (OPTIONAL) Global matching starting from precomputed statistics for images whole and overlap stats
-new_global_folder = os.path.join(working_directory, "GlobalMatch_New")
-saved_adjustments_path = os.path.join(new_global_folder, "GlobalAdjustments.json")
-
+# %% (OPTIONAL) Global matching starting from precomputed statistics for images whole and overlap stats and increase images tendency to move towards the mean
 
 global_regression(
     (input_folder, "*.tif"),
     (new_global_folder, "$_Global.tif"),
-    custom_mean_factor = 3, # Default is 1; 3 often works better to 'move' the spectral mean of images closer together
+    custom_mean_factor = 3, # Default is 1; 3 often works better to 'move' the spectral mean of images closer together (applied when creating model)
+    debug_logs=True,
+    load_adjustments=os.path.join(new_global_folder, "GlobalAdjustments.json"),
+    )
+
+# %% (OPTIONAL) Global match with increased performance using image and window process or threading with windowed calculations
+
+global_regression(
+    (input_folder, "*.tif"),
+    (new_global_folder, "$_Global.tif"),
     debug_logs=True,
     window_size=window_size,
-    parallel_workers=num_workers,
-    load_adjustments=saved_adjustments_path,
+    image_parallel_workers=("process", num_workers),
+    window_parallel_workers=("process", num_workers),
     )
 
 # %% Local matching

@@ -17,8 +17,9 @@ from typing import Tuple, Optional, List, Literal, Union
 from multiprocessing import Lock
 from multiprocessing import shared_memory
 
-from ..utils import _check_raster_requirements, _get_nodata_value, _create_windows, _choose_context
+from ..utils import _check_raster_requirements, _get_nodata_value
 from ..handlers import create_paths, search_paths, match_paths
+from ..utils_multiprocessing import _create_windows, _choose_context
 
 # Multiprocessing setup
 _worker_dataset_cache = {}
