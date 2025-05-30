@@ -19,12 +19,12 @@ Before installing, ensure you have the following system-level prerequisites:
 
 - Python ≥ 3.10
 - PROJ ≥ 9.3
-- GDAL ≥ 3.6
+- GDAL = 3.10.2
 - pip
 
 An easy way to install these dependancies is to use [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install#quickstart-install-instructions):
 ```bash
-conda create -n spectralmatch python=3.10 "gdal>=3.6" "proj>=9.3" -c conda-forge
+conda create -n spectralmatch python=3.10 "gdal=3.10.2" "proj>=9.3" -c conda-forge
 conda activate spectralmatch
 ```
 
@@ -57,7 +57,7 @@ Before installing, ensure you have the following system-level prerequisites:
 
 - Python ≥ 3.10
 - PROJ ≥ 9.3
-- GDAL ≥ 3.6
+- GDAL = 3.10.2
 
 An easy way to install these dependancies is to use [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install#quickstart-install-instructions):
 ```bash
