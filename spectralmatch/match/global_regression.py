@@ -151,7 +151,6 @@ def global_regression(
         if specify_model_images: print(f"    Excluded from model ({len(excluded_names)}): {sorted(excluded_names)}")
         else: print(f"    Excluded from model (0): []")
 
-    # Calculate stats
     if debug_logs: print("Calculating statistics")
     with rasterio.open(list(input_image_paths.values())[0]) as src: num_bands = src.count
 
@@ -163,71 +162,9 @@ def global_regression(
 
     # Calculate overlap stats
     overlapping_pairs = _find_overlaps(all_bounds)
-
     all_overlap_stats = {}
-    if image_parallel:
-        with _get_executor(image_backend, image_max_workers) as executor:
-            futures = []
-            for name_i, name_j in overlapping_pairs:
-                if name_i in loaded_model and name_j in loaded_model[name_i].get("overlap_stats", {}):
-                    continue
-                futures.append(executor.submit(
-                    _calculate_overlap_stats,
-                    window_parallel,
-                    window_max_workers,
-                    window_backend,
-                    num_bands,
-                    input_image_paths[name_i],
-                    input_image_paths[name_j],
-                    name_i,
-                    name_j,
-                    all_bounds[name_i],
-                    all_bounds[name_j],
-                    nodata_val,
-                    nodata_val,
-                    vector_mask_path,
-                    window_size,
-                    debug_logs,
-                ))
 
-            for future in as_completed(futures):
-                stats = future.result()
-                all_overlap_stats.update(stats)
-    else:
-        for name_i, name_j in overlapping_pairs:
-            if name_i in loaded_model and name_j in loaded_model[name_i].get("overlap_stats", {}):
-                continue
-
-            stats = _calculate_overlap_stats(
-                window_parallel,
-                window_max_workers,
-                window_backend,
-                num_bands,
-                input_image_paths[name_i],
-                input_image_paths[name_j],
-                name_i,
-                name_j,
-                all_bounds[name_i],
-                all_bounds[name_j],
-                nodata_val,
-                nodata_val,
-                vector_mask_path,
-                window_size,
-                debug_logs,
-            )
-            all_overlap_stats.update(stats)
-
-        for k_i, v in stats.items():
-            all_overlap_stats[k_i] = {
-                **all_overlap_stats.get(k_i, {}),
-                **{
-                    k_j: {**all_overlap_stats.get(k_i, {}).get(k_j, {}), **s}
-                    for k_j, s in v.items()
-                },
-            }
-
-
-    # Add loaded image stats to model
+    # Load overlap stats
     if load_adjustments:
         for name_i, model_entry in loaded_model.items():
             if name_i not in input_image_paths:
@@ -245,8 +182,41 @@ def global_regression(
                     } for k in bands
                 }
 
-    # Calculate whole stats
-    # Split work into already-loaded and to-be-computed
+    # Calculate overlap stats
+    parallel_args = [
+        (
+            window_parallel,
+            window_max_workers,
+            window_backend,
+            num_bands,
+            input_image_paths[name_i],
+            input_image_paths[name_j],
+            name_i,
+            name_j,
+            all_bounds[name_i],
+            all_bounds[name_j],
+            nodata_val,
+            nodata_val,
+            vector_mask_path,
+            window_size,
+            debug_logs,
+        )
+        for name_i, name_j in overlapping_pairs
+        if name_i not in loaded_model or name_j not in loaded_model.get(name_i, {}).get("overlap_stats", {})
+    ]
+
+    if image_parallel:
+        with _get_executor(image_backend, image_max_workers) as executor:
+            futures = [executor.submit(_calculate_overlap_stats, *args) for args in parallel_args]
+            for future in as_completed(futures):
+                stats = future.result()
+                all_overlap_stats.update(stats)
+    else:
+        for args in parallel_args:
+            stats = _calculate_overlap_stats(*args)
+            all_overlap_stats.update(stats)
+
+    # Load whole stats
     all_whole_stats = {
         name: {
             int(k.split("_")[1]): {
@@ -260,15 +230,18 @@ def global_regression(
         if name in loaded_model
     }
 
-    # Prepare list of image args for computation
+    # Calculate whole stats
     parallel_args = [
         (
+            window_parallel,
+            window_max_workers,
+            window_backend,
             image_path,
             nodata_val,
             num_bands,
             image_name,
             vector_mask_path,
-            read_window_size,
+            window_size,
             debug_logs,
         )
         for image_name, image_path in input_image_paths.items()
@@ -276,8 +249,8 @@ def global_regression(
     ]
 
     # Compute whole stats
-    if parallel:
-        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+    if image_parallel:
+        with _get_executor(image_backend, image_max_workers) as executor:
             futures = [executor.submit(_calculate_whole_stats, *args) for args in parallel_args]
             for future in as_completed(futures):
                 result = future.result()
@@ -1061,6 +1034,9 @@ def _fit_windows_to_pixel_bounds(
 
 
 def _calculate_whole_stats(
+    parallel: bool,
+    max_workers: int,
+    backend: str,
     input_image_path: str,
     nodata: int | float,
     num_bands: int,
@@ -1068,21 +1044,9 @@ def _calculate_whole_stats(
     vector_mask_path: Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None = None,
     window_size: int | Tuple[int, int] | Literal["internal"] | None = None,
     debug_logs: bool = False,
-):
+    ):
     """
-    Computes mean, standard deviation, and valid pixel count for each band in a single image.
-
-    Args:
-        input_image_path (str): Path to the input raster image.
-        nodata (int | float): NoData value to ignore during calculations.
-        num_bands (int): Number of bands to process.
-        image_name (str): Unique name for the image, used as a key in the output.
-        vector_mask_path (Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None): ("include"/"exclude", path, optional field_name). Defaults to None.
-        window_size (int | Tuple[int, int] | Literal["internal"] | None): Optional tile size for block-wise processing.
-        debug_logs (bool): To output debug logs or not.
-
-    Returns:
-        dict: Dictionary with image ID as key and per-band statistics as sub-dictionary.
+    Computes mean, standard deviation, and valid pixel count for each band in a single image using optional window-level multiprocessing.
     """
 
     stats = {image_name: {}}
@@ -1104,30 +1068,40 @@ def _calculate_whole_stats(
                     ]
                 else:
                     geoms = [feat["geometry"] for feat in vector]
+
         if geoms and debug_logs: print("        Applied mask")
 
         for band_idx in range(num_bands):
-            all_values = []
-
             windows = _resolve_windows(data, window_size)
 
-            for win in windows:
-                block = data.read(band_idx + 1, window=win)
-
-                if geoms:
-                    transform = data.window_transform(win)
-                    mask = geometry_mask(
+            if parallel:
+                with _get_executor(backend, max_workers) as executor:
+                    futures = [
+                        executor.submit(
+                            _process_window_for_whole_stats,
+                            win,
+                            band_idx,
+                            input_image_path,
+                            nodata,
+                            geoms,
+                            invert,
+                        )
+                        for win in windows
+                    ]
+                    all_values = [f.result() for f in as_completed(futures) if f.result() is not None]
+            else:
+                all_values = []
+                for win in windows:
+                    values = _process_window_for_whole_stats(
+                        win,
+                        band_idx,
+                        input_image_path,
+                        nodata,
                         geoms,
-                        transform=transform,
-                        invert=not invert,
-                        out_shape=(int(win.height), int(win.width)),
+                        invert,
                     )
-                    block[~mask] = nodata
-
-                valid = block != nodata
-                values = block[valid]
-                if values.size:
-                    all_values.append(values)
+                    if values is not None:
+                        all_values.append(values)
 
             if all_values:
                 stacked = np.concatenate(all_values)
@@ -1146,6 +1120,29 @@ def _calculate_whole_stats(
             }
 
     return stats
+
+
+def _process_window_for_whole_stats(
+    win: Window,
+    band_idx: int,
+    input_image_path: str,
+    nodata: int | float,
+    geoms: list | None,
+    invert: bool,
+) -> np.ndarray | None:
+    with rasterio.open(input_image_path) as data:
+        block = data.read(band_idx + 1, window=win)
+        if geoms:
+            transform = data.window_transform(win)
+            mask = geometry_mask(
+                geoms,
+                transform=transform,
+                invert=not invert,
+                out_shape=(int(win.height), int(win.width)),
+            )
+            block[~mask] = nodata
+        valid = block != nodata
+        return block[valid] if np.any(valid) else None
 
 
 def _init_worker(img_path: str):
