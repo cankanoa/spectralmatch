@@ -1,10 +1,7 @@
 import warnings
-import sys
-import multiprocessing as mp
 import rasterio
 
 from typing import List, Optional, Union
-from rasterio.windows import Window
 
 
 def _check_raster_requirements(
@@ -82,55 +79,3 @@ def _get_nodata_value(
 
     warnings.warn("Custom nodata value not set and could not get one from the first band so no nodata value will be used.")
     return None
-
-
-def _create_windows(
-    width: int,
-    height: int,
-    tile_width: int,
-    tile_height: int,
-    ):
-    """
-    Generates tiled windows across a raster based on specified dimensions.
-
-    Args:
-        width (int): Total width of the raster.
-        height (int): Total height of the raster.
-        tile_width (int): Width of each tile.
-        tile_height (int): Height of each tile.
-
-    Yields:
-        rasterio.windows.Window: A window representing a tile's position and size.
-    """
-
-    for row_off in range(0, height, tile_height):
-        for col_off in range(0, width, tile_width):
-            win_width = min(tile_width, width - col_off)
-            win_height = min(tile_height, height - row_off)
-            yield Window(col_off, row_off, win_width, win_height)
-
-
-def _choose_context(
-    prefer_fork: bool = True
-    ) -> mp.context.BaseContext:
-    """
-    Selects the optimal multiprocessing context based on platform and preference.
-
-    Args:
-        prefer_fork (bool): If True, prefers 'fork' context when available. Defaults to True.
-
-    Returns:
-        multiprocessing.context.BaseContext: The selected multiprocessing context.
-    """
-
-    if prefer_fork and sys.platform.startswith("linux"):
-        return mp.get_context("fork")
-    if prefer_fork and sys.platform == "darwin":
-        try:
-            return mp.get_context("fork")
-        except ValueError:
-            pass
-    try:
-        return mp.get_context("forkserver")
-    except ValueError:
-        return mp.get_context("spawn")

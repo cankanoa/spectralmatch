@@ -1,4 +1,3 @@
-import multiprocessing as mp
 import warnings
 import rasterio
 import fiona
@@ -16,8 +15,9 @@ from rasterio.transform import rowcol
 from rasterio.features import geometry_mask
 from rasterio.coords import BoundingBox
 
-from ..utils import _create_windows, _check_raster_requirements, _get_nodata_value, _choose_context
+from ..utils import _check_raster_requirements, _get_nodata_value
 from ..handlers import create_paths, search_paths, match_paths
+from ..utils_multiprocessing import _create_windows, _choose_context, _resolve_parallel_config, _resolve_windows, _get_executor
 
 # Multiprocessing setup
 _worker_dataset_cache = {}
@@ -30,12 +30,12 @@ def global_regression(
     custom_mean_factor: float = 1.0,
     custom_std_factor: float = 1.0,
     vector_mask_path: Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None = None,
-    read_window_size: int | Tuple[int, int] | Literal["internal"] | None = None,
-    write_window_size: int | Tuple[int, int] | Literal["internal"] | None = None,
+    window_size: int | Tuple[int, int] | Literal["internal"] | None = None,
     save_as_cog: bool = False,
     debug_logs: bool = False,
     custom_nodata_value: float | int | None = None,
-    parallel_workers: Literal["cpu"] | int | None = None,
+    image_parallel_workers: Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None,
+    window_parallel_workers: Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None,
     calculation_dtype: str = "float32",
     output_dtype: str | None = None,
     specify_model_images: Tuple[Literal["exclude", "include"], List[str]] | None = None,
@@ -57,13 +57,13 @@ def global_regression(
         custom_mean_factor (float, optional): Weight for mean constraints in regression. Defaults to 1.0.
         custom_std_factor (float, optional): Weight for standard deviation constraints in regression. Defaults to 1.0.
         vector_mask_path (Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None): Mask to limit stats calculation to specific areas in the format of a tuple with two or three items: literal "include" or "exclude" the mask area, str path to the vector file, optional str of field name in vector file that *includes* (can be substring) input image name to filter geometry by. Loaded stats won't have this applied to them. The matching solution is still applied to these areas in the output. Defaults to None for no mask.
-        read_window_size (int | Tuple[int, int] | Literal["internal"] | None): Tile size for reading input: int for square tiles, tuple for (width, height), "internal" to use raster's native tiling, or None for full image. "internal" enables efficient streaming from COGs.
-        write_window_size (int | Tuple[int, int] | Literal["internal"] | None): Tile size for writing output, same options as `read_window`. "internal" enables efficient streaming to COGs.
+        window_size (int | Tuple[int, int] | Literal["internal"] | None): Tile size for reading and writing: int for square tiles, tuple for (width, height), "internal" to use raster's native tiling, or None for full image. "internal" enables efficient streaming from COGs.
         save_as_cog (bool): If True, saves output as a Cloud-Optimized GeoTIFF using proper band and block order
         and input raster's tiling if available.
         debug_logs (bool, optional): If True, prints debug information and constraint matrices. Defaults to False.
         custom_nodata_value (float | int | None, optional): Overrides detected NoData value. Defaults to None.
-        parallel_workers (Literal["cpu"] | int | None): If set, enables multiprocessing. "cpu" = all cores, int = specific count, None = no parallel processing. Defaults to None.
+        image_parallel_workers (Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None): If provided, uses multiprocessing for image processing. Defaults to None.
+        window_parallel_workers (Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None) : If provided, uses multiprocessing for window processing. Defaults to None.
         calculation_dtype (str, optional): Data type used for internal calculations. Defaults to "float32".
         output_dtype (str | None, optional): Data type for output rasters. Defaults to input image dtype.
         specify_model_images (Tuple[Literal["exclude", "include"], List[str]] | None ): First item in tuples sets weather to 'include' or 'exclude' the listed images from model building statistics. Second item is the list of image names (without their extension) to apply criteria to. For example, if this param is only set to 'include' one image, all other images will be matched to that one image. Defaults to no exclusion.
@@ -76,23 +76,23 @@ def global_regression(
 
     print("Start global regression")
 
-    _validate_input_params(
-        input_images,
-        output_images,
-        custom_mean_factor,
-        custom_std_factor,
-        vector_mask_path,
-        read_window_size,
-        write_window_size,
-        debug_logs,
-        custom_nodata_value,
-        parallel_workers,
-        calculation_dtype,
-        output_dtype,
-        specify_model_images,
-        save_adjustments,
-        load_adjustments,
-    )
+    # _validate_input_params(
+    #     input_images,
+    #     output_images,
+    #     custom_mean_factor,
+    #     custom_std_factor,
+    #     vector_mask_path,
+    #     read_window_size,
+    #     write_window_size,
+    #     debug_logs,
+    #     custom_nodata_value,
+    #     parallel_workers,
+    #     calculation_dtype,
+    #     output_dtype,
+    #     specify_model_images,
+    #     save_adjustments,
+    #     load_adjustments,
+    # )
 
     if isinstance(input_images, tuple): input_images = search_paths(*input_images)
     if isinstance(output_images, tuple): output_images = create_paths(*output_images, input_images, create_folders=True)
@@ -109,15 +109,8 @@ def global_regression(
     nodata_val = _get_nodata_value(list(input_image_paths.values()), custom_nodata_value)
 
     # Determine multiprocessing and worker count
-    if parallel_workers == "cpu":
-        parallel = True
-        max_workers = mp.cpu_count()
-    elif isinstance(parallel_workers, int) and parallel_workers > 0:
-        parallel = True
-        max_workers = parallel_workers
-    else:
-        parallel = False
-        max_workers = None
+    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
+    window_parallel, window_backend, window_max_workers = _resolve_parallel_config(window_parallel_workers)
 
     # Find loaded and input files if load adjustments
     loaded_model = {}
@@ -176,8 +169,9 @@ def global_regression(
             continue
 
         stats = _calculate_overlap_stats(
-            parallel,
-            max_workers,
+            window_parallel,
+            window_max_workers,
+            window_backend,
             num_bands,
             input_image_paths[name_i],
             input_image_paths[name_j],
@@ -188,7 +182,7 @@ def global_regression(
             nodata_val,
             nodata_val,
             vector_mask_path,
-            read_window_size,
+            window_size,
             debug_logs,
         )
 
@@ -374,7 +368,7 @@ def global_regression(
             meta.update({"count": num_bands, "dtype": output_dtype or src.dtypes[0], "nodata": nodata_val})
             with rasterio.open(out_path, "w", **meta) as dst:
 
-                windows = _resolve_windows(src, read_window_size)
+                windows = _resolve_windows(src, window_size)
 
                 if parallel:
                     ctx = _choose_context(prefer_fork=True)
@@ -423,40 +417,6 @@ def global_regression(
                 if parallel:
                     pool.shutdown()
     return out_paths
-
-
-def _resolve_windows(
-    dataset,
-    window_size: int | Tuple[int, int] | Literal["internal"] | None,
-    ) -> List[Window]:
-    """
-    Generates a list of windows based on the specified tiling strategy.
-
-    Args:
-        dataset (rasterio.DatasetReader): Open raster dataset.
-        window_size (int | Tuple[int, int] | Literal["internal"] | None):
-            Tiling strategy to use:
-            - int: square tile size,
-            - (int, int): custom tile width and height,
-            - "internal": uses native tiling of the input raster,
-            - None: single window covering the full image.
-
-    Returns:
-        List[Window]: A list of rasterio Windows covering the dataset.
-    """
-    width = dataset.width
-    height = dataset.height
-
-    if window_size == "internal":
-        windows = [win for _, win in dataset.block_windows(1)]
-    elif isinstance(window_size, int):
-        windows = _create_windows(width, height, window_size, window_size)
-    elif isinstance(window_size, tuple):
-        windows = _create_windows(width, height, window_size[0], window_size[1])
-    else:
-        windows = [Window(0, 0, width, height)]
-
-    return windows
 
 
 def _validate_input_params(
@@ -557,6 +517,7 @@ def _validate_input_params(
 
     if load_adjustments is not None and not isinstance(load_adjustments, str):
         raise ValueError("load_adjustments must be a string or None.")
+
 
 def _save_adjustments(
     save_path: str,
@@ -836,6 +797,7 @@ def _find_overlaps(
 def _calculate_overlap_stats(
     parallel: bool,
     max_workers: int,
+    backend: str,
     num_bands: int,
     input_image_path_i: str,
     input_image_path_j: str,
@@ -892,37 +854,47 @@ def _calculate_overlap_stats(
         fit_windows_image_i = _fit_windows_to_pixel_bounds(windows_image_i, row_min_i, row_max_i, col_min_i, col_max_i, row_min_i, col_min_i)
 
         for band in range(num_bands):
-            overlap_args = [
-                (
-                    tile_window,
-                    band,
-                    col_min_i,
-                    row_min_i,
-                    input_image_path_i,
-                    input_image_path_j,
-                    nodata_i,
-                    nodata_j,
-                    geoms_i,
-                    geoms_j,
-                    invert,
-                )
-                for tile_window in fit_windows_image_i
-            ]
-
             combined_pixels_i, combined_pixels_j = [], []
 
             if parallel:
-                ctx = mp.get_context("spawn")
-                with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as executor:
-                    futures = [executor.submit(_process_overlap_window, *args) for args in overlap_args]
+                with _get_executor(backend, max_workers) as executor:
+                    futures = [
+                        executor.submit(
+                            _process_overlap_window,
+                            win,
+                            band,
+                            col_min_i,
+                            row_min_i,
+                            input_image_path_i,
+                            input_image_path_j,
+                            nodata_i,
+                            nodata_j,
+                            geoms_i,
+                            geoms_j,
+                            invert,
+                        )
+                        for win in fit_windows_image_i
+                    ]
                     for future in as_completed(futures):
                         result = future.result()
                         if result is not None:
                             combined_pixels_i.append(result[0])
                             combined_pixels_j.append(result[1])
             else:
-                for args in overlap_args:
-                    result = _process_overlap_window(*args)
+                for win in fit_windows_image_i:
+                    result = _process_overlap_window(
+                        win,
+                        band,
+                        col_min_i,
+                        row_min_i,
+                        input_image_path_i,
+                        input_image_path_j,
+                        nodata_i,
+                        nodata_j,
+                        geoms_i,
+                        geoms_j,
+                        invert,
+                    )
                     if result is not None:
                         combined_pixels_i.append(result[0])
                         combined_pixels_j.append(result[1])

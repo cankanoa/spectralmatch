@@ -34,7 +34,7 @@ global_regression(
     custom_mean_factor = 3, # Default is 1; 3 often works better to 'move' the spectral mean of images closer together
     debug_logs=True,
     window_size=window_size,
-    parallel_workers=num_workers,
+    window_parallel_workers=("process", 3),
     )
 
 # %% (OPTIONAL) Global matching all input images to the spectral profile of any number of specified images (regression will still be based on overlapping areas, however, only the *included* images statistics will influence the solution)

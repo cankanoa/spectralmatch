@@ -13,7 +13,7 @@ from osgeo import ogr
 from rasterio.windows import Window
 from rasterio.warp import reproject
 from rasterio.enums import Resampling
-from .utils import _create_windows
+from .utils_multiprocessing import _create_windows
 from rasterio.features import geometry_mask
 from rasterio.transform import from_origin
 from rasterio.coords import BoundingBox
