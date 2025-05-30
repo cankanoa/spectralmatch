@@ -275,6 +275,85 @@ def global_regression(
             print(f"    {i:<4}\t{source:<6}\t{included:<8}\t{name}")
 
     # Build model
+    all_params = solve_global_model(
+        num_bands,
+        num_total,
+        all_image_names,
+        included_names,
+        input_image_names,
+        all_overlap_stats,
+        all_whole_stats,
+        custom_mean_factor,
+        custom_std_factor,
+        overlapping_pairs,
+        debug_logs,
+    )
+
+    # Save adjustments
+    if save_adjustments:
+        _save_adjustments(
+            save_path=save_adjustments,
+            input_image_names=list(input_image_paths.keys()),
+            all_params=all_params,
+            all_whole_stats=all_whole_stats,
+            all_overlap_stats=all_overlap_stats,
+            num_bands=num_bands,
+            calculation_dtype=calculation_dtype
+        )
+
+    # Apply corrections
+    if debug_logs: print(f"Apply adjustments and saving results for:")
+    parallel_args = [
+        (
+            name,
+            img_path,
+            output_image_paths[name],
+            np.array([all_params[b, 2 * idx, 0] for b in range(num_bands)]),
+            np.array([all_params[b, 2 * idx + 1, 0] for b in range(num_bands)]),
+            num_bands,
+            nodata_val,
+            window_size,
+            calculation_dtype,
+            output_dtype,
+            window_parallel,
+            window_backend,
+            window_max_workers,
+            debug_logs,
+        )
+        for idx, (name, img_path) in enumerate(input_image_paths.items())
+    ]
+
+    if image_parallel:
+        with _get_executor(image_backend, image_max_workers) as executor:
+            futures = [executor.submit(_apply_global_adjustments_for_image, *args) for args in parallel_args]
+            for future in as_completed(futures):
+                future.result()
+    else:
+        for args in parallel_args:
+            _apply_global_adjustments_for_image(*args)
+
+    return output_images
+
+
+def solve_global_model(
+    num_bands: int,
+    num_total: int,
+    all_image_names: list[str],
+    included_names: list[str],
+    input_image_names: list[str],
+    all_overlap_stats: dict,
+    all_whole_stats: dict,
+    custom_mean_factor: float,
+    custom_std_factor: float,
+    overlapping_pairs: tuple[tuple[str, str], ...],
+    debug_logs: bool = False,
+) -> np.ndarray:
+    """
+    Solves global normalization model and returns per-image scale/offsets.
+
+    Returns:
+        np.ndarray: all_params shape (bands, 2 * num_images, 1)
+    """
     all_params = np.zeros((num_bands, 2 * num_total, 1), dtype=float)
     image_names_with_id = [(i, name) for i, name in enumerate(all_image_names)]
     for b in range(num_bands):
@@ -336,6 +415,8 @@ def global_regression(
         A_arr = np.asarray(A)
         y_arr = np.asarray(y)
         res = least_squares(lambda p: A_arr @ p - y_arr, [1, 0] * num_total)
+        all_params[b, :, 0] = res.x
+
 
         if debug_logs:
             _print_constraint_system(
@@ -346,53 +427,7 @@ def global_regression(
                 image_names_with_id=image_names_with_id,
 
             )
-
-        all_params[b] = res.x.reshape((2 * num_total, 1))
-
-    # Save adjustments
-    if save_adjustments:
-        _save_adjustments(
-            save_path=save_adjustments,
-            input_image_names=list(input_image_paths.keys()),
-            all_params=all_params,
-            all_whole_stats=all_whole_stats,
-            all_overlap_stats=all_overlap_stats,
-            num_bands=num_bands,
-            calculation_dtype=calculation_dtype
-        )
-
-    # Apply corrections
-    if debug_logs: print(f"Apply adjustments and saving results for:")
-    parallel_args = [
-        (
-            name,
-            img_path,
-            output_image_paths[name],
-            np.array([all_params[b, 2 * idx, 0] for b in range(num_bands)]),
-            np.array([all_params[b, 2 * idx + 1, 0] for b in range(num_bands)]),
-            num_bands,
-            nodata_val,
-            window_size,
-            calculation_dtype,
-            output_dtype,
-            window_parallel,
-            window_backend,
-            window_max_workers,
-            debug_logs,
-        )
-        for idx, (name, img_path) in enumerate(input_image_paths.items())
-    ]
-
-    if image_parallel:
-        with _get_executor(image_backend, image_max_workers) as executor:
-            futures = [executor.submit(_apply_global_adjustments_for_image, *args) for args in parallel_args]
-            for future in as_completed(futures):
-                future.result()
-    else:
-        for args in parallel_args:
-            _apply_global_adjustments_for_image(*args)
-
-    return output_images
+    return all_params
 
 
 def _apply_global_adjustments_for_image(
