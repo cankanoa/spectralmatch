@@ -5,6 +5,7 @@ import os
 import numpy as np
 import sys
 import json
+import cv2
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import List, Optional, Tuple, Literal
@@ -927,6 +928,7 @@ def _process_overlap_window(
     geoms_i: list | None,
     geoms_j: list | None,
     invert: bool,
+    interpolation_method: int = cv2.INTER_LINEAR,
     ) -> tuple[np.ndarray, np.ndarray] | None:
     with rasterio.open(src_i_path) as src_i, rasterio.open(src_j_path) as src_j:
         win_i = Window(col_min_i + win.col_off, row_min_i + win.row_off, win.width, win.height)
@@ -935,6 +937,9 @@ def _process_overlap_window(
 
         block_i = src_i.read(band + 1, window=win_i)
         block_j = src_j.read(band + 1, window=win_j, boundless=True, fill_value=nodata_j)
+
+        if np.all(block_i == nodata_i) or np.all(block_j == nodata_j):
+            return None
 
         if geoms_i:
             transform_i_win = src_i.window_transform(win_i)
@@ -946,8 +951,13 @@ def _process_overlap_window(
             mask_j = geometry_mask(geoms_j, transform=transform_j_win, invert=not invert, out_shape=block_j.shape)
             block_j[~mask_j] = nodata_j
 
-        if block_i.shape != block_j.shape:
-            return None
+        if block_j.shape != block_i.shape:
+            block_j = cv2.resize(
+                block_j,
+                (block_i.shape[1], block_i.shape[0]),
+                interpolation=interpolation_method
+            )
+        if block_j.shape != block_i.shape: raise ValueError(f"Block size mismatch after interpolation: block_i={block_i.shape}, block_j={block_j.shape}")
 
         valid = (block_i != nodata_i) & (block_j != nodata_j)
         if np.any(valid):
@@ -980,9 +990,9 @@ def _fit_windows_to_pixel_bounds(
     adjusted_windows = []
     for win in windows:
         win_row_start = row_offset + win.row_off
-        win_row_end = row_offset + win.row_off + win.height
+        win_row_end = win_row_start + win.height
         win_col_start = col_offset + win.col_off
-        win_col_end = col_offset + win.col_off + win.width
+        win_col_end = win_col_start + win.width
 
         clipped_row_start = max(win_row_start, row_min)
         clipped_row_end = min(win_row_end, row_max)
@@ -992,11 +1002,14 @@ def _fit_windows_to_pixel_bounds(
         new_width = clipped_col_end - clipped_col_start
         new_height = clipped_row_end - clipped_row_start
 
-        if new_width > 0 and new_height > 0:
+        win_row_off_adj = clipped_row_start - row_offset
+        win_col_off_adj = clipped_col_start - col_offset
+
+        if new_width > 0 and new_height > 0 and win_row_off_adj >= 0 and win_col_off_adj >= 0:
             adjusted_windows.append(
                 Window(
-                    clipped_col_start - row_offset,
-                    clipped_row_start - col_offset,
+                    win_col_off_adj,
+                    win_row_off_adj,
                     new_width,
                     new_height,
                 )
