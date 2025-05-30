@@ -4,7 +4,7 @@ import sys
 import rasterio
 import numpy as np
 
-from rasterio.windows import Window
+from rasterio.windows import Window, from_bounds
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 from typing import Tuple, Literal, List, Callable, Any, Optional
 from multiprocessing import shared_memory
@@ -147,23 +147,31 @@ class WorkerContext:
 
 def _resolve_windows(
     dataset,
-    window_size: int | Tuple[int, int] | Tuple[int, int, Tuple[float, float, float, float]] | Literal["internal"] | None,
+    window_size: int | Tuple[int, int] | Literal["internal"] | Literal["block"] | None,
+    *,
+    block_params: Optional[Tuple[int, int, Tuple[float, float, float, float]]] = None,
 ) -> List[Window]:
     """
-    Generates a list of raster windows based on the specified tiling strategy.
+    Generates a list of windows for reading a raster dataset based on the given tiling strategy.
 
     Args:
         dataset (rasterio.DatasetReader): Open raster dataset.
-        window_size (int | Tuple[int, int] | Tuple[int, int, Tuple[float, float, float, float]] | "internal" | None):
+        window_size (int | Tuple[int, int] | Literal["internal", "block"] | None):
             Tiling strategy:
-            - int: square tiles of (size x size),
-            - (int, int): custom tile width and height in pixels,
-            - (num_rows, num_cols, (minx, miny, maxx, maxy)): block grid with spatial bounds,
-            - "internal": use dataset's native tiling,
-            - None: single window covering the full image.
+            - int: square tile size,
+            - (int, int): custom width and height in pixels,
+            - "internal": use native tiling of dataset,
+            - "block": tile by block layout defined in `block_params`,
+            - None: single full-image window.
+
+        block_params (Tuple[int, int, Tuple[float, float, float, float]] | None, optional):
+            Required if window_size is "block". A tuple of:
+            - number of block rows (int),
+            - number of block columns (int),
+            - bounding box (minx, miny, maxx, maxy) of canvas extent in image coordinates.
 
     Returns:
-        List[Window]: List of rasterio Windows.
+        List[Window]: List of rasterio Windows that cover the dataset.
     """
     width, height = dataset.width, dataset.height
 
@@ -173,11 +181,12 @@ def _resolve_windows(
     elif isinstance(window_size, int):
         return _create_windows(width, height, window_size, window_size)
 
-    elif isinstance(window_size, tuple) and len(window_size) == 2:
+    elif isinstance(window_size, tuple):
         return _create_windows(width, height, window_size[0], window_size[1])
 
-    elif isinstance(window_size, tuple) and len(window_size) == 3:
-        num_row, num_col, bounds_canvas_coords = window_size
+    elif window_size == "block":
+        if block_params is None: raise ValueError("block_params must be provided when window_size is 'block'")
+        num_row, num_col, bounds_canvas_coords = block_params
         x_min, y_min, x_max, y_max = bounds_canvas_coords
         block_width = (x_max - x_min) / num_col
         block_height = (y_max - y_min) / num_row

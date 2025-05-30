@@ -19,7 +19,8 @@ from multiprocessing import shared_memory
 
 from ..utils import _check_raster_requirements, _get_nodata_value
 from ..handlers import create_paths, search_paths, match_paths
-from ..utils_multiprocessing import _create_windows, _choose_context
+from ..utils_multiprocessing import _create_windows, _choose_context, _resolve_parallel_config, _resolve_windows, _get_executor, WorkerContext
+
 
 # Multiprocessing setup
 _worker_dataset_cache = {}
@@ -38,7 +39,8 @@ def local_block_adjustment(
     debug_logs: bool = False,
     window_size: int | Tuple[int, int] | Literal["block"] | None = None,
     correction_method: Literal["gamma", "linear"] = "gamma",
-    parallel_workers: Literal["cpu"] | int | None = None,
+    image_parallel_workers: Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None,
+    window_parallel_workers: Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None,
     save_block_maps: Tuple[str, str] | None = None,
     load_block_maps: Tuple[str, List[str]] | Tuple[str, None]| Tuple[None, List[str]] | None = None,
     override_bounds_canvas_coords: Tuple[float, float, float, float] | None = None,
@@ -65,7 +67,8 @@ def local_block_adjustment(
         debug_logs (bool, optional): If True, prints progress. Defaults to False.
         window_size (int | Tuple[int, int] | Literal["block"] | None): Tile size for processing: int for square tiles, (width, height) for custom size, or "block" to set as the size of the block map, None for full image. Defaults to None.
         correction_method (Literal["gamma", "linear"], optional): Local correction method. Defaults to "gamma".
-        parallel_workers (Literal["cpu"] | int | None): If set, enables multiprocessing. "cpu" = all cores, int = specific count, None = no parallel processing. Defaults to None.
+        image_parallel_workers (Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None): Parallelization strategy at the image level. Provide a tuple like ("process", "cpu") to use multiprocessing with all available cores, or ("thread", 4) to use 4 threads. Set to None to disable.
+        window_parallel_workers (Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None): Parallelization strategy at the window level within each image. Same format as image_parallel_workers. Enables finer-grained parallelism across image tiles. Set to None to disable.
         save_block_maps (tuple(str, str) | None): If enabled, saves block maps for review, to resume processing later, or to add additional images to the reference map.
             - First str is the path to save the global block map.
             - Second str is the path to save the local block maps, which must include "$" which will be replaced my the image name (because there are multiple local maps).
@@ -108,6 +111,10 @@ def local_block_adjustment(
         vector_mask_path,
         block_valid_pixel_threshold,
     )
+
+    # Determine multiprocessing and worker count
+    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
+    window_parallel, window_backend, window_max_workers = _resolve_parallel_config(window_parallel_workers)
 
     if isinstance(input_images, tuple): input_images = search_paths(*input_images)
     if isinstance(output_images, tuple): output_images = create_paths(*output_images, input_images, create_folders=True)
@@ -212,8 +219,7 @@ def local_block_adjustment(
             block_valid_pixel_threshold,
         )
         overlap = set(block_local_means) & set(local_blocks_to_load)
-        if overlap:
-            raise ValueError(f"Duplicate keys when merging loaded and computed blocks: {overlap}")
+        if overlap: raise ValueError(f"Duplicate keys when merging loaded and computed blocks: {overlap}")
 
         block_local_means = {**block_local_means, **local_blocks_to_load}
     else:
@@ -264,16 +270,6 @@ def local_block_adjustment(
             # )
 
     # block_local_mean = _smooth_array(block_local_mean, nodata_value=global_nodata_value)
-
-    if parallel_workers == "cpu":
-        parallel = True
-        max_workers = mp.cpu_count()
-    elif isinstance(parallel_workers, int) and parallel_workers > 0:
-        parallel = True
-        max_workers = parallel_workers
-    else:
-        parallel = False
-        max_workers = None
 
     if debug_logs: print(f"Computing local correction, applying, and saving:")
     out_paths: List[str] = []
@@ -896,68 +892,35 @@ def _compute_local_blocks(
                         geoms = [feat["geometry"] for feat in vector]
             if geoms and debug_logs: print("        Applied mask")
 
-            dataset_bounds = dataset.bounds
-            tiles_to_process: List[Tuple[Optional[int], Optional[int], Window]] = []
-
-            if window_size is None:
-                full_window = Window(0, 0, dataset.width, dataset.height)
-                tiles_to_process.append((None, None, full_window))
-            elif window_size == "block":
-                for row_idx in range(num_row):
-                    for col_idx in range(num_col):
-                        block_x0 = x_min + col_idx * block_width
-                        block_x1 = block_x0 + block_width
-                        block_y1 = y_max - row_idx * block_height
-                        block_y0 = block_y1 - block_height
-
-                        if (block_x1 <= dataset_bounds.left or block_x0 >= dataset_bounds.right or
-                            block_y1 <= dataset_bounds.bottom or block_y0 >= dataset_bounds.top):
-                            continue
-
-                        intersected_window = from_bounds(
-                            max(block_x0, dataset_bounds.left),
-                            max(block_y0, dataset_bounds.bottom),
-                            min(block_x1, dataset_bounds.right),
-                            min(block_y1, dataset_bounds.top),
-                            transform=dataset.transform,
-                        )
-                        tiles_to_process.append((row_idx, col_idx, intersected_window))
-            elif isinstance(window_size, tuple):
-                tile_width, tile_height = window_size
-                for tile in _create_windows(dataset.width, dataset.height, tile_width, tile_height):
-                    tiles_to_process.append((None, None, tile))
+            windows_to_process = [
+                (None, None, win) for win in _resolve_windows(
+                    dataset,
+                    window_size,
+                    block_params=(num_row, num_col, dataset.bounds) if window_size == "block" else None
+                )
+            ]
 
             for band_index in range(num_bands):
-                for tile_index, (row_idx, col_idx, tile_window) in enumerate(tiles_to_process):
-                    tile_data = dataset.read(band_index + 1, window=tile_window).astype(calculation_dtype)
+                for window_index, (_, _, window) in enumerate(windows_to_process):
+                    result = _process_local_block_window(
+                        dataset_path=dataset.name,
+                        band_index=band_index,
+                        window=window,
+                        geoms=geoms,
+                        invert=invert,
+                        nodata_value=nodata_value,
+                        calculation_dtype=calculation_dtype,
+                        transform=dataset.transform,
+                        block_shape=(num_row, num_col),
+                        bounds_canvas_coords=(x_min, y_min, x_max, y_max),
+                    )
 
-                    if geoms:
-                        tile_transform = dataset.window_transform(tile_window)
-                        mask = geometry_mask(
-                            geoms,
-                            transform=tile_transform,
-                            invert=not invert,
-                            out_shape=(int(tile_window.height), int(tile_window.width))
-                        )
-                        tile_data[~mask] = nodata_value
-
-                    valid_mask = tile_data != nodata_value
-                    valid_rows, valid_cols = np.where(valid_mask)
-                    if valid_rows.size == 0:
+                    if result is None:
                         continue
 
-                    pixel_x = tile_window.col_off + valid_cols + 0.5
-                    pixel_y = tile_window.row_off + valid_rows + 0.5
-                    coords_x, coords_y = dataset.transform * (pixel_x, pixel_y)
-                    coords_x = np.array(coords_x)
-                    coords_y = np.array(coords_y)
-
-                    col_blocks = np.clip(((coords_x - x_min) / block_width).astype(int), 0, num_col - 1)
-                    row_blocks = np.clip(((y_max - coords_y) / block_height).astype(int), 0, num_row - 1)
-
-                    pixel_values = tile_data[valid_rows, valid_cols]
-                    np.add.at(block_value_sum[name][:, :, band_index], (row_blocks, col_blocks), pixel_values)
-                    np.add.at(block_pixel_count[name][:, :, band_index], (row_blocks, col_blocks), 1)
+                    value_sum, value_count = result
+                    block_value_sum[name][:, :, band_index] += value_sum
+                    block_pixel_count[name][:, :, band_index] += value_count
 
     block_mean_result = {}
     for name in input_image_pairs:
@@ -969,6 +932,64 @@ def _compute_local_blocks(
             )
 
     return block_mean_result, block_pixel_count
+
+
+def _process_local_block_window(
+    dataset_path: str,
+    band_index: int,
+    window: Window,
+    geoms: Optional[list],
+    invert: bool,
+    nodata_value: float,
+    calculation_dtype: str,
+    transform,
+    block_shape: Tuple[int, int],
+    bounds_canvas_coords: Tuple[float, float, float, float],
+) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    """
+    Processes a tile window and returns block-wise sums and counts.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray]: Arrays of shape (num_row, num_col) with sums and counts.
+    """
+    num_row, num_col = block_shape
+    x_min, y_min, x_max, y_max = bounds_canvas_coords
+    block_width = (x_max - x_min) / num_col
+    block_height = (y_max - y_min) / num_row
+
+    with rasterio.open(dataset_path) as dataset:
+        tile_data = dataset.read(band_index + 1, window=window).astype(calculation_dtype)
+
+        if geoms:
+            tile_transform = dataset.window_transform(window)
+            mask = geometry_mask(
+                geoms, transform=tile_transform, invert=not invert, out_shape=(int(window.height), int(window.width))
+            )
+            tile_data[~mask] = nodata_value
+
+        valid_mask = tile_data != nodata_value
+        valid_rows, valid_cols = np.where(valid_mask)
+        if valid_rows.size == 0:
+            return None
+
+        pixel_x = window.col_off + valid_cols + 0.5
+        pixel_y = window.row_off + valid_rows + 0.5
+        coords_x, coords_y = dataset.transform * (pixel_x, pixel_y)
+        coords_x = np.array(coords_x)
+        coords_y = np.array(coords_y)
+
+        col_blocks = np.clip(((coords_x - x_min) / block_width).astype(int), 0, num_col - 1)
+        row_blocks = np.clip(((y_max - coords_y) / block_height).astype(int), 0, num_row - 1)
+
+        pixel_values = tile_data[valid_rows, valid_cols]
+
+        value_sum = np.zeros((num_row, num_col), dtype=calculation_dtype)
+        value_count = np.zeros((num_row, num_col), dtype=calculation_dtype)
+
+        np.add.at(value_sum, (row_blocks, col_blocks), pixel_values)
+        np.add.at(value_count, (row_blocks, col_blocks), 1)
+
+        return value_sum, value_count
 
 
 def _weighted_bilinear_interpolation(
