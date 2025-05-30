@@ -38,6 +38,7 @@ def local_block_adjustment(
     output_dtype: str | None = None,
     debug_logs: bool = False,
     window_size: int | Tuple[int, int] | Literal["block"] | None = None,
+    save_as_cog: bool = False,
     correction_method: Literal["gamma", "linear"] = "gamma",
     image_parallel_workers: Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None,
     window_parallel_workers: Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None,
@@ -66,6 +67,7 @@ def local_block_adjustment(
         output_dtype (str | None, optional): Data type for output rasters. Defaults to input image dtype.
         debug_logs (bool, optional): If True, prints progress. Defaults to False.
         window_size (int | Tuple[int, int] | Literal["block"] | None): Tile size for processing: int for square tiles, (width, height) for custom size, or "block" to set as the size of the block map, None for full image. Defaults to None.
+        save_as_cog (bool, optional): If True, saves as COG. Defaults to False.
         correction_method (Literal["gamma", "linear"], optional): Local correction method. Defaults to "gamma".
         image_parallel_workers (Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None): Parallelization strategy at the image level. Provide a tuple like ("process", "cpu") to use multiprocessing with all available cores, or ("thread", 4) to use 4 threads. Set to None to disable.
         window_parallel_workers (Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None): Parallelization strategy at the window level within each image. Same format as image_parallel_workers. Enables finer-grained parallelism across image tiles. Set to None to disable.
@@ -103,8 +105,10 @@ def local_block_adjustment(
         output_dtype,
         debug_logs,
         window_size,
+        save_as_cog,
         correction_method,
-        parallel_workers,
+        image_parallel_workers,
+        window_parallel_workers,
         save_block_maps,
         load_block_maps,
         override_bounds_canvas_coords,
@@ -205,7 +209,7 @@ def local_block_adjustment(
     }
 
     if local_blocks_to_calculate:
-        block_local_means, block_local_counts = _compute_local_blocks(
+        block_local_means, _ = _compute_local_blocks(
             local_blocks_to_calculate,
             bounds_canvas_coords,
             num_row,
@@ -217,6 +221,9 @@ def local_block_adjustment(
             calculation_dtype,
             vector_mask_path,
             block_valid_pixel_threshold,
+            window_parallel,
+            window_backend,
+            window_max_workers,
         )
         overlap = set(block_local_means) & set(local_blocks_to_load)
         if overlap: raise ValueError(f"Duplicate keys when merging loaded and computed blocks: {overlap}")
@@ -397,8 +404,10 @@ def _validate_input_params(
     output_dtype,
     debug_logs,
     window_size,
+    save_as_cog,
     correction_method,
-    parallel_workers,
+    image_parallel_workers,
+    window_parallel_workers,
     save_block_maps,
     load_block_maps,
     override_bounds_canvas_coords,
@@ -456,15 +465,20 @@ def _validate_input_params(
     ):
         raise ValueError("window_size must be int, (int, int), 'block', or None.")
 
+    if not isinstance(save_as_cog, bool):
+        raise TypeError("save_as_cog must be a boolean.")
+
     if correction_method not in {"gamma", "linear"}:
         raise ValueError("correction_method must be 'gamma' or 'linear'.")
 
-    if not (
-        parallel_workers is None or
-        parallel_workers == "cpu" or
-        isinstance(parallel_workers, int)
-    ):
-        raise ValueError("parallel_workers must be None, 'cpu', or an integer.")
+    for name, param in {"image_parallel_workers": image_parallel_workers, "window_parallel_workers": window_parallel_workers}.items():
+        if param is not None:
+            if not (
+                isinstance(param, tuple) and len(param) == 2 and
+                param[0] in {"process", "thread"} and
+                (param[1] == "cpu" or isinstance(param[1], int))
+            ):
+                raise ValueError(f"{name} must be a tuple like ('process'|'thread', 'cpu'|int), or None.")
 
     if save_block_maps is not None:
         if not (isinstance(save_block_maps, tuple) and len(save_block_maps) == 2 and all(isinstance(p, str) for p in save_block_maps)):
@@ -502,6 +516,7 @@ def _validate_input_params(
 
     if not isinstance(block_valid_pixel_threshold, float) or not (0 <= block_valid_pixel_threshold <= 1):
         raise ValueError("block_valid_pixel_threshold must be a float between 0 and 1.")
+
 
 def _get_pre_computed_block_maps(
     load_block_maps: Tuple[Optional[str], Optional[List[str]]],
@@ -833,6 +848,9 @@ def _compute_local_blocks(
     calculation_dtype: str,
     vector_mask_path: Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None,
     block_valid_pixel_threshold: float,
+    parallel: bool,
+    backend: Literal["thread", "process"],
+    max_workers: int,
 ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
     """
     Computes local block-wise mean values and valid pixel counts for each input image.
@@ -849,6 +867,9 @@ def _compute_local_blocks(
         calculation_dtype (str): Numpy dtype string used for internal calculations.
         vector_mask_path (tuple): mode, path, optional_field (example: "include", "/path/to/mask.gpkg", "image_field").
         block_valid_pixel_threshold (float): Minimum fraction of valid pixels required per block (0–1).
+        parallel (bool): Whether to run in parallel.
+        backend (Literal["thread", "process"]): Backend to use for parallel processing.
+        max_workers (int): Maximum number of workers to use for parallel processing.
 
     Returns:
         Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
@@ -900,24 +921,35 @@ def _compute_local_blocks(
                 )
             ]
 
-            for band_index in range(num_bands):
-                for window_index, (_, _, window) in enumerate(windows_to_process):
-                    result = _process_local_block_window(
-                        dataset_path=dataset.name,
-                        band_index=band_index,
-                        window=window,
-                        geoms=geoms,
-                        invert=invert,
-                        nodata_value=nodata_value,
-                        calculation_dtype=calculation_dtype,
-                        transform=dataset.transform,
-                        block_shape=(num_row, num_col),
-                        bounds_canvas_coords=(x_min, y_min, x_max, y_max),
-                    )
+    for band_index in range(num_bands):
+        args = [
+            (
+                dataset.name,
+                band_index,
+                window,
+                geoms,
+                invert,
+                nodata_value,
+                calculation_dtype,
+                dataset.transform,
+                (num_row, num_col),
+                (x_min, y_min, x_max, y_max)
+            )
+            for (_, _, window) in windows_to_process
+        ]
 
-                    if result is None:
-                        continue
-
+        if parallel:
+            with _get_executor(backend, max_workers) as executor:
+                futures = [executor.submit(_process_local_block_window, *arg) for arg in args]
+                for result in futures:
+                    if (res := result.result()) is not None:
+                        value_sum, value_count = res
+                        block_value_sum[name][:, :, band_index] += value_sum
+                        block_pixel_count[name][:, :, band_index] += value_count
+        else:
+            for arg in args:
+                result = _process_local_block_window(*arg)
+                if result is not None:
                     value_sum, value_count = result
                     block_value_sum[name][:, :, band_index] += value_sum
                     block_pixel_count[name][:, :, band_index] += value_count
