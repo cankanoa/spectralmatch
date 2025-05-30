@@ -363,25 +363,34 @@ def global_regression(
 
     # Apply corrections
     if debug_logs: print(f"Apply adjustments and saving results for:")
-    for idx, (name, img_path) in enumerate(input_image_paths.items()):
-        if debug_logs:print(f"    {name}")
-
-        _apply_global_adjustments_for_image(
-            image_name=name,
-            input_image_path=img_path,
-            output_image_path=output_image_paths[name],
-            scale=np.array([all_params[b, 2 * idx, 0] for b in range(num_bands)]),
-            offset=np.array([all_params[b, 2 * idx + 1, 0] for b in range(num_bands)]),
-            num_bands=num_bands,
-            nodata_val=nodata_val,
-            window_size=window_size,
-            calculation_dtype=calculation_dtype,
-            output_dtype=output_dtype,
-            window_parallel=window_parallel,
-            window_backend=window_backend,
-            window_max_workers=window_max_workers,
-            debug_logs=debug_logs,
+    parallel_args = [
+        (
+            name,
+            img_path,
+            output_image_paths[name],
+            np.array([all_params[b, 2 * idx, 0] for b in range(num_bands)]),
+            np.array([all_params[b, 2 * idx + 1, 0] for b in range(num_bands)]),
+            num_bands,
+            nodata_val,
+            window_size,
+            calculation_dtype,
+            output_dtype,
+            window_parallel,
+            window_backend,
+            window_max_workers,
+            debug_logs,
         )
+        for idx, (name, img_path) in enumerate(input_image_paths.items())
+    ]
+
+    if image_parallel:
+        with _get_executor(image_backend, image_max_workers) as executor:
+            futures = [executor.submit(_apply_global_adjustments_for_image, *args) for args in parallel_args]
+            for future in as_completed(futures):
+                future.result()
+    else:
+        for args in parallel_args:
+            _apply_global_adjustments_for_image(*args)
 
     return output_images
 
