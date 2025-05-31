@@ -26,7 +26,7 @@ def global_regression(
     *,
     custom_mean_factor: float = 1.0,
     custom_std_factor: float = 1.0,
-    vector_mask_path: Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None = None,
+    vector_mask: Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None = None,
     window_size: int | Tuple[int, int] | Literal["internal"] | None = None,
     save_as_cog: bool = False,
     debug_logs: bool = False,
@@ -53,7 +53,7 @@ def global_regression(
             - A list of full output paths, which must match the number of input images.
         custom_mean_factor (float, optional): Weight for mean constraints in regression. Defaults to 1.0.
         custom_std_factor (float, optional): Weight for standard deviation constraints in regression. Defaults to 1.0.
-        vector_mask_path (Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None): Mask to limit stats calculation to specific areas in the format of a tuple with two or three items: literal "include" or "exclude" the mask area, str path to the vector file, optional str of field name in vector file that *includes* (can be substring) input image name to filter geometry by. Loaded stats won't have this applied to them. The matching solution is still applied to these areas in the output. Defaults to None for no mask.
+        vector_mask (Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None): Mask to limit stats calculation to specific areas in the format of a tuple with two or three items: literal "include" or "exclude" the mask area, str path to the vector file, optional str of field name in vector file that *includes* (can be substring) input image name to filter geometry by. Loaded stats won't have this applied to them. The matching solution is still applied to these areas in the output. Defaults to None for no mask.
         window_size (int | Tuple[int, int] | Literal["internal"] | None): Tile size for reading and writing: int for square tiles, tuple for (width, height), "internal" to use raster's native tiling, or None for full image. "internal" enables efficient streaming from COGs.
         save_as_cog (bool): If True, saves output as a Cloud-Optimized GeoTIFF using proper band and block order.
         and input raster's tiling if available.
@@ -78,7 +78,7 @@ def global_regression(
         output_images,
         custom_mean_factor,
         custom_std_factor,
-        vector_mask_path,
+        vector_mask,
         window_size,
         save_as_cog,
         debug_logs,
@@ -195,7 +195,7 @@ def global_regression(
             all_bounds[name_j],
             nodata_val,
             nodata_val,
-            vector_mask_path,
+            vector_mask,
             window_size,
             debug_logs,
         )
@@ -240,7 +240,7 @@ def global_regression(
             nodata_val,
             num_bands,
             image_name,
-            vector_mask_path,
+            vector_mask,
             window_size,
             debug_logs,
         )
@@ -503,7 +503,7 @@ def _validate_input_params(
     output_images,
     custom_mean_factor,
     custom_std_factor,
-    vector_mask_path,
+    vector_mask,
     window_size,
     save_as_cog,
     debug_logs,
@@ -543,14 +543,14 @@ def _validate_input_params(
     if not isinstance(custom_std_factor, (int, float)):
         raise ValueError("custom_std_factor must be a number.")
 
-    if vector_mask_path is not None:
-        if not isinstance(vector_mask_path, tuple) or len(vector_mask_path) not in {2, 3}:
-            raise ValueError("vector_mask_path must be a tuple of 2 or 3 elements.")
-        if vector_mask_path[0] not in {"include", "exclude"}:
-            raise ValueError("The first element of vector_mask_path must be 'include' or 'exclude'.")
-        if not isinstance(vector_mask_path[1], str):
+    if vector_mask is not None:
+        if not isinstance(vector_mask, tuple) or len(vector_mask) not in {2, 3}:
+            raise ValueError("vector_mask must be a tuple of 2 or 3 elements.")
+        if vector_mask[0] not in {"include", "exclude"}:
+            raise ValueError("The first element of vector_mask must be 'include' or 'exclude'.")
+        if not isinstance(vector_mask[1], str):
             raise ValueError("The second element must be a string (vector file path).")
-        if len(vector_mask_path) == 3 and not isinstance(vector_mask_path[2], str):
+        if len(vector_mask) == 3 and not isinstance(vector_mask[2], str):
             raise ValueError("The third element, if provided, must be a string (field name).")
 
     def _validate_window_param(val):
@@ -899,7 +899,7 @@ def _calculate_overlap_stats(
     bound_j: BoundingBox,
     nodata_i: int | float,
     nodata_j: int | float,
-    vector_mask_path: Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None,
+    vector_mask: Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None,
     window_size: int | Tuple[int, int] | Literal["internal"] | None,
     debug_logs: bool,
     ):
@@ -913,8 +913,8 @@ def _calculate_overlap_stats(
         # Parse geometry masks separately per image
         geoms_i = geoms_j = None
         invert = False
-        if vector_mask_path:
-            mode, path, *field = vector_mask_path
+        if vector_mask:
+            mode, path, *field = vector_mask
             invert = mode == "exclude"
             field_name = field[0] if field else None
 
@@ -1117,7 +1117,7 @@ def _calculate_whole_stats(
     nodata: int | float,
     num_bands: int,
     image_name: str,
-    vector_mask_path: Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None = None,
+    vector_mask: Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None = None,
     window_size: int | Tuple[int, int] | Literal["internal"] | None = None,
     debug_logs: bool = False,
     ):
@@ -1131,8 +1131,8 @@ def _calculate_whole_stats(
         geoms = None
         invert = False
 
-        if vector_mask_path:
-            mode, path, *field = vector_mask_path
+        if vector_mask:
+            mode, path, *field = vector_mask
             invert = mode == "exclude"
             field_name = field[0] if field else None
             with fiona.open(path, "r") as vector:

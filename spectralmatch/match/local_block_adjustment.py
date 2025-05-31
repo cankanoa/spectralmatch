@@ -37,7 +37,7 @@ def local_block_adjustment(
     save_block_maps: Tuple[str, str] | None = None,
     load_block_maps: Tuple[str, List[str]] | Tuple[str, None]| Tuple[None, List[str]] | None = None,
     override_bounds_canvas_coords: Tuple[float, float, float, float] | None = None,
-    vector_mask_path: Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None = None,
+    vector_mask: Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None = None,
     block_valid_pixel_threshold: float = 0.001,
     )-> list:
     """
@@ -78,7 +78,7 @@ def local_block_adjustment(
                 - The reference map defines the reference block statistics and the local maps define per-image local block statistics.
                 - Both reference and local maps must have the same canvas extent and dimensions which will be used to set those values.
         override_bounds_canvas_coords (Tuple[float, float, float, float] | None): Manually set (min_x, min_y, max_x, max_y) bounds to override the computed/loaded canvas extent. If you wish to have a larger extent than the current images, you can manually set this, along with setting a fixed number of blocks, to anticipate images will expand beyond the current extent.
-        vector_mask_path (Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None): A mask limiting pixels to include when calculating stats for each block in the format of a tuple with two or three items: literal "include" or "exclude" the mask area, str path to the vector file, optional str of field name in vector file that *includes* (can be substring) input image name to filter geometry by. It is only applied when calculating local blocks, as the reference map is calculated as the mean of all local blocks. Loaded block maps won't have this applied unless it was used when calculating them. The matching solution is still applied to these areas in the output. Defaults to None for no mask.
+        vector_mask (Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None): A mask limiting pixels to include when calculating stats for each block in the format of a tuple with two or three items: literal "include" or "exclude" the mask area, str path to the vector file, optional str of field name in vector file that *includes* (can be substring) input image name to filter geometry by. It is only applied when calculating local blocks, as the reference map is calculated as the mean of all local blocks. Loaded block maps won't have this applied unless it was used when calculating them. The matching solution is still applied to these areas in the output. Defaults to None for no mask.
         block_valid_pixel_threshold (float): Minimum fraction of valid pixels required to include a block (0–1).
 
     Returns:
@@ -104,7 +104,7 @@ def local_block_adjustment(
         save_block_maps,
         load_block_maps,
         override_bounds_canvas_coords,
-        vector_mask_path,
+        vector_mask,
         block_valid_pixel_threshold,
     )
 
@@ -213,7 +213,7 @@ def local_block_adjustment(
                 debug_logs,
                 nodata_val,
                 calculation_dtype,
-                vector_mask_path,
+                vector_mask,
                 block_valid_pixel_threshold,
                 window_parallel,
                 window_backend,
@@ -340,7 +340,7 @@ def _validate_input_params(
     save_block_maps,
     load_block_maps,
     override_bounds_canvas_coords,
-    vector_mask_path,
+    vector_mask,
     block_valid_pixel_threshold,
 ):
     """
@@ -433,15 +433,15 @@ def _validate_input_params(
         ):
             raise TypeError("override_bounds_canvas_coords must be a tuple of four numbers or None.")
 
-    if vector_mask_path is not None:
+    if vector_mask is not None:
         if not (
-            isinstance(vector_mask_path, tuple) and
-            len(vector_mask_path) in {2, 3} and
-            vector_mask_path[0] in {"include", "exclude"} and
-            isinstance(vector_mask_path[1], str) and
-            (len(vector_mask_path) == 2 or isinstance(vector_mask_path[2], str))
+            isinstance(vector_mask, tuple) and
+            len(vector_mask) in {2, 3} and
+            vector_mask[0] in {"include", "exclude"} and
+            isinstance(vector_mask[1], str) and
+            (len(vector_mask) == 2 or isinstance(vector_mask[2], str))
         ):
-            raise TypeError("vector_mask_path must be a tuple ('include'|'exclude', path [, field_name]) or None.")
+            raise TypeError("vector_mask must be a tuple ('include'|'exclude', path [, field_name]) or None.")
 
     if not isinstance(block_valid_pixel_threshold, float) or not (0 <= block_valid_pixel_threshold <= 1):
         raise ValueError("block_valid_pixel_threshold must be a float between 0 and 1.")
@@ -844,7 +844,7 @@ def _compute_local_blocks_single(
     debug_logs: bool,
     nodata_value: float,
     calculation_dtype: str,
-    vector_mask_path: Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None,
+    vector_mask: Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None,
     block_valid_pixel_threshold: float,
     parallel: bool,
     backend: Literal["thread", "process"],
@@ -873,8 +873,8 @@ def _compute_local_blocks_single(
         # Load vector mask if applicable
         geoms = None
         invert = None
-        if vector_mask_path:
-            mode, path, *field = vector_mask_path
+        if vector_mask:
+            mode, path, *field = vector_mask
             invert = mode == "exclude"
             field_name = field[0] if field else None
 
