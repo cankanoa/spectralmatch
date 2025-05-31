@@ -445,7 +445,7 @@ def _apply_global_adjustments_for_image(
     window_backend: str,
     window_max_workers: int,
     debug_logs: bool = False,
-) -> str:
+    ):
     """
     Applies global normalization adjustments for a single image using per-band scale and offset.
 
@@ -497,8 +497,6 @@ def _apply_global_adjustments_for_image(
                         band, window, buf = _process_tile_global(*arg)
                         dst.write(buf.astype(meta["dtype"]), band + 1, window=window)
                     WorkerContext.close()
-
-    return output_image_path
 
 
 def _validate_input_params(

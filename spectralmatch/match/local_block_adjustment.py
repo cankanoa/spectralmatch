@@ -20,10 +20,17 @@ from multiprocessing import shared_memory
 from ..utils import _check_raster_requirements, _get_nodata_value
 from ..handlers import create_paths, search_paths, match_paths
 from ..utils_multiprocessing import _create_windows, _choose_context, _resolve_parallel_config, _resolve_windows, _get_executor, WorkerContext
+import os
+import gc
+from concurrent.futures import as_completed
+import numpy as np
+import rasterio
+from rasterio.windows import Window
+from multiprocessing import shared_memory
+
 
 
 # Multiprocessing setup
-_worker_dataset_cache = {}
 file_lock = Lock()
 
 
@@ -209,29 +216,42 @@ def local_block_adjustment(
     }
 
     if local_blocks_to_calculate:
-        block_local_means, _ = _compute_local_blocks(
-            local_blocks_to_calculate,
-            bounds_canvas_coords,
-            num_row,
-            num_col,
-            num_bands,
-            window_size,
-            debug_logs,
-            nodata_val,
-            calculation_dtype,
-            vector_mask_path,
-            block_valid_pixel_threshold,
-            window_parallel,
-            window_backend,
-            window_max_workers,
-        )
+        args = [
+            (
+                name,
+                path,
+                bounds_canvas_coords,
+                num_row,
+                num_col,
+                num_bands,
+                window_size,
+                debug_logs,
+                nodata_val,
+                calculation_dtype,
+                vector_mask_path,
+                block_valid_pixel_threshold,
+                window_parallel,
+                window_backend,
+                window_max_workers,
+            )
+            for name, path in local_blocks_to_calculate.items()
+        ]
+
+        if image_parallel:
+            with _get_executor(image_backend, image_max_workers) as executor:
+                futures = [executor.submit(_compute_local_blocks_single, *arg) for arg in args]
+                results = [f.result() for f in futures]
+        else:
+            results = [_compute_local_blocks_single(*arg) for arg in args]
+
+        block_local_means = {name: mean for name, mean, _ in results}
+
         overlap = set(block_local_means) & set(local_blocks_to_load)
         if overlap: raise ValueError(f"Duplicate keys when merging loaded and computed blocks: {overlap}")
 
         block_local_means = {**block_local_means, **local_blocks_to_load}
     else:
         block_local_means = local_blocks_to_load
-
 
     bounds_images_block_space = get_bounding_rect_images_block_space(block_local_means)
 
@@ -278,120 +298,44 @@ def local_block_adjustment(
 
     # block_local_mean = _smooth_array(block_local_mean, nodata_value=global_nodata_value)
 
+    # Apply adjustments to images
     if debug_logs: print(f"Computing local correction, applying, and saving:")
-    out_paths: List[str] = []
-    for name, img_path in input_image_pairs.items():
-        in_name = os.path.splitext(os.path.basename(img_path))[0]
-        out_path = output_image_pairs[name]
-        out_name = os.path.splitext(os.path.basename(out_path))[0]
-        out_paths.append(str(out_path))
+    args = [
+        (
+            name,
+            input_image_pairs[name],
+            output_image_pairs[name],
+            num_bands,
+            block_reference_mean,
+            block_local_means[name],
+            bounds_images_block_space[name],
+            bounds_canvas_coords,
+            window_size,
+            num_row,
+            num_col,
+            nodata_val,
+            alpha,
+            correction_method,
+            calculation_dtype,
+            output_dtype,
+            debug_logs,
+            window_parallel,
+            window_backend,
+            window_max_workers,
+        )
+        for name in input_image_pairs
+    ]
 
-        if debug_logs: print(f"    {in_name}")
-        with rasterio.open(img_path) as src:
-            meta = src.meta.copy()
-            meta.update({"count": num_bands, "dtype": output_dtype or src.dtypes[0], "nodata": nodata_val})
-            block_reference_mean_masked = np.where(
-                (np.arange(block_reference_mean.shape[0])[:, None, None] >= bounds_images_block_space[name][0]) &
-                (np.arange(block_reference_mean.shape[0])[:, None, None] < bounds_images_block_space[name][2]) &
-                (np.arange(block_reference_mean.shape[1])[None, :, None] >= bounds_images_block_space[name][1]) &
-                (np.arange(block_reference_mean.shape[1])[None, :, None] < bounds_images_block_space[name][3]),
-                block_reference_mean,
-                np.nan
-            )
+    if image_parallel:
+        with _get_executor(image_backend, image_max_workers) as executor:
+            futures = [executor.submit(_process_output_image, *arg) for arg in args]
+            for future in as_completed(futures):
+                future.result()
+    else:
+        for arg in args:
+            _process_output_image(*arg)
 
-            if isinstance(window_size, tuple):
-                tw, th = window_size
-                windows = list(_create_windows(src.width, src.height, tw, th))
-            elif window_size == "block":
-                block_width_geo = (bounds_canvas_coords[2] - bounds_canvas_coords[0]) / num_col
-                block_height_geo = (bounds_canvas_coords[3] - bounds_canvas_coords[1]) / num_row
-                res_x = abs(src.transform.a)
-                res_y = abs(src.transform.e)
-                tile_width = max(1, int(round(block_width_geo / res_x)))
-                tile_height = max(1, int(round(block_height_geo / res_y)))
-                windows = list(_create_windows(src.width, src.height, tile_width, tile_height))
-            elif window_size is None:
-                windows = [Window(0, 0, src.width, src.height)]
-
-            if parallel:
-                ctx = _choose_context(prefer_fork=True)
-
-                ref_shm = shared_memory.SharedMemory(create=True, size=block_reference_mean.nbytes)
-                ref_array = np.ndarray(block_reference_mean.shape, dtype=block_reference_mean.dtype, buffer=ref_shm.buf)
-                ref_array[:] = block_reference_mean[:]
-
-                loc_shm = shared_memory.SharedMemory(create=True, size=block_local_means[name].nbytes)
-                loc_array = np.ndarray(block_local_means[name].shape, dtype=block_local_means[name].dtype,
-                                       buffer=loc_shm.buf)
-                loc_array[:] = block_local_means[name][:]
-
-                pool = ProcessPoolExecutor(
-                    max_workers=max_workers,
-                    mp_context=ctx,
-                    initializer=_init_worker,
-                    initargs=(
-                    img_path, ref_shm.name, loc_shm.name, block_reference_mean.shape, block_local_means[name].shape,
-                    block_reference_mean.dtype.name),
-                )
-
-                try:
-                    with rasterio.open(out_path, "w", **meta) as dst:
-                        futures = [
-                            pool.submit(_compute_tile_local,
-                                        w,
-                                        b,
-                                        num_row,
-                                        num_col,
-                                        bounds_canvas_coords,
-                                        nodata_val,
-                                        alpha,
-                                        correction_method,
-                                        calculation_dtype,
-                                        )
-                            for b in range(num_bands)
-                            for w_id, w in enumerate(windows)
-                        ]
-                        for fut in as_completed(futures):
-                            win, b_idx, buf = fut.result()
-                            dst.write(np.nan_to_num(buf, nan=nodata_val).astype(output_dtype), b_idx + 1, window=win)
-                            del buf, win
-                finally:
-                    pool.shutdown(wait=True)
-                    ref_shm.close()
-                    loc_shm.close()
-                    ref_shm.unlink()
-                    loc_shm.unlink()
-            else:
-                with rasterio.open(out_path, "w", **meta) as dst:
-                    _worker_dataset_cache["ds"] = rasterio.open(img_path, "r")
-                    _worker_dataset_cache["block_ref_mean"] = block_reference_mean
-                    _worker_dataset_cache["block_loc_mean"] = block_local_means[name]
-
-                    for b in range(num_bands):
-                        for w_id, win in enumerate(windows):
-                            win_, b_idx, buf = _compute_tile_local(
-                                win,
-                                b,
-                                num_row,
-                                num_col,
-                                bounds_canvas_coords,
-                                nodata_val,
-                                alpha,
-                                correction_method,
-                                calculation_dtype,
-                            )
-                            dst.write(buf.astype(output_dtype), b_idx + 1, window=win_)
-                            del buf, win_
-            if not parallel:
-                if "ds" in _worker_dataset_cache:
-                    _worker_dataset_cache["ds"].close()
-                    del _worker_dataset_cache["ds"]
-                _worker_dataset_cache.pop("block_ref_mean", None)
-                _worker_dataset_cache.pop("block_loc_mean", None)
-
-            del block_reference_mean_masked, windows
-            gc.collect()
-    return out_paths
+    return output_images
 
 
 def _validate_input_params(
@@ -647,7 +591,105 @@ def _compute_reference_blocks(
     return ref_block_mean
 
 
+def _process_output_image(
+    name: str,
+    img_path: str,
+    out_path: str,
+    num_bands: int,
+    block_reference_mean: np.ndarray,
+    block_local_mean: np.ndarray,
+    bounds_image_block_space: tuple,
+    bounds_canvas_coords: tuple,
+    window_size,
+    num_row: int,
+    num_col: int,
+    nodata_val: float,
+    alpha: float,
+    correction_method: str,
+    calculation_dtype: str,
+    output_dtype: str,
+    debug_logs: bool,
+    parallel: bool,
+    backend: str,
+    max_workers: int,
+):
+
+    if debug_logs: print(f"    {name}")
+
+    with rasterio.open(img_path) as src:
+        meta = meta_template.copy()
+        meta.update({"count": num_bands, "dtype": output_dtype or src.dtypes[0], "nodata": nodata_val})
+
+        # Mask global block reference to image bounds
+        block_reference_mean_masked = np.where(
+            (np.arange(block_reference_mean.shape[0])[:, None, None] >= bounds_images_block_space[name][0]) &
+            (np.arange(block_reference_mean.shape[0])[:, None, None] < bounds_images_block_space[name][2]) &
+            (np.arange(block_reference_mean.shape[1])[None, :, None] >= bounds_images_block_space[name][1]) &
+            (np.arange(block_reference_mean.shape[1])[None, :, None] < bounds_images_block_space[name][3]),
+            block_reference_mean,
+            np.nan
+        )
+
+        windows = _resolve_windows(src, window_size, block_params=(num_row, num_col, bounds_canvas_coords) if window_size == "block" else None)
+
+        with rasterio.open(out_path, "w", **meta) as dst:
+            for band in range(num_bands):
+                args = [
+                    (
+                        name,
+                        win,
+                        band,
+                        num_row,
+                        num_col,
+                        bounds_canvas_coords,
+                        nodata_val,
+                        alpha,
+                        correction_method,
+                        calculation_dtype,
+                    )
+                    for win in windows
+                ]
+
+                if parallel:
+                    ref_shm = shared_memory.SharedMemory(create=True, size=block_reference_mean_masked.nbytes)
+                    ref_array = np.ndarray(block_reference_mean_masked.shape, dtype=block_reference_mean_masked.dtype, buffer=ref_shm.buf)
+                    ref_array[:] = block_reference_mean_masked
+
+                    loc_shm = shared_memory.SharedMemory(create=True, size=block_local_means[name].nbytes)
+                    loc_array = np.ndarray(block_local_means[name].shape, dtype=block_local_means[name].dtype, buffer=loc_shm.buf)
+                    loc_array[:] = block_local_means[name]
+
+                    with _get_executor(
+                        backend,
+                        max_workers,
+                        initializer=WorkerContext.init,
+                        initargs=({
+                              name: ("raster", img_path),
+                              "block_ref_mean": ("array", ref_shm.name, block_reference_mean_masked.shape, block_reference_mean_masked.dtype.name),
+                              f"block_loc_mean_{name}": ("array", loc_shm.name, block_local_means[name].shape, block_local_means[name].dtype.name),
+                        },)
+                    ) as executor:
+                        futures = [executor.submit(_compute_tile_local, *arg) for arg in args]
+                        for fut in as_completed(futures):
+                            win, b_idx, buf = fut.result()
+                            dst.write(np.nan_to_num(buf, nan=nodata_val).astype(output_dtype), b_idx + 1, window=win)
+
+                    ref_shm.close(); ref_shm.unlink()
+                    loc_shm.close(); loc_shm.unlink()
+                else:
+                    WorkerContext.init({
+                              name: ("raster", img_path),
+                              "block_ref_mean": ("array", ref_shm.name, block_reference_mean_masked.shape, block_reference_mean_masked.dtype.name),
+                              f"block_loc_mean_{name}": ("array", loc_shm.name, block_local_means[name].shape, block_local_means[name].dtype.name),
+                        },)
+                    for arg in args:
+                        win, b_idx, buf = _compute_tile_local(*arg)
+                        dst.write(buf.astype(output_dtype), b_idx + 1, window=win)
+                    WorkerContext.close()
+
+
 def _compute_tile_local(
+    name: str,
     window: Window,
     band_idx: int,
     num_row: int,
@@ -661,24 +703,13 @@ def _compute_tile_local(
     """
     Applies local radiometric correction to a raster tile using bilinear interpolation between global and local block means.
 
-    Args:
-        window (Window): Rasterio window defining the tile extent.
-        band_idx (int): Index of the band to process.
-        num_row (int): Number of block rows in the mosaic.
-        num_col (int): Number of block columns in the mosaic.
-        bounds_canvas_coords (tuple): (minx, miny, maxx, maxy) bounding the full mosaic.
-        nodata_val (float | int): NoData value in the raster.
-        alpha (float): Weighting factor for blending reference and local statistics.
-        correction_method (Literal["gamma", "linear"]): Method of radiometric correction.
-        calculation_dtype (str): Internal computation precision (e.g., "float32").
-
     Returns:
         tuple: (Window, band index, corrected tile as np.ndarray)
     """
     try:
         # if debug_logs: print(f"b{band_idx}w{w_id}[{window.col_off}:{window.row_off} {window.width}x{window.height}], ", end="", flush=True)
 
-        ds = _worker_dataset_cache["ds"]
+        ds = WorkerContext.get(name)
         arr_in = ds.read(band_idx + 1, window=window).astype(calculation_dtype)
         arr_out = np.full_like(arr_in, nodata_val, dtype=calculation_dtype)
 
@@ -693,23 +724,21 @@ def _compute_tile_local(
         row_coords = win_tr[5] + np.arange(window.height) * win_tr[4]
 
         row_f = np.clip(
-            ((bounds_canvas_coords[3] - row_coords) / (bounds_canvas_coords[3] - bounds_canvas_coords[1])) * num_row
-            - 0.5,
+            ((bounds_canvas_coords[3] - row_coords) / (bounds_canvas_coords[3] - bounds_canvas_coords[1])) * num_row - 0.5,
             0,
             num_row - 1,
         )
         col_f = np.clip(
-            ((col_coords - bounds_canvas_coords[0]) / (bounds_canvas_coords[2] - bounds_canvas_coords[0])) * num_col
-            - 0.5,
+            ((col_coords - bounds_canvas_coords[0]) / (bounds_canvas_coords[2] - bounds_canvas_coords[0])) * num_col - 0.5,
             0,
             num_col - 1,
         )
 
         ref = _weighted_bilinear_interpolation(
-            _worker_dataset_cache["block_ref_mean"][:, :, band_idx], col_f[vc], row_f[vr]
+            WorkerContext.get("block_ref_mean")[:, :, band_idx], col_f[vc], row_f[vr]
         )
         loc = _weighted_bilinear_interpolation(
-            _worker_dataset_cache["block_loc_mean"][:, :, band_idx], col_f[vc], row_f[vr]
+            WorkerContext.get(f"block_loc_mean_{name}")[:, :, band_idx], col_f[vc], row_f[vr]
         )
 
         if correction_method == "gamma":
@@ -717,36 +746,19 @@ def _compute_tile_local(
             if smallest <= 0:
                 offset = abs(smallest) + 1
                 arr_out[mask], gammas = _apply_gamma_correction(
-                    arr_in[mask] + offset,
-                    ref + offset,
-                    loc + offset,
-                    alpha,
+                    arr_in[mask] + offset, ref + offset, loc + offset, alpha
                 )
                 arr_out[mask] -= offset
             else:
                 arr_out[mask], gammas = _apply_gamma_correction(arr_in[mask], ref, loc, alpha)
+
         elif correction_method == "linear":
             gammas = ref / loc
             arr_out[mask] = arr_in[mask] * gammas
         else: raise ValueError('Invalid correction method')
 
-        # if save_block_maps:
-        #     gammas_array = np.full((*arr_in.shape, num_bands), np.nan, dtype=calculation_dtype)
-        #     gammas_array[..., band_idx][mask] = gammas
-        #     _download_block_map(
-        #         gammas_array,
-        #         bounding_rect_image,
-        #         os.path.join(output_image_folder, "Gamma", out_name + f"_Gamma.tif"),
-        #         projection,
-        #         calculation_dtype,
-        #         nodata_val,
-        #         arr_in.shape[1],
-        #         arr_in.shape[0],
-        #         (band_idx,),
-        #         window,
-        #     )
-
         return window, band_idx, arr_out
+
     except Exception as e:
         print(f"\nWorker failed on band {band_idx}, window {window}: {e}")
         traceback.print_exc()
@@ -836,8 +848,9 @@ def _compute_mosaic_coefficient_of_variation(
     return max(1, int(round(r * m))), max(1, int(round(r * n)))
 
 
-def _compute_local_blocks(
-    input_image_pairs: dict[str, str],
+def _compute_local_blocks_single(
+    name: str,
+    image_path: str,
     bounds_canvas_coords: Tuple[float, float, float, float],
     num_row: int,
     num_col: int,
@@ -851,119 +864,97 @@ def _compute_local_blocks(
     parallel: bool,
     backend: Literal["thread", "process"],
     max_workers: int,
-) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+) -> Tuple[str, np.ndarray, np.ndarray]:
     """
-    Computes local block-wise mean values and valid pixel counts for each input image.
-
-    Args:
-        input_image_pairs (dict[str, str]): Dictionary mapping image names to file paths.
-        bounds_canvas_coords (tuple): (minx, miny, maxx, maxy) of the full mosaic extent.
-        num_row (int): Number of block rows in the canvas.
-        num_col (int): Number of block columns in the canvas.
-        num_bands (int): Number of bands per image.
-        window_size (tuple[int, int] | Literal["block"] | None): Tiling mode for reading.
-        debug_logs (bool): Whether to print debug statements.
-        nodata_value (float): Value representing NoData in input rasters.
-        calculation_dtype (str): Numpy dtype string used for internal calculations.
-        vector_mask_path (tuple): mode, path, optional_field (example: "include", "/path/to/mask.gpkg", "image_field").
-        block_valid_pixel_threshold (float): Minimum fraction of valid pixels required per block (0–1).
-        parallel (bool): Whether to run in parallel.
-        backend (Literal["thread", "process"]): Backend to use for parallel processing.
-        max_workers (int): Maximum number of workers to use for parallel processing.
+    Computes local block-wise mean values and valid pixel counts for a single input image.
 
     Returns:
-        Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
-            - Block means per image (shape: num_row × num_col × num_bands)
-            - Valid pixel counts per image (same shape)
+        Tuple (name, block_mean_array, block_pixel_count_array)
     """
-
-    block_value_sum = {}
-    block_pixel_count = {}
+    if debug_logs: print(f'    {name}')
 
     x_min, y_min, x_max, y_max = bounds_canvas_coords
     block_width = (x_max - x_min) / num_col
     block_height = (y_max - y_min) / num_row
+    output_shape = (num_row, num_col, num_bands)
 
-    for name, image_path in input_image_pairs.items():
-        if debug_logs: print(f'    {name}')
-        output_shape = (num_row, num_col, num_bands)
-        block_value_sum[name] = np.zeros(output_shape, dtype=calculation_dtype)
-        block_pixel_count[name] = np.zeros(output_shape, dtype=calculation_dtype)
+    block_value_sum = np.zeros(output_shape, dtype=calculation_dtype)
+    block_pixel_count = np.zeros(output_shape, dtype=calculation_dtype)
 
-        with rasterio.open(image_path) as dataset:
-            pixel_size_x, pixel_size_y = abs(dataset.transform.a), abs(dataset.transform.e)
-            min_required_pixels = block_valid_pixel_threshold * (block_width * block_height) / (pixel_size_x * pixel_size_y)
+    with rasterio.open(image_path) as dataset:
+        pixel_size_x, pixel_size_y = abs(dataset.transform.a), abs(dataset.transform.e)
+        min_required_pixels = block_valid_pixel_threshold * (block_width * block_height) / (pixel_size_x * pixel_size_y)
 
-            # Load vector mask if applicable
-            geoms = None
-            invert = None
-            if vector_mask_path:
-                mode, path, *field = vector_mask_path
-                invert = mode == "exclude"
-                field_name = field[0] if field else None
+        # Load vector mask if applicable
+        geoms = None
+        invert = None
+        if vector_mask_path:
+            mode, path, *field = vector_mask_path
+            invert = mode == "exclude"
+            field_name = field[0] if field else None
 
-                with fiona.open(path, "r") as vector:
-                    if field_name:
-                        geoms = [
-                            feat["geometry"]
-                            for feat in vector
-                            if field_name in feat["properties"] and name in str(feat["properties"][field_name])
-                        ]
-                    else:
-                        geoms = [feat["geometry"] for feat in vector]
-            if geoms and debug_logs: print("        Applied mask")
+            with fiona.open(path, "r") as vector:
+                if field_name:
+                    geoms = [
+                        feat["geometry"]
+                        for feat in vector
+                        if field_name in feat["properties"] and name in str(feat["properties"][field_name])
+                    ]
+                else:
+                    geoms = [feat["geometry"] for feat in vector]
 
-            windows_to_process = [
-                (None, None, win) for win in _resolve_windows(
-                    dataset,
-                    window_size,
-                    block_params=(num_row, num_col, dataset.bounds) if window_size == "block" else None
-                )
-            ]
+        if geoms and debug_logs:
+            print("        Applied mask")
 
-    for band_index in range(num_bands):
-        args = [
-            (
-                dataset.name,
-                band_index,
-                window,
-                geoms,
-                invert,
-                nodata_value,
-                calculation_dtype,
-                dataset.transform,
-                (num_row, num_col),
-                (x_min, y_min, x_max, y_max)
+        windows_to_process = [
+            (None, None, win) for win in _resolve_windows(
+                dataset,
+                window_size,
+                block_params=(num_row, num_col, dataset.bounds) if window_size == "block" else None
             )
-            for (_, _, window) in windows_to_process
         ]
 
-        if parallel:
-            with _get_executor(backend, max_workers) as executor:
-                futures = [executor.submit(_process_local_block_window, *arg) for arg in args]
-                for result in futures:
-                    if (res := result.result()) is not None:
-                        value_sum, value_count = res
-                        block_value_sum[name][:, :, band_index] += value_sum
-                        block_pixel_count[name][:, :, band_index] += value_count
-        else:
-            for arg in args:
-                result = _process_local_block_window(*arg)
-                if result is not None:
-                    value_sum, value_count = result
-                    block_value_sum[name][:, :, band_index] += value_sum
-                    block_pixel_count[name][:, :, band_index] += value_count
+        for band_index in range(num_bands):
+            args = [
+                (
+                    dataset.name,
+                    band_index,
+                    window,
+                    geoms,
+                    invert,
+                    nodata_value,
+                    calculation_dtype,
+                    dataset.transform,
+                    (num_row, num_col),
+                    (x_min, y_min, x_max, y_max)
+                )
+                for (_, _, window) in windows_to_process
+            ]
 
-    block_mean_result = {}
-    for name in input_image_pairs:
-        with np.errstate(invalid='ignore', divide='ignore'):
-            block_mean_result[name] = np.where(
-                block_pixel_count[name] >= min_required_pixels,
-                block_value_sum[name] / block_pixel_count[name],
-                np.nan,
-            )
+            if parallel:
+                with _get_executor(backend, max_workers) as executor:
+                    futures = [executor.submit(_process_local_block_window, *arg) for arg in args]
+                    for result in futures:
+                        if (res := result.result()) is not None:
+                            value_sum, value_count = res
+                            block_value_sum[:, :, band_index] += value_sum
+                            block_pixel_count[:, :, band_index] += value_count
+            else:
+                for arg in args:
+                    result = _process_local_block_window(*arg)
+                    if result is not None:
+                        value_sum, value_count = result
+                        block_value_sum[:, :, band_index] += value_sum
+                        block_pixel_count[:, :, band_index] += value_count
 
-    return block_mean_result, block_pixel_count
+    with np.errstate(invalid='ignore', divide='ignore'):
+        block_mean_array = np.where(
+            block_pixel_count >= min_required_pixels,
+            block_value_sum / block_pixel_count,
+            np.nan,
+        )
+
+    return name, block_mean_array, block_pixel_count
 
 
 def _process_local_block_window(
@@ -1264,28 +1255,3 @@ def _smooth_array(
         smoothed_normalized = np.where(valid_mask, smoothed_normalized, nodata_value)
 
     return smoothed_normalized
-
-
-def _init_worker(
-    img_path: str,
-    ref_shm_name: str,
-    loc_shm_name: str,
-    ref_shape: tuple,
-    loc_shape: tuple,
-    dtype_name: str
-    ):
-
-    global _worker_dataset_cache
-    _worker_dataset_cache["ds"] = rasterio.open(img_path, "r")
-
-    dtype = np.dtype(dtype_name)
-
-    # Store SharedMemory objects to prevent premature GC
-    ref_shm = shared_memory.SharedMemory(name=ref_shm_name)
-    loc_shm = shared_memory.SharedMemory(name=loc_shm_name)
-
-    _worker_dataset_cache["ref_shm"] = ref_shm
-    _worker_dataset_cache["loc_shm"] = loc_shm
-
-    _worker_dataset_cache["block_ref_mean"] = np.ndarray(ref_shape, dtype=dtype, buffer=ref_shm.buf)
-    _worker_dataset_cache["block_loc_mean"] = np.ndarray(loc_shape, dtype=dtype, buffer=loc_shm.buf)
