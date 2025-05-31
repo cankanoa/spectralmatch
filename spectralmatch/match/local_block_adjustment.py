@@ -612,20 +612,20 @@ def _process_output_image(
     parallel: bool,
     backend: str,
     max_workers: int,
-):
+    ):
 
     if debug_logs: print(f"    {name}")
 
     with rasterio.open(img_path) as src:
-        meta = meta_template.copy()
+        meta = src.meta.copy()
         meta.update({"count": num_bands, "dtype": output_dtype or src.dtypes[0], "nodata": nodata_val})
 
         # Mask global block reference to image bounds
         block_reference_mean_masked = np.where(
-            (np.arange(block_reference_mean.shape[0])[:, None, None] >= bounds_images_block_space[name][0]) &
-            (np.arange(block_reference_mean.shape[0])[:, None, None] < bounds_images_block_space[name][2]) &
-            (np.arange(block_reference_mean.shape[1])[None, :, None] >= bounds_images_block_space[name][1]) &
-            (np.arange(block_reference_mean.shape[1])[None, :, None] < bounds_images_block_space[name][3]),
+            (np.arange(block_reference_mean.shape[0])[:, None, None] >= bounds_image_block_space[0]) &
+            (np.arange(block_reference_mean.shape[0])[:, None, None] < bounds_image_block_space[2]) &
+            (np.arange(block_reference_mean.shape[1])[None, :, None] >= bounds_image_block_space[1]) &
+            (np.arange(block_reference_mean.shape[1])[None, :, None] < bounds_image_block_space[3]),
             block_reference_mean,
             np.nan
         )
@@ -655,18 +655,18 @@ def _process_output_image(
                     ref_array = np.ndarray(block_reference_mean_masked.shape, dtype=block_reference_mean_masked.dtype, buffer=ref_shm.buf)
                     ref_array[:] = block_reference_mean_masked
 
-                    loc_shm = shared_memory.SharedMemory(create=True, size=block_local_means[name].nbytes)
-                    loc_array = np.ndarray(block_local_means[name].shape, dtype=block_local_means[name].dtype, buffer=loc_shm.buf)
-                    loc_array[:] = block_local_means[name]
+                    loc_shm = shared_memory.SharedMemory(create=True, size=block_local_mean.nbytes)
+                    loc_array = np.ndarray(block_local_mean.shape, dtype=block_local_mean.dtype, buffer=loc_shm.buf)
+                    loc_array[:] = block_local_mean
 
                     with _get_executor(
                         backend,
                         max_workers,
                         initializer=WorkerContext.init,
                         initargs=({
-                              name: ("raster", img_path),
-                              "block_ref_mean": ("array", ref_shm.name, block_reference_mean_masked.shape, block_reference_mean_masked.dtype.name),
-                              f"block_loc_mean_{name}": ("array", loc_shm.name, block_local_means[name].shape, block_local_means[name].dtype.name),
+                            name: ("raster", img_path),
+                            "block_ref_mean": ("array", ref_shm.name, block_reference_mean_masked.shape, block_reference_mean_masked.dtype.name),
+                            f"block_loc_mean_{name}": ("array", loc_shm.name, block_local_mean.shape, block_local_mean.dtype.name),
                         },)
                     ) as executor:
                         futures = [executor.submit(_compute_tile_local, *arg) for arg in args]
@@ -678,10 +678,10 @@ def _process_output_image(
                     loc_shm.close(); loc_shm.unlink()
                 else:
                     WorkerContext.init({
-                              name: ("raster", img_path),
-                              "block_ref_mean": ("array", ref_shm.name, block_reference_mean_masked.shape, block_reference_mean_masked.dtype.name),
-                              f"block_loc_mean_{name}": ("array", loc_shm.name, block_local_means[name].shape, block_local_means[name].dtype.name),
-                        },)
+                        name: ("raster", img_path),
+                        "block_ref_mean": ("value", block_reference_mean_masked),
+                        f"block_loc_mean_{name}": ("value", block_local_mean),
+                    })
                     for arg in args:
                         win, b_idx, buf = _compute_tile_local(*arg)
                         dst.write(buf.astype(output_dtype), b_idx + 1, window=win)
