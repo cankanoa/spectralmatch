@@ -1,37 +1,22 @@
-import multiprocessing as mp
 import math
 import os
 import numpy as np
 import rasterio
 import traceback
-import gc
 import fiona
 
 from scipy.ndimage import map_coordinates, gaussian_filter
-from rasterio.windows import from_bounds, Window
+from rasterio.windows import Window
 from rasterio.transform import from_origin
 from rasterio.crs import CRS
 from rasterio.features import geometry_mask
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from typing import Tuple, Optional, List, Literal, Union
-from multiprocessing import Lock
+from concurrent.futures import as_completed
+from typing import Tuple, Optional, List, Literal
 from multiprocessing import shared_memory
 
 from ..utils import _check_raster_requirements, _get_nodata_value
-from ..handlers import create_paths, search_paths, match_paths
-from ..utils_multiprocessing import _create_windows, _choose_context, _resolve_parallel_config, _resolve_windows, _get_executor, WorkerContext
-import os
-import gc
-from concurrent.futures import as_completed
-import numpy as np
-import rasterio
-from rasterio.windows import Window
-from multiprocessing import shared_memory
-
-
-
-# Multiprocessing setup
-file_lock = Lock()
+from ..handlers import create_paths, search_paths
+from ..utils_multiprocessing import _resolve_parallel_config, _resolve_windows, _get_executor, WorkerContext, file_lock
 
 
 def local_block_adjustment(
@@ -47,8 +32,8 @@ def local_block_adjustment(
     window_size: int | Tuple[int, int] | Literal["block"] | None = None,
     save_as_cog: bool = False,
     correction_method: Literal["gamma", "linear"] = "gamma",
-    image_parallel_workers: Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None,
-    window_parallel_workers: Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None,
+    image_parallel_workers: Tuple[Literal["process"], Literal["cpu"] | int] | None = None,
+    window_parallel_workers: Tuple[Literal["process"], Literal["cpu"] | int] | None = None,
     save_block_maps: Tuple[str, str] | None = None,
     load_block_maps: Tuple[str, List[str]] | Tuple[str, None]| Tuple[None, List[str]] | None = None,
     override_bounds_canvas_coords: Tuple[float, float, float, float] | None = None,
@@ -76,8 +61,8 @@ def local_block_adjustment(
         window_size (int | Tuple[int, int] | Literal["block"] | None): Tile size for processing: int for square tiles, (width, height) for custom size, or "block" to set as the size of the block map, None for full image. Defaults to None.
         save_as_cog (bool, optional): If True, saves as COG. Defaults to False.
         correction_method (Literal["gamma", "linear"], optional): Local correction method. Defaults to "gamma".
-        image_parallel_workers (Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None): Parallelization strategy at the image level. Provide a tuple like ("process", "cpu") to use multiprocessing with all available cores, or ("thread", 4) to use 4 threads. Set to None to disable.
-        window_parallel_workers (Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None): Parallelization strategy at the window level within each image. Same format as image_parallel_workers. Enables finer-grained parallelism across image tiles. Set to None to disable.
+        image_parallel_workers (Tuple[Literal["process"], Literal["cpu"] | int] | None = None): Parallelization strategy at the image level. Provide a tuple like ("process", "cpu") to use multiprocessing with all available cores. Threads are not supported. Set to None to disable.
+        window_parallel_workers (Tuple[Literal["process"], Literal["cpu"] | int] | None = None): Parallelization strategy at the window level within each image. Same format as image_parallel_workers. Threads are not supported. Set to None to disable.
         save_block_maps (tuple(str, str) | None): If enabled, saves block maps for review, to resume processing later, or to add additional images to the reference map.
             - First str is the path to save the global block map.
             - Second str is the path to save the local block maps, which must include "$" which will be replaced my the image name (because there are multiple local maps).
@@ -419,10 +404,10 @@ def _validate_input_params(
         if param is not None:
             if not (
                 isinstance(param, tuple) and len(param) == 2 and
-                param[0] in {"process", "thread"} and
+                param[0] in {"process"} and
                 (param[1] == "cpu" or isinstance(param[1], int))
             ):
-                raise ValueError(f"{name} must be a tuple like ('process'|'thread', 'cpu'|int), or None.")
+                raise ValueError(f"{name} must be a tuple like ('process', 'cpu'|int), or None.")
 
     if save_block_maps is not None:
         if not (isinstance(save_block_maps, tuple) and len(save_block_maps) == 2 and all(isinstance(p, str) for p in save_block_maps)):

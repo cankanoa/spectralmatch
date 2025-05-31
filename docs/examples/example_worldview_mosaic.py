@@ -48,11 +48,21 @@ global_regression(
     (input_folder, "*.tif"),
     (new_global_folder, "$_Global.tif"),
     custom_mean_factor = 3, # Default is 1; 3 often works better to 'move' the spectral mean of images closer together (applied when creating model)
+    custom_std_factor=1,
+    debug_logs=True,
+    load_adjustments=os.path.join(new_global_folder, "GlobalAdjustments.json"),
+    )
+# %% (OPTIONAL) Global matching starting from precomputed statistics for images whole and overlap stats and increase images tendency to move towards the mean
+
+global_regression(
+    (input_folder, "*.tif"),
+    (new_global_folder, "$_Global.tif"),
+    custom_mean_factor = 3, # Default is 1; 3 often works better to 'move' the spectral mean of images closer together (applied when creating model)
     debug_logs=True,
     load_adjustments=os.path.join(new_global_folder, "GlobalAdjustments.json"),
     )
 
-# %% (OPTIONAL) Global match with increased performance using image and window process or threading with windowed calculations
+# %% (OPTIONAL) Global match with multiprocessing and windows
 
 global_regression(
     (input_folder, "*.tif"),
@@ -67,10 +77,6 @@ global_regression(
 local_block_adjustment(
     (global_folder, "*.tif"),
     (local_folder, "$_Local.tif"),
-    number_of_blocks=100,
-    debug_logs=True,
-    window_size=window_size,
-    parallel_workers=num_workers,
     )
 
 # %% (OPTIONAL) Local match with a larger canvas than images bounds (perhaps to anticipate adding additional imagery so you don't have to recalculate local block maps each rematch)
@@ -83,8 +89,6 @@ local_block_adjustment(
     (new_local_folder, "$_Local.tif"),
     number_of_blocks=(30,30),
     debug_logs=True,
-    window_size=window_size,
-    parallel_workers=num_workers,
     override_bounds_canvas_coords = (193011.1444011169369332, 2184419.3597142999060452, 205679.2836037494416814, 2198309.8632259583100677),
     save_block_maps=(reference_map_path, local_maps_path),
     )
@@ -99,11 +103,21 @@ saved_local_block_paths = [os.path.join(os.path.join(new_local_folder, "LocalBlo
 local_block_adjustment(
     (global_folder, "*.tif"),
     (new_local_folder, "$_Local.tif"),
-    number_of_blocks=100,
     debug_logs=True,
-    window_size=window_size,
-    parallel_workers=num_workers,
     load_block_maps=(None, saved_local_block_paths)
+    )
+
+# %% (OPTIONAL) Local match with multiprocessing and windows
+
+new_local_folder = os.path.join(working_directory, "LocalMatch_New")
+
+local_block_adjustment(
+    (global_folder, "*.tif"),
+    (new_local_folder, "$_Local.tif"),
+    debug_logs=True,
+    window_size = window_size,
+    image_parallel_workers = ("process", num_workers),
+    window_parallel_workers = ("process", num_workers),
     )
 
 #%% Align rasters

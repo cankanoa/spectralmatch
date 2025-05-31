@@ -8,7 +8,9 @@ from rasterio.windows import Window, from_bounds
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 from typing import Tuple, Literal, List, Callable, Any, Optional
 from multiprocessing import shared_memory
+from multiprocessing import Lock
 
+file_lock = Lock()
 
 def _choose_context(prefer_fork: bool = True) -> mp.context.BaseContext:
 
@@ -43,6 +45,8 @@ def _get_executor(backend: str, max_workers: int, initializer=None, initargs=Non
             initargs=initargs or ()
         )
     elif backend == "thread":
+        if initializer is not None and initargs is not None:
+            initializer(*initargs)
         return ThreadPoolExecutor(max_workers=max_workers)
     else:
         raise ValueError(f"Unsupported backend: {backend}")

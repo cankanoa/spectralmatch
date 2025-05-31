@@ -1,4 +1,3 @@
-import warnings
 import rasterio
 import fiona
 import os
@@ -7,8 +6,8 @@ import sys
 import json
 import cv2
 
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from typing import List, Optional, Tuple, Literal
+from concurrent.futures import as_completed
+from typing import List, Tuple, Literal
 from numpy import ndarray
 from scipy.optimize import least_squares
 from rasterio.windows import Window
@@ -17,8 +16,8 @@ from rasterio.features import geometry_mask
 from rasterio.coords import BoundingBox
 
 from ..utils import _check_raster_requirements, _get_nodata_value
-from ..handlers import create_paths, search_paths, match_paths
-from ..utils_multiprocessing import _create_windows, _choose_context, _resolve_parallel_config, _resolve_windows, _get_executor, WorkerContext
+from ..handlers import create_paths, search_paths
+from ..utils_multiprocessing import _resolve_parallel_config, _resolve_windows, _get_executor, WorkerContext
 
 
 def global_regression(
@@ -32,8 +31,8 @@ def global_regression(
     save_as_cog: bool = False,
     debug_logs: bool = False,
     custom_nodata_value: float | int | None = None,
-    image_parallel_workers: Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None,
-    window_parallel_workers: Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None,
+    image_parallel_workers: Tuple[Literal["process"], Literal["cpu"] | int] | None = None,
+    window_parallel_workers: Tuple[Literal["process"], Literal["cpu"] | int] | None = None,
     calculation_dtype: str = "float32",
     output_dtype: str | None = None,
     specify_model_images: Tuple[Literal["exclude", "include"], List[str]] | None = None,
@@ -60,8 +59,8 @@ def global_regression(
         and input raster's tiling if available.
         debug_logs (bool, optional): If True, prints debug information and constraint matrices. Defaults to False.
         custom_nodata_value (float | int | None, optional): Overrides detected NoData value. Defaults to None.
-        image_parallel_workers (Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None): Parallelization strategy at the image level. Provide a tuple like ("process", "cpu") to use multiprocessing with all available cores, or ("thread", 4) to use 4 threads. Set to None to disable.
-        window_parallel_workers (Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None): Parallelization strategy at the window level within each image. Same format as image_parallel_workers. Enables finer-grained parallelism across image tiles. Set to None to disable.
+        image_parallel_workers (Tuple[Literal["process"], Literal["cpu"] | int] | None = None): Parallelization strategy at the image level. Provide a tuple like ("process", "cpu") to use multiprocessing with all available cores. Threads are not supported. Set to None to disable.
+        window_parallel_workers (Tuple[Literal["process"], Literal["cpu"] | int] | None = None): Parallelization strategy at the window level within each image. Same format as image_parallel_workers. Threads are not supported. Set to None to disable.
         calculation_dtype (str, optional): Data type used for internal calculations. Defaults to "float32".
         output_dtype (str | None, optional): Data type for output rasters. Defaults to input image dtype.
         specify_model_images (Tuple[Literal["exclude", "include"], List[str]] | None ): First item in tuples sets weather to 'include' or 'exclude' the listed images from model building statistics. Second item is the list of image names (without their extension) to apply criteria to. For example, if this param is only set to 'include' one image, all other images will be matched to that one image. Defaults to no exclusion.
@@ -582,8 +581,8 @@ def _validate_input_params(
         if not isinstance(val, tuple) or len(val) != 2:
             raise ValueError(f"{name} must be a tuple of (backend, workers) or None.")
         backend, workers = val
-        if backend not in {"process", "thread"}:
-            raise ValueError(f"The first element of {name} must be 'process' or 'thread'.")
+        if backend not in {"process"}:
+            raise ValueError(f"The first element of {name} must be 'process'.")
         if workers != "cpu" and not isinstance(workers, int):
             raise ValueError(f"The second element of {name} must be 'cpu' or an integer.")
 

@@ -100,12 +100,19 @@ vector_mask_path = os.path.join(working_directory , "Pifs.gpkg")
 global_regression(
     (masked_folder, "*.tif"),
     (global_folder, "$_GlobalMatch.tif"),
-    custom_mean_factor = 3, # Defualt 1; 3 often works better to 'move' the spectral mean of images closer together
     vector_mask_path=("exclude", vector_mask_path),
     # vector_mask_path=("exclude", vector_mask_path, "image"), # Use unique mask per image
-    window_size=window_size,
-    parallel_workers=num_workers,
     debug_logs=True,
+    )
+
+
+# %% (OPTIONAL) Global matching saving output as a Cloud Optimized GeoTIFF
+
+global_regression(
+    (masked_folder, "*.tif"),
+    (global_folder, "$_GlobalMatch.tif"),
+    debug_logs=True,
+    save_as_cog=True,
     )
 
 # %% Local matching
