@@ -15,7 +15,7 @@ from typing import Tuple, Optional, List, Literal
 from multiprocessing import shared_memory
 
 from ..utils import _check_raster_requirements, _get_nodata_value
-from ..handlers import create_paths, search_paths
+from ..handlers import _resolve_paths
 from ..utils_multiprocessing import _resolve_parallel_config, _resolve_windows, _get_executor, WorkerContext, file_lock
 from ..types_and_validation import Universal, Match
 
@@ -117,16 +117,15 @@ def local_block_adjustment(
     image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
     window_parallel, window_backend, window_max_workers = _resolve_parallel_config(window_parallel_workers)
 
-    if isinstance(input_images, tuple): input_images = search_paths(*input_images)
-    if isinstance(output_images, tuple): output_images = create_paths(*output_images, input_images, create_folders=True)
+    input_image_paths = _resolve_paths("search", input_images)
+    output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
 
-    if debug_logs: print(f"Input images: {input_images}")
-    if debug_logs: print(f"Output images: {output_images}")
+    if debug_logs: print(f"Input images: {input_image_paths}")
+    if debug_logs: print(f"Output images: {output_image_paths}")
 
-    input_image_paths = input_images
-    input_image_names = [os.path.splitext(os.path.basename(p))[0] for p in input_images]
-    input_image_pairs = dict(zip(input_image_names, input_images))
-    output_image_pairs = dict(zip(input_image_names, output_images))
+    input_image_names = [os.path.splitext(os.path.basename(p))[0] for p in input_image_paths]
+    input_image_path_pairs = dict(zip(input_image_names, input_image_paths))
+    output_image_path_pairs = dict(zip(input_image_names, output_image_paths))
 
     _check_raster_requirements(input_image_paths, debug_logs)
 
@@ -170,7 +169,7 @@ def local_block_adjustment(
     # Create image bounds dict
     bounds_images_coords = {
         name: rasterio.open(path).bounds
-        for name, path in input_image_pairs.items()
+        for name, path in input_image_path_pairs.items()
     }
 
     # Get bounds canvas coords
@@ -199,7 +198,7 @@ def local_block_adjustment(
     if debug_logs: print("Computing local block maps:")
 
     # Compute local blocks
-    local_blocks_to_calculate = {k: v for k, v in input_image_pairs.items() if k in only_input}
+    local_blocks_to_calculate = {k: v for k, v in input_image_path_pairs.items() if k in only_input}
     local_blocks_to_load = {
         **{k: loaded_block_local_means[soft_matches[k]] for k in matched},
         **{k: loaded_block_local_means[k] for k in only_loaded},
@@ -293,8 +292,8 @@ def local_block_adjustment(
     args = [
         (
             name,
-            input_image_pairs[name],
-            output_image_pairs[name],
+            input_image_path_pairs[name],
+            output_image_path_pairs[name],
             num_bands,
             block_reference_mean,
             block_local_means[name],
@@ -313,7 +312,7 @@ def local_block_adjustment(
             window_backend,
             window_max_workers,
         )
-        for name in input_image_pairs
+        for name in input_image_path_pairs
     ]
 
     if image_parallel:
@@ -325,7 +324,7 @@ def local_block_adjustment(
         for arg in args:
             _process_output_image(*arg)
 
-    return output_images
+    return output_image_paths
 
 
 def _validate_input_params(

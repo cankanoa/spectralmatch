@@ -1,14 +1,15 @@
-from typing import List, Tuple
 import os
 import rasterio
 import numpy as np
+import networkx as nx
+
 from rasterio.features import shapes
 from affine import Affine
 from shapely.geometry import shape, Polygon, LineString, mapping, GeometryCollection, Point, MultiLineString
 from shapely.ops import split, voronoi_diagram
-import networkx as nx
-import fiona
 from itertools import combinations
+from typing import List, Tuple
+
 from ..handlers import search_paths
 
 def voronoi_center_seamline(

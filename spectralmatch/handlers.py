@@ -7,19 +7,18 @@ import geopandas as gpd
 import glob
 import pandas as pd
 import re
+import warnings
 
 from typing import List, Optional, Literal, Tuple
-from osgeo import ogr
 from rasterio.windows import Window
-from rasterio.warp import reproject
 from rasterio.enums import Resampling
-from .utils_multiprocessing import _create_windows
 from rasterio.features import geometry_mask
-from rasterio.transform import from_origin
-from rasterio.coords import BoundingBox
-from rasterio.warp import calculate_default_transform
+from rasterio.warp import calculate_default_transform, reproject
 from rasterio.coords import BoundingBox
 from multiprocessing import Pool, cpu_count, get_context
+
+from .types_and_validation import Universal
+from .utils_multiprocessing import _create_windows, _resolve_windows
 
 
 def merge_vectors(
@@ -122,6 +121,102 @@ def _merge_tile(
                 tile_data[b][mask] = temp[mask]
 
     return window, tile_data
+
+
+def align_rasters(
+    input_images: Universal.SearchFolderOrListFiles,
+    output_images: Universal.CreateInFolderOrListFiles,
+    *,
+    resampling_method: Literal["nearest", "bilinear", "cubic"] = "nearest",
+    tap: bool = False,
+    resolution: Literal["highest", "average", "lowest"] = "highest",
+    window_size: Universal.WindowSize = None,
+    debug_logs: Universal.DebugLogs = False,
+    ) -> None:
+    """
+    Aligns rasters to a common resolution and pixel alignment using reprojection.
+
+    Args:
+        input_images (Tuple[str, str] | List[str]): Input images as search tuple or list of paths.
+        output_images (Tuple[str, str] | List[str]): Output images as template or list of paths.
+        resampling_method (Literal["nearest", "bilinear", "cubic"]): Reprojection method.
+        tap (bool): Snap output bounds to aligned pixels.
+        resolution (Literal["highest", "average", "lowest"]): Strategy to determine target resolution.
+        window_size (int | Tuple[int, int] | Literal["internal"] | None): Tiling size.
+        debug_logs (bool): Print debug information if True.
+
+    Outputs:
+        Saves aligned rasters to output_images.
+    """
+
+    print("Start align rasters")
+
+    input_image_paths = _resolve_paths("search", input_images)
+    output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
+
+    if debug_logs:print(f"{len(input_image_paths)} rasters to align")
+
+    resolutions = []
+    crs_list = []
+    for path in input_image_paths:
+        with rasterio.open(path) as src:
+            resolutions.append(src.res)
+            crs_list.append(src.crs)
+    if len(set(crs_list)) > 1: raise ValueError("Input rasters must have the same CRS.")
+
+    res_arr = np.array(resolutions)
+    target_res = {
+        "highest": res_arr.min(axis=0),
+        "lowest": res_arr.max(axis=0),
+        "average": res_arr.mean(axis=0),
+    }[resolution]
+
+    if debug_logs: print(f"Target resolution: {target_res}")
+
+    for in_path, out_path in zip(input_image_paths, output_image_paths):
+        with rasterio.open(in_path) as src:
+            profile = src.profile.copy()
+
+            if tap:
+                res_x, res_y = target_res
+                minx = np.floor(src.bounds.left / res_x) * res_x
+                miny = np.floor(src.bounds.bottom / res_y) * res_y
+                maxx = np.ceil(src.bounds.right / res_x) * res_x
+                maxy = np.ceil(src.bounds.top / res_y) * res_y
+                dst_width = int((maxx - minx) / res_x)
+                dst_height = int((maxy - miny) / res_y)
+                dst_transform = rasterio.transform.from_origin(minx, maxy, res_x, res_y)
+            else:
+                dst_width, dst_height = src.width, src.height
+                dst_transform = src.transform
+
+            profile.update({
+                "height": dst_height,
+                "width": dst_width,
+                "transform": dst_transform
+            })
+
+            windows_src = _resolve_windows(src, window_size)
+            windows_dst = _resolve_windows(
+                dataset=type("FakeDS", (), {"width": dst_width, "height": dst_height, "transform": dst_transform, "block_windows": lambda _: [], "bounds": src.bounds})(),
+                window_size=window_size,
+            )
+
+            with rasterio.open(out_path, "w", **profile) as dst:
+                for src_win, dst_win in zip(windows_src, windows_dst):
+                    reproject(
+                        source=rasterio.band(src, list(range(1, src.count + 1))),
+                        destination=rasterio.band(dst, list(range(1, src.count + 1))),
+                        src_transform=src.window_transform(src_win),
+                        src_crs=src.crs,
+                        dst_transform=dst_transform,
+                        dst_crs=src.crs,
+                        src_nodata=src.nodata,
+                        dst_nodata=src.nodata,
+                        resampling=Resampling[resampling_method],
+                        src_window=src_win,
+                        dst_window=dst_win
+                    )
 
 
 def merge_rasters(
@@ -405,6 +500,37 @@ def mask_rasters(
         shutil.rmtree(temp_dir)
 
 
+def _resolve_paths(
+    mode: Literal["search", "create", "match"],
+    input: Universal.SearchFolderOrListFiles | Universal.CreateInFolderOrListFiles,
+    args: Tuple | None = None,
+) -> List[str]:
+    """
+    Resolves a list of input based on the mode and input format.
+
+    Args:
+        mode (Literal["search", "create", "match"]): Type of operation to perform.
+        input (Tuple[str, str] | List[str]): Either a list of file input or a tuple specifying folder/template info.
+        args (Tuple): Additional arguments passed to the called function.
+
+    Returns:
+        List[str]: List of resolved input.
+    """
+    if isinstance(input, list):
+        resolved = input
+    elif mode == "search":
+        resolved = search_paths(input[0], input[1], *(args or ()))
+    elif mode == "create":
+        resolved = create_paths(input[0], input[1], *(args or ()))
+    elif mode == "match":
+        resolved = match_paths(*(args or ()))
+    else: raise ValueError(f"Invalid mode: {mode}")
+
+    if len(resolved) == 0:
+        warnings.warn(f"No results found for paths.", RuntimeWarning)
+
+    return resolved
+
 def search_paths(
     folder_path: str,
     pattern: str,
@@ -440,7 +566,7 @@ def create_paths(
     paths_or_bases: List[str],
     debug_logs: bool = False,
     replace_symbol: str = "$",
-    create_folders: bool = False,
+    create_folders: bool = True,
     ) -> List[str]:
     """
     Create output paths using a filename template and a list of reference paths or names.

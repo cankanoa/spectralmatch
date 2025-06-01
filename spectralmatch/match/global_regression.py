@@ -16,7 +16,7 @@ from rasterio.features import geometry_mask
 from rasterio.coords import BoundingBox
 
 from ..utils import _check_raster_requirements, _get_nodata_value
-from ..handlers import create_paths, search_paths
+from ..handlers import _resolve_paths
 from ..utils_multiprocessing import _resolve_parallel_config, _resolve_windows, _get_executor, WorkerContext
 from ..types_and_validation import Universal, Match
 
@@ -101,20 +101,20 @@ def global_regression(
     )
 
     # Input and output paths
-    if isinstance(input_images, tuple): input_images = search_paths(*input_images)
-    if isinstance(output_images, tuple): output_images = create_paths(*output_images, input_images, create_folders=True)
+    input_image_paths = _resolve_paths("search", input_images)
+    output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
 
-    if debug_logs: print(f"Input images: {input_images}")
-    if debug_logs: print(f"Output images: {output_images}")
+    if debug_logs: print(f"Input images: {input_image_paths}")
+    if debug_logs: print(f"Output images: {output_image_paths}")
 
-    input_image_names = [os.path.splitext(os.path.basename(p))[0] for p in input_images]
-    input_image_paths = dict(zip(input_image_names, input_images))
-    output_image_paths = dict(zip(input_image_names, output_images))
+    input_image_names = [os.path.splitext(os.path.basename(p))[0] for p in input_image_paths]
+    input_image_path_pairs = dict(zip(input_image_names, input_image_paths))
+    output_image_path_pairs = dict(zip(input_image_names, output_image_paths))
 
     # Check raster requirements
-    _check_raster_requirements(list(input_image_paths.values()), debug_logs)
+    _check_raster_requirements(list(input_image_path_pairs.values()), debug_logs)
 
-    nodata_val = _get_nodata_value(list(input_image_paths.values()), custom_nodata_value)
+    nodata_val = _get_nodata_value(list(input_image_path_pairs.values()), custom_nodata_value)
 
     # Determine multiprocessing and worker count
     image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
@@ -158,11 +158,11 @@ def global_regression(
         else: print(f"    Excluded from model (0): []")
 
     if debug_logs: print("Calculating statistics")
-    with rasterio.open(list(input_image_paths.values())[0]) as src: num_bands = src.count
+    with rasterio.open(list(input_image_path_pairs.values())[0]) as src: num_bands = src.count
 
     # Get images bounds
     all_bounds = {}
-    for name, path in input_image_paths.items():
+    for name, path in input_image_path_pairs.items():
         with rasterio.open(path) as ds:
             all_bounds[name] = ds.bounds
 
@@ -173,11 +173,11 @@ def global_regression(
     # Load overlap stats
     if load_adjustments:
         for name_i, model_entry in loaded_model.items():
-            if name_i not in input_image_paths:
+            if name_i not in input_image_path_pairs:
                 continue
 
             for name_j, bands in model_entry.get("overlap_stats", {}).items():
-                if name_j not in input_image_paths:
+                if name_j not in input_image_path_pairs:
                     continue
 
                 all_overlap_stats.setdefault(name_i, {})[name_j] = {
@@ -195,8 +195,8 @@ def global_regression(
             window_max_workers,
             window_backend,
             num_bands,
-            input_image_paths[name_i],
-            input_image_paths[name_j],
+            input_image_path_pairs[name_i],
+            input_image_path_pairs[name_j],
             name_i,
             name_j,
             all_bounds[name_i],
@@ -234,7 +234,7 @@ def global_regression(
             }
             for k in loaded_model[name]["whole_stats"]
         }
-        for name in input_image_paths
+        for name in input_image_path_pairs
         if name in loaded_model
     }
 
@@ -252,7 +252,7 @@ def global_regression(
             window_size,
             debug_logs,
         )
-        for image_name, image_path in input_image_paths.items()
+        for image_name, image_path in input_image_path_pairs.items()
         if image_name not in loaded_model
     ]
 
@@ -300,7 +300,7 @@ def global_regression(
     if save_adjustments:
         _save_adjustments(
             save_path=save_adjustments,
-            input_image_names=list(input_image_paths.keys()),
+            input_image_names=list(input_image_path_pairs.keys()),
             all_params=all_params,
             all_whole_stats=all_whole_stats,
             all_overlap_stats=all_overlap_stats,
@@ -314,7 +314,7 @@ def global_regression(
         (
             name,
             img_path,
-            output_image_paths[name],
+            output_image_path_pairs[name],
             np.array([all_params[b, 2 * idx, 0] for b in range(num_bands)]),
             np.array([all_params[b, 2 * idx + 1, 0] for b in range(num_bands)]),
             num_bands,
@@ -327,7 +327,7 @@ def global_regression(
             window_max_workers,
             debug_logs,
         )
-        for idx, (name, img_path) in enumerate(input_image_paths.items())
+        for idx, (name, img_path) in enumerate(input_image_path_pairs.items())
     ]
 
     if image_parallel:
@@ -339,7 +339,7 @@ def global_regression(
         for args in parallel_args:
             _apply_global_adjustments_for_image(*args)
 
-    return output_images
+    return output_image_paths
 
 
 def solve_global_model(
