@@ -228,10 +228,10 @@ def local_block_adjustment(
 
         if image_parallel:
             with _get_executor(image_backend, image_max_workers) as executor:
-                futures = [executor.submit(_compute_local_blocks_single, *arg) for arg in args]
+                futures = [executor.submit(_calculate_block_process_image, *arg) for arg in args]
                 results = [f.result() for f in futures]
         else:
-            results = [_compute_local_blocks_single(*arg) for arg in args]
+            results = [_calculate_block_process_image(*arg) for arg in args]
 
         block_local_means = {name: mean for name, mean, _ in results}
 
@@ -317,12 +317,12 @@ def local_block_adjustment(
 
     if image_parallel:
         with _get_executor(image_backend, image_max_workers) as executor:
-            futures = [executor.submit(_process_output_image, *arg) for arg in args]
+            futures = [executor.submit(_apply_adjustment_process_image, *arg) for arg in args]
             for future in as_completed(futures):
                 future.result()
     else:
         for arg in args:
-            _process_output_image(*arg)
+            _apply_adjustment_process_image(*arg)
 
     return output_image_paths
 
@@ -580,7 +580,7 @@ def _compute_reference_blocks(
     return ref_block_mean
 
 
-def _process_output_image(
+def _apply_adjustment_process_image(
     name: str,
     img_path: str,
     out_path: str,
@@ -657,7 +657,7 @@ def _process_output_image(
                             f"block_loc_mean_{name}": ("array", loc_shm.name, block_local_mean.shape, block_local_mean.dtype.name),
                         },)
                     ) as executor:
-                        futures = [executor.submit(_compute_tile_local, *arg) for arg in args]
+                        futures = [executor.submit(_apply_adjustment_process_window, *arg) for arg in args]
                         for fut in as_completed(futures):
                             win, b_idx, buf = fut.result()
                             dst.write(np.nan_to_num(buf, nan=nodata_val).astype(output_dtype), b_idx + 1, window=win)
@@ -671,12 +671,12 @@ def _process_output_image(
                         f"block_loc_mean_{name}": ("value", block_local_mean),
                     })
                     for arg in args:
-                        win, b_idx, buf = _compute_tile_local(*arg)
+                        win, b_idx, buf = _apply_adjustment_process_window(*arg)
                         dst.write(buf.astype(output_dtype), b_idx + 1, window=win)
                     WorkerContext.close()
 
 
-def _compute_tile_local(
+def _apply_adjustment_process_window(
     name: str,
     window: Window,
     band_idx: int,
@@ -836,7 +836,7 @@ def _compute_mosaic_coefficient_of_variation(
     return max(1, int(round(r * m))), max(1, int(round(r * n)))
 
 
-def _compute_local_blocks_single(
+def _calculate_block_process_image(
     name: str,
     image_path: str,
     bounds_canvas_coords: Tuple[float, float, float, float],
@@ -905,7 +905,7 @@ def _compute_local_blocks_single(
         for band_index in range(num_bands):
             args = [
                 (
-                    dataset.name,
+                    dataset,
                     band_index,
                     window,
                     geoms,
@@ -921,7 +921,7 @@ def _compute_local_blocks_single(
 
             if parallel:
                 with _get_executor(backend, max_workers) as executor:
-                    futures = [executor.submit(_process_local_block_window, *arg) for arg in args]
+                    futures = [executor.submit(_calculate_block_process_window, *arg) for arg in args]
                     for result in futures:
                         if (res := result.result()) is not None:
                             value_sum, value_count = res
@@ -929,7 +929,7 @@ def _compute_local_blocks_single(
                             block_pixel_count[:, :, band_index] += value_count
             else:
                 for arg in args:
-                    result = _process_local_block_window(*arg)
+                    result = _calculate_block_process_window(*arg)
                     if result is not None:
                         value_sum, value_count = result
                         block_value_sum[:, :, band_index] += value_sum
@@ -945,8 +945,8 @@ def _compute_local_blocks_single(
     return name, block_mean_array, block_pixel_count
 
 
-def _process_local_block_window(
-    dataset_path: str,
+def _calculate_block_process_window(
+    dataset,
     band_index: int,
     window: Window,
     geoms: Optional[list],
@@ -956,51 +956,51 @@ def _process_local_block_window(
     transform,
     block_shape: Tuple[int, int],
     bounds_canvas_coords: Tuple[float, float, float, float],
-) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
     """
     Processes a tile window and returns block-wise sums and counts.
 
     Returns:
         Tuple[np.ndarray, np.ndarray]: Arrays of shape (num_row, num_col) with sums and counts.
     """
+
     num_row, num_col = block_shape
     x_min, y_min, x_max, y_max = bounds_canvas_coords
     block_width = (x_max - x_min) / num_col
     block_height = (y_max - y_min) / num_row
 
-    with rasterio.open(dataset_path) as dataset:
-        tile_data = dataset.read(band_index + 1, window=window).astype(calculation_dtype)
+    tile_data = dataset.read(band_index + 1, window=window).astype(calculation_dtype)
 
-        if geoms:
-            tile_transform = dataset.window_transform(window)
-            mask = geometry_mask(
-                geoms, transform=tile_transform, invert=not invert, out_shape=(int(window.height), int(window.width))
-            )
-            tile_data[~mask] = nodata_value
+    if geoms:
+        tile_transform = dataset.window_transform(window)
+        mask = geometry_mask(
+            geoms, transform=tile_transform, invert=not invert, out_shape=(int(window.height), int(window.width))
+        )
+        tile_data[~mask] = nodata_value
 
-        valid_mask = tile_data != nodata_value
-        valid_rows, valid_cols = np.where(valid_mask)
-        if valid_rows.size == 0:
-            return None
+    valid_mask = tile_data != nodata_value
+    valid_rows, valid_cols = np.where(valid_mask)
+    if valid_rows.size == 0:
+        return None
 
-        pixel_x = window.col_off + valid_cols + 0.5
-        pixel_y = window.row_off + valid_rows + 0.5
-        coords_x, coords_y = dataset.transform * (pixel_x, pixel_y)
-        coords_x = np.array(coords_x)
-        coords_y = np.array(coords_y)
+    pixel_x = window.col_off + valid_cols + 0.5
+    pixel_y = window.row_off + valid_rows + 0.5
+    coords_x, coords_y = dataset.transform * (pixel_x, pixel_y)
+    coords_x = np.array(coords_x)
+    coords_y = np.array(coords_y)
 
-        col_blocks = np.clip(((coords_x - x_min) / block_width).astype(int), 0, num_col - 1)
-        row_blocks = np.clip(((y_max - coords_y) / block_height).astype(int), 0, num_row - 1)
+    col_blocks = np.clip(((coords_x - x_min) / block_width).astype(int), 0, num_col - 1)
+    row_blocks = np.clip(((y_max - coords_y) / block_height).astype(int), 0, num_row - 1)
 
-        pixel_values = tile_data[valid_rows, valid_cols]
+    pixel_values = tile_data[valid_rows, valid_cols]
 
-        value_sum = np.zeros((num_row, num_col), dtype=calculation_dtype)
-        value_count = np.zeros((num_row, num_col), dtype=calculation_dtype)
+    value_sum = np.zeros((num_row, num_col), dtype=calculation_dtype)
+    value_count = np.zeros((num_row, num_col), dtype=calculation_dtype)
 
-        np.add.at(value_sum, (row_blocks, col_blocks), pixel_values)
-        np.add.at(value_count, (row_blocks, col_blocks), 1)
+    np.add.at(value_sum, (row_blocks, col_blocks), pixel_values)
+    np.add.at(value_count, (row_blocks, col_blocks), 1)
 
-        return value_sum, value_count
+    return value_sum, value_count
 
 
 def _weighted_bilinear_interpolation(

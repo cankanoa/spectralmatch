@@ -213,14 +213,14 @@ def global_regression(
 
     if image_parallel:
         with _get_executor(image_backend, image_max_workers) as executor:
-            futures = [executor.submit(_calculate_overlap_stats, *args) for args in parallel_args]
+            futures = [executor.submit(_overlap_stats_process_image, *args) for args in parallel_args]
             for future in as_completed(futures):
                 stats = future.result()
                 for outer, inner in stats.items():
                     all_overlap_stats.setdefault(outer, {}).update(inner)
     else:
         for args in parallel_args:
-            stats = _calculate_overlap_stats(*args)
+            stats = _overlap_stats_process_image(*args)
             for outer, inner in stats.items():
                 all_overlap_stats.setdefault(outer, {}).update(inner)
 
@@ -259,13 +259,13 @@ def global_regression(
     # Compute whole stats
     if image_parallel:
         with _get_executor(image_backend, image_max_workers) as executor:
-            futures = [executor.submit(_calculate_whole_stats, *args) for args in parallel_args]
+            futures = [executor.submit(_whole_stats_process_image, *args) for args in parallel_args]
             for future in as_completed(futures):
                 result = future.result()
                 all_whole_stats.update(result)
     else:
         for args in parallel_args:
-            result = _calculate_whole_stats(*args)
+            result = _whole_stats_process_image(*args)
             all_whole_stats.update(result)
 
     # Get image names
@@ -332,12 +332,12 @@ def global_regression(
 
     if image_parallel:
         with _get_executor(image_backend, image_max_workers) as executor:
-            futures = [executor.submit(_apply_global_adjustments_for_image, *args) for args in parallel_args]
+            futures = [executor.submit(_apply_adjustments_process_image, *args) for args in parallel_args]
             for future in as_completed(futures):
                 future.result()
     else:
         for args in parallel_args:
-            _apply_global_adjustments_for_image(*args)
+            _apply_adjustments_process_image(*args)
 
     return output_image_paths
 
@@ -437,7 +437,7 @@ def solve_global_model(
     return all_params
 
 
-def _apply_global_adjustments_for_image(
+def _apply_adjustments_process_image(
     image_name: str,
     input_image_path: str,
     output_image_path: str,
@@ -494,14 +494,14 @@ def _apply_global_adjustments_for_image(
                             initializer=WorkerContext.init,
                             initargs=({image_name: ("raster", input_image_path)},)
                     ) as executor:
-                        futures = [executor.submit(_process_tile_global, *arg) for arg in args]
+                        futures = [executor.submit(_apply_adjustments_process_window, *arg) for arg in args]
                         for future in as_completed(futures):
                             band, window, buf = future.result()
                             dst.write(buf.astype(meta["dtype"]), band + 1, window=window)
                 else:
                     WorkerContext.init({image_name: ("raster", input_image_path)})
                     for arg in args:
-                        band, window, buf = _process_tile_global(*arg)
+                        band, window, buf = _apply_adjustments_process_window(*arg)
                         dst.write(buf.astype(meta["dtype"]), band + 1, window=window)
                     WorkerContext.close()
 
@@ -651,7 +651,7 @@ def _validate_adjustment_model_structure(model: dict) -> None:
     print("Loaded adjustments structure passed validation")
 
 
-def _process_tile_global(
+def _apply_adjustments_process_window(
     window: Window,
     band_idx: int,
     a: float,
@@ -782,7 +782,7 @@ def _find_overlaps(
     return tuple(overlaps)
 
 
-def _calculate_overlap_stats(
+def _overlap_stats_process_image(
     parallel: bool,
     max_workers: int,
     backend: str,
@@ -822,7 +822,6 @@ def _calculate_overlap_stats(
                 else:
                     geoms_i = geoms_j = [f["geometry"] for f in features]
 
-
         # Determine overlap bounds
         x_min = max(bound_i.left, bound_j.left)
         x_max = min(bound_i.right, bound_j.right)
@@ -848,13 +847,13 @@ def _calculate_overlap_stats(
                 with _get_executor(backend, max_workers) as executor:
                     futures = [
                         executor.submit(
-                            _process_overlap_window,
+                            _overlap_stats_process_window,
                             win,
                             band,
                             col_min_i,
                             row_min_i,
-                            input_image_path_i,
-                            input_image_path_j,
+                            src_i,
+                            src_j,
                             nodata_i,
                             nodata_j,
                             geoms_i,
@@ -870,13 +869,13 @@ def _calculate_overlap_stats(
                             combined_pixels_j.append(result[1])
             else:
                 for win in fit_windows_image_i:
-                    result = _process_overlap_window(
+                    result = _overlap_stats_process_window(
                         win,
                         band,
                         col_min_i,
                         row_min_i,
-                        input_image_path_i,
-                        input_image_path_j,
+                        src_i,
+                        src_j,
                         nodata_i,
                         nodata_j,
                         geoms_i,
@@ -903,13 +902,13 @@ def _calculate_overlap_stats(
     return stats
 
 
-def _process_overlap_window(
+def _overlap_stats_process_window(
     win: Window,
     band: int,
     col_min_i: int,
     row_min_i: int,
-    src_i_path: str,
-    src_j_path: str,
+    src_i,
+    src_j,
     nodata_i: float,
     nodata_j: float,
     geoms_i: list | None,
@@ -917,38 +916,40 @@ def _process_overlap_window(
     invert: bool,
     interpolation_method: int = cv2.INTER_LINEAR,
     ) -> tuple[np.ndarray, np.ndarray] | None:
-    with rasterio.open(src_i_path) as src_i, rasterio.open(src_j_path) as src_j:
-        win_i = Window(col_min_i + win.col_off, row_min_i + win.row_off, win.width, win.height)
-        bounds = src_i.window_bounds(win_i)
-        win_j = rasterio.windows.from_bounds(*bounds, transform=src_j.transform)
 
-        block_i = src_i.read(band + 1, window=win_i)
-        block_j = src_j.read(band + 1, window=win_j, boundless=True, fill_value=nodata_j)
+    win_i = Window(col_min_i + win.col_off, row_min_i + win.row_off, win.width, win.height)
+    bounds = src_i.window_bounds(win_i)
+    win_j = rasterio.windows.from_bounds(*bounds, transform=src_j.transform)
 
-        if np.all(block_i == nodata_i) or np.all(block_j == nodata_j):
-            return None
+    block_i = src_i.read(band + 1, window=win_i)
+    block_j = src_j.read(band + 1, window=win_j, boundless=True, fill_value=nodata_j)
 
-        if geoms_i:
-            transform_i_win = src_i.window_transform(win_i)
-            mask_i = geometry_mask(geoms_i, transform=transform_i_win, invert=not invert, out_shape=block_i.shape)
-            block_i[~mask_i] = nodata_i
+    if np.all(block_i == nodata_i) or np.all(block_j == nodata_j):
+        return None
 
-        if geoms_j:
-            transform_j_win = src_j.window_transform(win_j)
-            mask_j = geometry_mask(geoms_j, transform=transform_j_win, invert=not invert, out_shape=block_j.shape)
-            block_j[~mask_j] = nodata_j
+    if geoms_i:
+        transform_i_win = src_i.window_transform(win_i)
+        mask_i = geometry_mask(geoms_i, transform=transform_i_win, invert=not invert, out_shape=block_i.shape)
+        block_i[~mask_i] = nodata_i
 
-        if block_j.shape != block_i.shape:
-            block_j = cv2.resize(
-                block_j,
-                (block_i.shape[1], block_i.shape[0]),
-                interpolation=interpolation_method
-            )
-        if block_j.shape != block_i.shape: raise ValueError(f"Block size mismatch after interpolation: block_i={block_i.shape}, block_j={block_j.shape}")
+    if geoms_j:
+        transform_j_win = src_j.window_transform(win_j)
+        mask_j = geometry_mask(geoms_j, transform=transform_j_win, invert=not invert, out_shape=block_j.shape)
+        block_j[~mask_j] = nodata_j
 
-        valid = (block_i != nodata_i) & (block_j != nodata_j)
-        if np.any(valid):
-            return block_i[valid], block_j[valid]
+    if block_j.shape != block_i.shape:
+        block_j = cv2.resize(
+            block_j,
+            (block_i.shape[1], block_i.shape[0]),
+            interpolation=interpolation_method
+        )
+    if block_j.shape != block_i.shape:
+        raise ValueError(f"Block size mismatch after interpolation: block_i={block_i.shape}, block_j={block_j.shape}")
+
+    valid = (block_i != nodata_i) & (block_j != nodata_j)
+    if np.any(valid):
+        return block_i[valid], block_j[valid]
+
     return None
 
 
@@ -1005,7 +1006,7 @@ def _fit_windows_to_pixel_bounds(
     return adjusted_windows
 
 
-def _calculate_whole_stats(
+def _whole_stats_process_image(
     parallel: bool,
     max_workers: int,
     backend: str,
@@ -1050,10 +1051,10 @@ def _calculate_whole_stats(
                 with _get_executor(backend, max_workers) as executor:
                     futures = [
                         executor.submit(
-                            _process_window_for_whole_stats,
+                            _whole_stats_process_window,
                             win,
                             band_idx,
-                            input_image_path,
+                            data,
                             nodata,
                             geoms,
                             invert,
@@ -1064,10 +1065,10 @@ def _calculate_whole_stats(
             else:
                 all_values = []
                 for win in windows:
-                    values = _process_window_for_whole_stats(
+                    values = _whole_stats_process_window(
                         win,
                         band_idx,
-                        input_image_path,
+                        data,
                         nodata,
                         geoms,
                         invert,
@@ -1094,24 +1095,23 @@ def _calculate_whole_stats(
     return stats
 
 
-def _process_window_for_whole_stats(
+def _whole_stats_process_window(
     win: Window,
     band_idx: int,
-    input_image_path: str,
+    data,
     nodata: int | float,
     geoms: list | None,
     invert: bool,
 ) -> np.ndarray | None:
-    with rasterio.open(input_image_path) as data:
-        block = data.read(band_idx + 1, window=win)
-        if geoms:
-            transform = data.window_transform(win)
-            mask = geometry_mask(
-                geoms,
-                transform=transform,
-                invert=not invert,
-                out_shape=(int(win.height), int(win.width)),
-            )
-            block[~mask] = nodata
-        valid = block != nodata
-        return block[valid] if np.any(valid) else None
+    block = data.read(band_idx + 1, window=win)
+    if geoms:
+        transform = data.window_transform(win)
+        mask = geometry_mask(
+            geoms,
+            transform=transform,
+            invert=not invert,
+            out_shape=(int(win.height), int(win.width)),
+        )
+        block[~mask] = nodata
+    valid = block != nodata
+    return block[valid] if np.any(valid) else None
