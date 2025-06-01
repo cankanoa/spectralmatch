@@ -843,48 +843,50 @@ def _overlap_stats_process_image(
         for band in range(num_bands):
             combined_pixels_i, combined_pixels_j = [], []
 
+            args = [
+                (
+                    win,
+                    band,
+                    col_min_i,
+                    row_min_i,
+                    name_i,
+                    name_j,
+                    nodata_i,
+                    nodata_j,
+                    geoms_i,
+                    geoms_j,
+                    invert,
+                )
+                for win in fit_windows_image_i
+            ]
+
             if parallel:
-                with _get_executor(backend, max_workers) as executor:
-                    futures = [
-                        executor.submit(
-                            _overlap_stats_process_window,
-                            win,
-                            band,
-                            col_min_i,
-                            row_min_i,
-                            src_i,
-                            src_j,
-                            nodata_i,
-                            nodata_j,
-                            geoms_i,
-                            geoms_j,
-                            invert,
-                        )
-                        for win in fit_windows_image_i
-                    ]
+                with _get_executor(
+                    backend,
+                    max_workers,
+                    initializer=WorkerContext.init,
+                    initargs=({
+                        name_i: ("raster", input_image_path_i),
+                        name_j: ("raster", input_image_path_j)
+                    },)
+                ) as executor:
+                    futures = [executor.submit(_overlap_stats_process_window, *arg) for arg in args]
                     for future in as_completed(futures):
                         result = future.result()
                         if result is not None:
                             combined_pixels_i.append(result[0])
                             combined_pixels_j.append(result[1])
             else:
-                for win in fit_windows_image_i:
-                    result = _overlap_stats_process_window(
-                        win,
-                        band,
-                        col_min_i,
-                        row_min_i,
-                        src_i,
-                        src_j,
-                        nodata_i,
-                        nodata_j,
-                        geoms_i,
-                        geoms_j,
-                        invert,
-                    )
+                WorkerContext.init({
+                    name_i: ("raster", input_image_path_i),
+                    name_j: ("raster", input_image_path_j)
+                })
+                for arg in args:
+                    result = _overlap_stats_process_window(*arg)
                     if result is not None:
                         combined_pixels_i.append(result[0])
                         combined_pixels_j.append(result[1])
+                WorkerContext.close()
 
             v_i = np.concatenate(combined_pixels_i) if combined_pixels_i else np.array([])
             v_j = np.concatenate(combined_pixels_j) if combined_pixels_j else np.array([])
@@ -907,8 +909,8 @@ def _overlap_stats_process_window(
     band: int,
     col_min_i: int,
     row_min_i: int,
-    src_i,
-    src_j,
+    name_i: str,
+    name_j: str,
     nodata_i: float,
     nodata_j: float,
     geoms_i: list | None,
@@ -916,6 +918,8 @@ def _overlap_stats_process_window(
     invert: bool,
     interpolation_method: int = cv2.INTER_LINEAR,
     ) -> tuple[np.ndarray, np.ndarray] | None:
+    src_i = WorkerContext.get(name_i)
+    src_j = WorkerContext.get(name_j)
 
     win_i = Window(col_min_i + win.col_off, row_min_i + win.row_off, win.width, win.height)
     bounds = src_i.window_bounds(win_i)
@@ -1047,34 +1051,28 @@ def _whole_stats_process_image(
         for band_idx in range(num_bands):
             windows = _resolve_windows(data, window_size)
 
+            args = [
+                (win, band_idx, image_name, nodata, geoms, invert)
+                for win in windows
+            ]
+
             if parallel:
-                with _get_executor(backend, max_workers) as executor:
-                    futures = [
-                        executor.submit(
-                            _whole_stats_process_window,
-                            win,
-                            band_idx,
-                            data,
-                            nodata,
-                            geoms,
-                            invert,
-                        )
-                        for win in windows
-                    ]
+                with _get_executor(
+                    backend,
+                    max_workers,
+                    initializer=WorkerContext.init,
+                    initargs=({image_name: ("raster", input_image_path)},)
+                ) as executor:
+                    futures = [executor.submit(_whole_stats_process_window, *arg) for arg in args]
                     all_values = [f.result() for f in as_completed(futures) if f.result() is not None]
             else:
+                WorkerContext.init({image_name: ("raster", input_image_path)})
                 all_values = []
-                for win in windows:
-                    values = _whole_stats_process_window(
-                        win,
-                        band_idx,
-                        data,
-                        nodata,
-                        geoms,
-                        invert,
-                    )
+                for arg in args:
+                    values = _whole_stats_process_window(*arg)
                     if values is not None:
                         all_values.append(values)
+                WorkerContext.close()
 
             if all_values:
                 stacked = np.concatenate(all_values)
@@ -1098,11 +1096,13 @@ def _whole_stats_process_image(
 def _whole_stats_process_window(
     win: Window,
     band_idx: int,
-    data,
+    image_name: str,
     nodata: int | float,
     geoms: list | None,
     invert: bool,
-) -> np.ndarray | None:
+    ) -> np.ndarray | None:
+
+    data = WorkerContext.get(image_name)
     block = data.read(band_idx + 1, window=win)
     if geoms:
         transform = data.window_transform(win)

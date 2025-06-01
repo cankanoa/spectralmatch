@@ -852,13 +852,8 @@ def _calculate_block_process_image(
     parallel: bool,
     backend: Literal["thread", "process"],
     max_workers: int,
-) -> Tuple[str, np.ndarray, np.ndarray]:
-    """
-    Computes local block-wise mean values and valid pixel counts for a single input image.
+    ) -> Tuple[str, np.ndarray, np.ndarray]:
 
-    Returns:
-        Tuple (name, block_mean_array, block_pixel_count_array)
-    """
     if debug_logs: print(f'    {name}')
 
     x_min, y_min, x_max, y_max = bounds_canvas_coords
@@ -905,9 +900,9 @@ def _calculate_block_process_image(
         for band_index in range(num_bands):
             args = [
                 (
-                    dataset,
                     band_index,
                     window,
+                    name,
                     geoms,
                     invert,
                     nodata_value,
@@ -920,7 +915,12 @@ def _calculate_block_process_image(
             ]
 
             if parallel:
-                with _get_executor(backend, max_workers) as executor:
+                with _get_executor(
+                    backend,
+                    max_workers,
+                    initializer=WorkerContext.init,
+                    initargs=({name: ("raster", image_path)},)
+                ) as executor:
                     futures = [executor.submit(_calculate_block_process_window, *arg) for arg in args]
                     for result in futures:
                         if (res := result.result()) is not None:
@@ -928,12 +928,14 @@ def _calculate_block_process_image(
                             block_value_sum[:, :, band_index] += value_sum
                             block_pixel_count[:, :, band_index] += value_count
             else:
+                WorkerContext.init({name: ("raster", image_path)})
                 for arg in args:
                     result = _calculate_block_process_window(*arg)
                     if result is not None:
                         value_sum, value_count = result
                         block_value_sum[:, :, band_index] += value_sum
                         block_pixel_count[:, :, band_index] += value_count
+                WorkerContext.close()
 
     with np.errstate(invalid='ignore', divide='ignore'):
         block_mean_array = np.where(
@@ -946,9 +948,9 @@ def _calculate_block_process_image(
 
 
 def _calculate_block_process_window(
-    dataset,
     band_index: int,
     window: Window,
+    name: str,
     geoms: Optional[list],
     invert: bool,
     nodata_value: float,
@@ -957,18 +959,13 @@ def _calculate_block_process_window(
     block_shape: Tuple[int, int],
     bounds_canvas_coords: Tuple[float, float, float, float],
     ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
-    """
-    Processes a tile window and returns block-wise sums and counts.
-
-    Returns:
-        Tuple[np.ndarray, np.ndarray]: Arrays of shape (num_row, num_col) with sums and counts.
-    """
 
     num_row, num_col = block_shape
     x_min, y_min, x_max, y_max = bounds_canvas_coords
     block_width = (x_max - x_min) / num_col
     block_height = (y_max - y_min) / num_row
 
+    dataset = WorkerContext.get(name)
     tile_data = dataset.read(band_index + 1, window=window).astype(calculation_dtype)
 
     if geoms:
