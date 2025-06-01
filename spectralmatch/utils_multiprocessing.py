@@ -37,17 +37,31 @@ def _resolve_parallel_config(
     return True, backend, max_workers
 
 
-def _get_executor(backend: str, max_workers: int, initializer=None, initargs=None):
+def _get_executor(
+    backend: str,
+    max_workers: int,
+    initializer: Optional[Callable] = None,
+    initargs: Optional[tuple] = None,
+):
+    """
+    Returns a ThreadPoolExecutor or ProcessPoolExecutor depending on the backend.
+    Automatically handles initializer differences between thread and process pools.
+    """
+
     if backend == "process":
         return ProcessPoolExecutor(
             max_workers=max_workers,
             initializer=initializer,
-            initargs=initargs or ()
+            initargs=initargs or (),
+            mp_context=_choose_context(),
         )
+
     elif backend == "thread":
-        if initializer is not None and initargs is not None:
-            initializer(*initargs)
+        if initializer is not None:
+            # Run initializer immediately in the main thread for all worker threads to share context
+            initializer(*(initargs or ()))
         return ThreadPoolExecutor(max_workers=max_workers)
+
     else:
         raise ValueError(f"Unsupported backend: {backend}")
 

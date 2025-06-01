@@ -19,7 +19,7 @@ from multiprocessing import Pool, cpu_count, get_context
 from concurrent.futures import as_completed
 
 from .types_and_validation import Universal
-from .utils_multiprocessing import _create_windows, _resolve_windows, _get_executor
+from .utils_multiprocessing import _create_windows, _resolve_windows, _get_executor, WorkerContext
 
 
 def merge_vectors(
@@ -236,37 +236,56 @@ def _align_process_image(
         with rasterio.open(out_path, "w", **profile) as dst:
             window_args = [
                 (
-                    src,
-                    dst,
                     src_win,
                     dst_win,
                     dst_transform,
-                    resampling_method
+                    resampling_method,
+                    "src_key",
+                    (dst_win.height, dst_win.width),
+                    debug_logs,
                 )
                 for src_win, dst_win in zip(windows_src, windows_dst)
             ]
 
-            if window_parallel and window_parallel[0] == "thread":
-                with _get_executor(*window_parallel) as executor:
-                    futures = [executor.submit(_align_process_window, *args) for args in window_args]
-                    for future in as_completed(futures):
-                        future.result()
-            else:
-                for args in window_args:
-                    _align_process_window(*args)
+            parallel = window_parallel is not None
+            backend, max_workers = (window_parallel or (None, None))[0:2]
 
+            if parallel and backend == "process":
+                with _get_executor(
+                        backend,
+                        max_workers,
+                        initializer=WorkerContext.init,
+                        initargs=({"src_key": ("raster", in_path)},)
+                ) as executor:
+                    futures = [executor.submit(_align_process_window, *args) for args in window_args]
+                    for args, future in zip(window_args, futures):
+                        buf = future.result()
+                        dst.write(buf, window=args[1])
+                WorkerContext.close()
+            else:
+                WorkerContext.init({"src_key": ("raster", in_path)})
+                for args in window_args:
+                    buf = _align_process_window(*args)
+                    dst.write(buf, window=args[1])
+                WorkerContext.close()
 
 def _align_process_window(
-        src,
-        dst,
-        src_win: Window,
-        dst_win: Window,
-        dst_transform,
-        resampling_method: str,
-):
+    src_win: Window,
+    dst_win: Window,
+    dst_transform,
+    resampling_method: str,
+    src_key: str,
+    dst_shape: Tuple[int, int],
+    debug_logs: bool = False,
+    ) -> np.ndarray:
+
+    src = WorkerContext.get(src_key)
+    num_bands = src.count
+    dst_buffer = np.empty((num_bands, dst_shape[0], dst_shape[1]), dtype=src.dtypes[0])
+
     reproject(
-        source=rasterio.band(src, list(range(1, src.count + 1))),
-        destination=rasterio.band(dst, list(range(1, src.count + 1))),
+        source=rasterio.band(src, list(range(1, num_bands + 1))),
+        destination=dst_buffer,
         src_transform=src.window_transform(src_win),
         src_crs=src.crs,
         dst_transform=dst_transform,
@@ -275,8 +294,10 @@ def _align_process_window(
         dst_nodata=src.nodata,
         resampling=Resampling[resampling_method],
         src_window=src_win,
-        dst_window=dst_win
+        dst_window=Window(0, 0, dst_shape[1], dst_shape[0]),
     )
+
+    return dst_buffer
 
 
 def merge_rasters(
