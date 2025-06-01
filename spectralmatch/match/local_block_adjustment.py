@@ -17,27 +17,28 @@ from multiprocessing import shared_memory
 from ..utils import _check_raster_requirements, _get_nodata_value
 from ..handlers import create_paths, search_paths
 from ..utils_multiprocessing import _resolve_parallel_config, _resolve_windows, _get_executor, WorkerContext, file_lock
+from ..types_and_validation import Universal, Match
 
 
 def local_block_adjustment(
-    input_images: Tuple[str, str] | List[str],
-    output_images: Tuple[str, str] | List[str],
+    input_images: Universal.SearchFolderOrListFiles,
+    output_images: Universal.CreateInFolderOrListFiles,
     *,
-    custom_nodata_value: float | int | None = None,
+    calculation_dtype: Universal.CalculationDtype = "float32",
+    output_dtype: Universal.OutputDtype = None,
+    vector_mask: Universal.VectorMask = None,
+    debug_logs: Universal.DebugLogs = False,
+    custom_nodata_value: Universal.CustomNodataValue = None,
+    image_parallel_workers: Universal.ImageParallelWorkers = None,
+    window_parallel_workers: Universal.WindowParallelWorkers = None,
+    window_size: Universal.WindowSizeWithBlock = None,
+    save_as_cog: Universal.SaveAsCog = False,
     number_of_blocks: int | Tuple[int, int] | Literal["coefficient_of_variation"] = 100,
     alpha: float = 1.0,
-    calculation_dtype: str = "float32",
-    output_dtype: str | None = None,
-    debug_logs: bool = False,
-    window_size: int | Tuple[int, int] | Literal["block"] | None = None,
-    save_as_cog: bool = False,
     correction_method: Literal["gamma", "linear"] = "gamma",
-    image_parallel_workers: Tuple[Literal["process"], Literal["cpu"] | int] | None = None,
-    window_parallel_workers: Tuple[Literal["process"], Literal["cpu"] | int] | None = None,
     save_block_maps: Tuple[str, str] | None = None,
     load_block_maps: Tuple[str, List[str]] | Tuple[str, None]| Tuple[None, List[str]] | None = None,
     override_bounds_canvas_coords: Tuple[float, float, float, float] | None = None,
-    vector_mask: Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None = None,
     block_valid_pixel_threshold: float = 0.001,
     )-> list:
     """
@@ -52,17 +53,18 @@ def local_block_adjustment(
             Specifies how output filenames are generated or provided:
             - A tuple with an output folder and a filename template using "$" as a placeholder for each input image's basename (e.g., ("/output/folder", "$_LocalMatch.tif")).
             - A list of full output paths, which must match the number of input images.
-        custom_nodata_value (float | int | None, optional): Overrides detected NoData value. Defaults to None.
-        number_of_blocks (int | tuple | Literal["coefficient_of_variation"]): int as a target of blocks per image, tuple to set manually set total blocks width and height, coefficient_of_variation to find the number of blocks based on this metric.
-        alpha (float, optional): Blending factor between reference and local means. Defaults to 1.0.
         calculation_dtype (str, optional): Precision for internal calculations. Defaults to "float32".
         output_dtype (str | None, optional): Data type for output rasters. Defaults to input image dtype.
+        vector_mask (Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None): A mask limiting pixels to include when calculating stats for each block in the format of a tuple with two or three items: literal "include" or "exclude" the mask area, str path to the vector file, optional str of field name in vector file that *includes* (can be substring) input image name to filter geometry by. It is only applied when calculating local blocks, as the reference map is calculated as the mean of all local blocks. Loaded block maps won't have this applied unless it was used when calculating them. The matching solution is still applied to these areas in the output. Defaults to None for no mask.
         debug_logs (bool, optional): If True, prints progress. Defaults to False.
+        custom_nodata_value (float | int | None, optional): Overrides detected NoData value. Defaults to None.
+        image_parallel_workers (Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None): Parallelization strategy at the image level. Provide a tuple like ("process", "cpu") to use multiprocessing with all available cores. Threads are supported too. Set to None to disable.
+        window_parallel_workers (Tuple[Literal["process"], Literal["cpu"] | int] | None = None): Parallelization strategy at the window level within each image. Same format as image_parallel_workers. Threads are not supported. Set to None to disable.
         window_size (int | Tuple[int, int] | Literal["block"] | None): Tile size for processing: int for square tiles, (width, height) for custom size, or "block" to set as the size of the block map, None for full image. Defaults to None.
         save_as_cog (bool, optional): If True, saves as COG. Defaults to False.
+        number_of_blocks (int | tuple | Literal["coefficient_of_variation"]): int as a target of blocks per image, tuple to set manually set total blocks width and height, coefficient_of_variation to find the number of blocks based on this metric.
+        alpha (float, optional): Blending factor between reference and local means. Defaults to 1.0.
         correction_method (Literal["gamma", "linear"], optional): Local correction method. Defaults to "gamma".
-        image_parallel_workers (Tuple[Literal["process"], Literal["cpu"] | int] | None = None): Parallelization strategy at the image level. Provide a tuple like ("process", "cpu") to use multiprocessing with all available cores. Threads are not supported. Set to None to disable.
-        window_parallel_workers (Tuple[Literal["process"], Literal["cpu"] | int] | None = None): Parallelization strategy at the window level within each image. Same format as image_parallel_workers. Threads are not supported. Set to None to disable.
         save_block_maps (tuple(str, str) | None): If enabled, saves block maps for review, to resume processing later, or to add additional images to the reference map.
             - First str is the path to save the global block map.
             - Second str is the path to save the local block maps, which must include "$" which will be replaced my the image name (because there are multiple local maps).
@@ -78,7 +80,6 @@ def local_block_adjustment(
                 - The reference map defines the reference block statistics and the local maps define per-image local block statistics.
                 - Both reference and local maps must have the same canvas extent and dimensions which will be used to set those values.
         override_bounds_canvas_coords (Tuple[float, float, float, float] | None): Manually set (min_x, min_y, max_x, max_y) bounds to override the computed/loaded canvas extent. If you wish to have a larger extent than the current images, you can manually set this, along with setting a fixed number of blocks, to anticipate images will expand beyond the current extent.
-        vector_mask (Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None): A mask limiting pixels to include when calculating stats for each block in the format of a tuple with two or three items: literal "include" or "exclude" the mask area, str path to the vector file, optional str of field name in vector file that *includes* (can be substring) input image name to filter geometry by. It is only applied when calculating local blocks, as the reference map is calculated as the mean of all local blocks. Loaded block maps won't have this applied unless it was used when calculating them. The matching solution is still applied to these areas in the output. Defaults to None for no mask.
         block_valid_pixel_threshold (float): Minimum fraction of valid pixels required to include a block (0–1).
 
     Returns:
@@ -87,25 +88,29 @@ def local_block_adjustment(
 
     print("Start local block adjustment")
 
-    _validate_input_params(
-        input_images,
-        output_images,
-        custom_nodata_value,
-        number_of_blocks,
-        alpha,
-        calculation_dtype,
-        output_dtype,
-        debug_logs,
-        window_size,
-        save_as_cog,
-        correction_method,
-        image_parallel_workers,
-        window_parallel_workers,
-        save_block_maps,
-        load_block_maps,
-        override_bounds_canvas_coords,
-        vector_mask,
-        block_valid_pixel_threshold,
+    # Validate params
+    Universal.validate(
+        input_images=input_images,
+        output_images=output_images,
+        save_as_cog=save_as_cog,
+        debug_logs=debug_logs,
+        vector_mask=vector_mask,
+        window_size=window_size,
+        custom_nodata_value=custom_nodata_value,
+        image_parallel_workers=image_parallel_workers,
+        window_parallel_workers=window_parallel_workers,
+        calculation_dtype=calculation_dtype,
+        output_dtype=output_dtype,
+    )
+
+    Match.validate_local_block_adjustment(
+        number_of_blocks=number_of_blocks,
+        alpha=alpha,
+        correction_method=correction_method,
+        save_block_maps=save_block_maps,
+        load_block_maps=load_block_maps,
+        override_bounds_canvas_coords=override_bounds_canvas_coords,
+        block_valid_pixel_threshold=block_valid_pixel_threshold,
     )
 
     # Determine multiprocessing and worker count
@@ -615,10 +620,9 @@ def _process_output_image(
             np.nan
         )
 
-        windows = _resolve_windows(src, window_size, block_params=(num_row, num_col, bounds_canvas_coords) if window_size == "block" else None)
-
         with rasterio.open(out_path, "w", **meta) as dst:
             for band in range(num_bands):
+                windows = _resolve_windows(src, window_size, block_params=(num_row, num_col, bounds_canvas_coords) if window_size == "block" else None)
                 args = [
                     (
                         name,

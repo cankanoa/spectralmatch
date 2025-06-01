@@ -18,24 +18,25 @@ from rasterio.coords import BoundingBox
 from ..utils import _check_raster_requirements, _get_nodata_value
 from ..handlers import create_paths, search_paths
 from ..utils_multiprocessing import _resolve_parallel_config, _resolve_windows, _get_executor, WorkerContext
+from ..types_and_validation import Universal, Match
 
 
 def global_regression(
-    input_images: Tuple[str, str] | List[str],
-    output_images: Tuple[str, str] | List[str],
+    input_images: Universal.SearchFolderOrListFiles,
+    output_images: Universal.CreateInFolderOrListFiles,
     *,
+    calculation_dtype: Universal.CalculationDtype = "float32",
+    output_dtype: Universal.OutputDtype = None,
+    vector_mask: Universal.VectorMask = None,
+    debug_logs: Universal.DebugLogs = False,
+    custom_nodata_value: Universal.CustomNodataValue = None,
+    image_parallel_workers: Universal.ImageParallelWorkers = None,
+    window_parallel_workers: Universal.WindowParallelWorkers = None,
+    window_size: Universal.WindowSize = None,
+    save_as_cog: Universal.SaveAsCog = False,
+    specify_model_images: Match.SpecifyModelImages = None,
     custom_mean_factor: float = 1.0,
     custom_std_factor: float = 1.0,
-    vector_mask: Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None = None,
-    window_size: int | Tuple[int, int] | Literal["internal"] | None = None,
-    save_as_cog: bool = False,
-    debug_logs: bool = False,
-    custom_nodata_value: float | int | None = None,
-    image_parallel_workers: Tuple[Literal["process"], Literal["cpu"] | int] | None = None,
-    window_parallel_workers: Tuple[Literal["process"], Literal["cpu"] | int] | None = None,
-    calculation_dtype: str = "float32",
-    output_dtype: str | None = None,
-    specify_model_images: Tuple[Literal["exclude", "include"], List[str]] | None = None,
     save_adjustments: str | None = None,
     load_adjustments: str | None = None,
     ) -> list:
@@ -51,19 +52,19 @@ def global_regression(
             Specifies how output filenames are generated or provided:
             - A tuple with an output folder and a filename template using "$" as a placeholder for each input image's basename (e.g., ("/output/folder", "$_GlobalMatch.tif")).
             - A list of full output paths, which must match the number of input images.
-        custom_mean_factor (float, optional): Weight for mean constraints in regression. Defaults to 1.0.
-        custom_std_factor (float, optional): Weight for standard deviation constraints in regression. Defaults to 1.0.
-        vector_mask (Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None): Mask to limit stats calculation to specific areas in the format of a tuple with two or three items: literal "include" or "exclude" the mask area, str path to the vector file, optional str of field name in vector file that *includes* (can be substring) input image name to filter geometry by. Loaded stats won't have this applied to them. The matching solution is still applied to these areas in the output. Defaults to None for no mask.
-        window_size (int | Tuple[int, int] | Literal["internal"] | None): Tile size for reading and writing: int for square tiles, tuple for (width, height), "internal" to use raster's native tiling, or None for full image. "internal" enables efficient streaming from COGs.
-        save_as_cog (bool): If True, saves output as a Cloud-Optimized GeoTIFF using proper band and block order.
-        and input raster's tiling if available.
-        debug_logs (bool, optional): If True, prints debug information and constraint matrices. Defaults to False.
-        custom_nodata_value (float | int | None, optional): Overrides detected NoData value. Defaults to None.
-        image_parallel_workers (Tuple[Literal["process"], Literal["cpu"] | int] | None = None): Parallelization strategy at the image level. Provide a tuple like ("process", "cpu") to use multiprocessing with all available cores. Threads are not supported. Set to None to disable.
-        window_parallel_workers (Tuple[Literal["process"], Literal["cpu"] | int] | None = None): Parallelization strategy at the window level within each image. Same format as image_parallel_workers. Threads are not supported. Set to None to disable.
         calculation_dtype (str, optional): Data type used for internal calculations. Defaults to "float32".
         output_dtype (str | None, optional): Data type for output rasters. Defaults to input image dtype.
+        vector_mask (Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None): Mask to limit stats calculation to specific areas in the format of a tuple with two or three items: literal "include" or "exclude" the mask area, str path to the vector file, optional str of field name in vector file that *includes* (can be substring) input image name to filter geometry by. Loaded stats won't have this applied to them. The matching solution is still applied to these areas in the output. Defaults to None for no mask.
+        debug_logs (bool, optional): If True, prints debug information and constraint matrices. Defaults to False.
+        custom_nodata_value (float | int | None, optional): Overrides detected NoData value. Defaults to None.
+        image_parallel_workers (Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None): Parallelization strategy at the image level. Provide a tuple like ("process", "cpu") to use multiprocessing with all available cores. Threads are supported too. Set to None to disable.
+        window_parallel_workers (Tuple[Literal["process"], Literal["cpu"] | int] | None = None): Parallelization strategy at the window level within each image. Same format as image_parallel_workers. Threads are not supported. Set to None to disable.
+        window_size (int | Tuple[int, int] | Literal["internal"] | None): Tile size for reading and writing: int for square tiles, tuple for (width, height), "internal" to use raster's native tiling, or None for full image. "internal" enables efficient streaming from COGs.
+        save_as_cog (bool): If True, saves output as a Cloud-Optimized GeoTIFF using proper band and block order.
         specify_model_images (Tuple[Literal["exclude", "include"], List[str]] | None ): First item in tuples sets weather to 'include' or 'exclude' the listed images from model building statistics. Second item is the list of image names (without their extension) to apply criteria to. For example, if this param is only set to 'include' one image, all other images will be matched to that one image. Defaults to no exclusion.
+        custom_mean_factor (float, optional): Weight for mean constraints in regression. Defaults to 1.0.
+        custom_std_factor (float, optional): Weight for standard deviation constraints in regression. Defaults to 1.0.
+        and input raster's tiling if available.
         save_adjustments (str | None, optional): The output path of a .json file to save adjustments parameters. Defaults to not saving.
         load_adjustments (str | None, optional): If set, loads saved whole and overlapping statistics only for images that exist in the .json file. Other images will still have their statistics calculated. Defaults to None.
 
@@ -73,23 +74,30 @@ def global_regression(
 
     print("Start global regression")
 
-    _validate_input_params(
-        input_images,
-        output_images,
-        custom_mean_factor,
-        custom_std_factor,
-        vector_mask,
-        window_size,
-        save_as_cog,
-        debug_logs,
-        custom_nodata_value,
-        image_parallel_workers,
-        window_parallel_workers,
-        calculation_dtype,
-        output_dtype,
-        specify_model_images,
-        save_adjustments,
-        load_adjustments,
+    # Validate params
+    Universal.validate(
+        input_images=input_images,
+        output_images=output_images,
+        save_as_cog=save_as_cog,
+        debug_logs=debug_logs,
+        vector_mask=vector_mask,
+        window_size=window_size,
+        custom_nodata_value=custom_nodata_value,
+        image_parallel_workers=image_parallel_workers,
+        window_parallel_workers=window_parallel_workers,
+        calculation_dtype=calculation_dtype,
+        output_dtype=output_dtype,
+    )
+
+    Match.validate_match(
+        specify_model_images=specify_model_images,
+    )
+
+    Match.validate_global_regression(
+        custom_mean_factor=custom_mean_factor,
+        custom_std_factor=custom_std_factor,
+        save_adjustments=save_adjustments,
+        load_adjustments=load_adjustments,
     )
 
     # Input and output paths
@@ -496,118 +504,6 @@ def _apply_global_adjustments_for_image(
                         band, window, buf = _process_tile_global(*arg)
                         dst.write(buf.astype(meta["dtype"]), band + 1, window=window)
                     WorkerContext.close()
-
-
-def _validate_input_params(
-    input_images,
-    output_images,
-    custom_mean_factor,
-    custom_std_factor,
-    vector_mask,
-    window_size,
-    save_as_cog,
-    debug_logs,
-    custom_nodata_value,
-    image_parallel_workers,
-    window_parallel_workers,
-    calculation_dtype,
-    output_dtype,
-    specify_model_images,
-    save_adjustments,
-    load_adjustments,
-):
-    """
-    Validates the input parameters provided to the global_regression function.
-
-    Raises:
-        ValueError: If any input parameter is not of the expected type or structure.
-    """
-    if not isinstance(input_images, (tuple, list)):
-        raise ValueError("input_images must be a tuple (folder, pattern) or a list of strings.")
-    if isinstance(input_images, tuple):
-        if len(input_images) != 2 or not all(isinstance(s, str) for s in input_images):
-            raise ValueError("If input_images is a tuple, it must be (folder_path, pattern).")
-    elif not all(isinstance(p, str) for p in input_images):
-        raise ValueError("All elements in input_images list must be strings.")
-
-    if not isinstance(output_images, (tuple, list)):
-        raise ValueError("output_images must be a tuple or a list of strings.")
-    if isinstance(output_images, tuple):
-        if len(output_images) != 2 or not all(isinstance(s, str) for s in output_images):
-            raise ValueError("If output_images is a tuple, it must be (output_folder, name_template).")
-    elif not all(isinstance(p, str) for p in output_images):
-        raise ValueError("All elements in output_images list must be strings.")
-
-    if not isinstance(custom_mean_factor, (int, float)):
-        raise ValueError("custom_mean_factor must be a number.")
-    if not isinstance(custom_std_factor, (int, float)):
-        raise ValueError("custom_std_factor must be a number.")
-
-    if vector_mask is not None:
-        if not isinstance(vector_mask, tuple) or len(vector_mask) not in {2, 3}:
-            raise ValueError("vector_mask must be a tuple of 2 or 3 elements.")
-        if vector_mask[0] not in {"include", "exclude"}:
-            raise ValueError("The first element of vector_mask must be 'include' or 'exclude'.")
-        if not isinstance(vector_mask[1], str):
-            raise ValueError("The second element must be a string (vector file path).")
-        if len(vector_mask) == 3 and not isinstance(vector_mask[2], str):
-            raise ValueError("The third element, if provided, must be a string (field name).")
-
-    def _validate_window_param(val):
-        if val is None:
-            return
-        if isinstance(val, int):
-            return
-        if isinstance(val, tuple) and len(val) == 2 and all(isinstance(i, int) for i in val):
-            return
-        if val == "internal":
-            return
-        raise ValueError("window_size must be an int, a (width, height) tuple, 'internal', or None.")
-
-    _validate_window_param(window_size)
-
-    if not isinstance(save_as_cog, bool):
-        raise ValueError("save_as_cog must be a boolean.")
-
-    if not isinstance(debug_logs, bool):
-        raise ValueError("debug_logs must be a boolean.")
-
-    if custom_nodata_value is not None and not isinstance(custom_nodata_value, (int, float)):
-        raise ValueError("custom_nodata_value must be a number or None.")
-
-    def _validate_parallel_workers(val, name):
-        if val is None:
-            return
-        if not isinstance(val, tuple) or len(val) != 2:
-            raise ValueError(f"{name} must be a tuple of (backend, workers) or None.")
-        backend, workers = val
-        if backend not in {"process"}:
-            raise ValueError(f"The first element of {name} must be 'process'.")
-        if workers != "cpu" and not isinstance(workers, int):
-            raise ValueError(f"The second element of {name} must be 'cpu' or an integer.")
-
-    _validate_parallel_workers(image_parallel_workers, "image_parallel_workers")
-    _validate_parallel_workers(window_parallel_workers, "window_parallel_workers")
-
-    if not isinstance(calculation_dtype, str):
-        raise ValueError("calculation_dtype must be a string.")
-
-    if output_dtype is not None and not isinstance(output_dtype, str):
-        raise ValueError("output_dtype must be a string or None.")
-
-    if specify_model_images is not None:
-        if (not isinstance(specify_model_images, tuple) or
-            len(specify_model_images) != 2 or
-            specify_model_images[0] not in {"include", "exclude"} or
-            not isinstance(specify_model_images[1], list) or
-            not all(isinstance(s, str) for s in specify_model_images[1])):
-            raise ValueError("specify_model_images must be a tuple of ('include'|'exclude', list of strings).")
-
-    if save_adjustments is not None and not isinstance(save_adjustments, str):
-        raise ValueError("save_adjustments must be a string or None.")
-
-    if load_adjustments is not None and not isinstance(load_adjustments, str):
-        raise ValueError("load_adjustments must be a string or None.")
 
 
 def _save_adjustments(
