@@ -2,15 +2,17 @@ import os
 import rasterio
 import numpy as np
 import networkx as nx
+import fiona
 
 from rasterio.features import shapes
 from affine import Affine
-from shapely.geometry import shape, Polygon, LineString, mapping, GeometryCollection, Point, MultiLineString
+from shapely.geometry import shape, Polygon, LineString, mapping, GeometryCollection, Point
 from shapely.ops import split, voronoi_diagram
 from itertools import combinations
 from typing import List, Tuple
 
 from ..handlers import search_paths
+
 
 def voronoi_center_seamline(
     input_images: Tuple[str, str] | List[str],
@@ -258,10 +260,6 @@ def _segment_emp(
 
     return emp
 
-
-import fiona
-from fiona.errors import DriverError
-from shapely.geometry import Polygon, Point, mapping
 
 def _save_intersection_points(
     a: Polygon,

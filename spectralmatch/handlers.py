@@ -1,4 +1,6 @@
 import os
+
+import fiona
 import numpy as np
 import tempfile
 import rasterio
@@ -19,7 +21,7 @@ from multiprocessing import Pool, cpu_count, get_context
 from concurrent.futures import as_completed
 
 from .types_and_validation import Universal
-from .utils_multiprocessing import _create_windows, _resolve_windows, _get_executor, WorkerContext
+from .utils_multiprocessing import _create_windows, _resolve_windows, _get_executor, WorkerContext, _resolve_parallel_config
 
 
 def merge_vectors(
@@ -427,158 +429,207 @@ def merge_rasters(
 
 
 def mask_rasters(
-    input_image_paths: List[str],
-    output_image_paths: List[str],
-    vector_mask_path: str | None = None,
-    split_mask_by_attribute: Optional[str] = None,
-    resampling_method: Literal["nearest", "bilinear", "cubic"] = "nearest",
-    tap: bool = False,
-    resolution: Literal["highest", "average", "lowest"] = "highest",
-    window_size: int | Tuple[int, int] | None = None,
-    debug_logs: bool = False,
+    input_images: Universal.SearchFolderOrListFiles,
+    output_images: Universal.CreateInFolderOrListFiles,
+    vector_mask: Universal.VectorMask = None,
+    window_size: Universal.WindowSize = None,
+    debug_logs: Universal.DebugLogs = False,
+    image_parallel_workers: Universal.ImageParallelWorkers = None,
+    window_parallel_workers: Universal.WindowParallelWorkers = None,
     include_touched_pixels: bool = False,
-) -> None:
+    ) -> None:
     """
-    Masks rasters using vector geometries. If `split_mask_by_attribute` is set,
-    geometries are filtered by the raster's basename (excluding extension) to allow
-    per-image masking with specific matching features. If no vector is provided,
-    rasters are processed without masking.
-
-    Args:
-        input_image_paths (List[str]): Paths to input rasters.
-        output_image_paths (List[str]): Corresponding output raster paths.
-        vector_mask_path (str | None, optional): Path to vector mask file (.shp, .gpkg, etc.). If None, no masking is applied.
-        split_mask_by_attribute (Optional[str]): Attribute to match raster basenames.
-        resampling_method (Literal["nearest", "bilinear", "cubic"]): Resampling algorithm.
-        tap (bool): Snap output bounds to target-aligned pixels.
-        resolution (Literal["highest", "average", "lowest"]): Strategy to determine target resolution.
-        window_size (Optional[int | Tuple[int, int]]): Optional tile size for processing.
-        debug_logs (bool): Print debug information if True.
-        include_touched_pixels (bool): If True, include touched pixels in output raster.
-
-    Outputs:
-        Saved masked raster files to output_image_paths.
+    Masks rasters using optional vector geometries with support for window-based and image-based multiprocessing.
     """
-    if debug_logs: print(f'Masking {len(input_image_paths)} rasters')
+    # Validate parameters
+    Universal.validate(
+        input_images=input_images,
+        output_images=output_images,
+        debug_logs=debug_logs,
+        vector_mask=vector_mask,
+        window_size=window_size,
+        image_parallel_workers=image_parallel_workers,
+        window_parallel_workers=window_parallel_workers,
+    )
 
-    gdf = gpd.read_file(vector_mask_path) if vector_mask_path else None
+    input_image_paths = _resolve_paths("search", input_images)
+    output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
 
-    if isinstance(window_size, int): window_size = (window_size, window_size)
+    if debug_logs: print(f"Input images: {input_image_paths}")
+    if debug_logs: print(f"Output images: {output_image_paths}")
 
-    resolutions = []
-    bounds_list = []
-    crs_set = set()
+    input_image_names = [os.path.splitext(os.path.basename(p))[0] for p in input_image_paths]
+    input_image_path_pairs = dict(zip(input_image_names, input_image_paths))
+    output_image_path_pairs = dict(zip(input_image_names, output_image_paths))
 
-    for path in input_image_paths:
-        with rasterio.open(path) as src:
-            res_x, res_y = src.res
-            resolutions.append((res_x, res_y))
-            bounds_list.append(src.bounds)
-            crs_set.add(src.crs)
+    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
+    window_parallel, window_backend, window_max_workers = _resolve_parallel_config(window_parallel_workers)
 
-    if len(crs_set) > 1:
-        raise ValueError("Input rasters must have the same CRS.")
+    parallel_args = [
+        (
+            window_parallel,
+            window_max_workers,
+            window_backend,
+            input_image_path_pairs[name],
+            output_image_path_pairs[name],
+            name,
+            vector_mask,
+            window_size,
+            debug_logs,
+            include_touched_pixels
+        )
+        for name in input_image_names
+    ]
 
-    resolutions_array = np.array(resolutions)
-    if resolution == "highest":
-        target_res = resolutions_array.min(axis=0)
-    elif resolution == "lowest":
-        target_res = resolutions_array.max(axis=0)
+    if image_parallel:
+        with _get_executor(image_backend, image_max_workers) as executor:
+            futures = [executor.submit(_mask_raster_process_image, *args) for args in parallel_args]
+            for future in as_completed(futures):
+                future.result()
     else:
-        target_res = resolutions_array.mean(axis=0)
-    if debug_logs: print(f'Resolution: {target_res}')
+        for args in parallel_args:
+            _mask_raster_process_image(*args)
 
-    temp_dir = tempfile.mkdtemp()
-    tapped_paths = []
 
-    for in_path in input_image_paths:
-        raster_name = os.path.splitext(os.path.basename(in_path))[0]
-        with rasterio.open(in_path) as src:
-            profile = src.profile.copy()
+def _mask_raster_process_image(
+    window_parallel: bool,
+    max_workers: int,
+    backend: str,
+    input_image_path: str,
+    output_image_path: str,
+    image_name: str,
+    vector_mask: Universal.VectorMask,
+    window_size: Universal.WindowSize,
+    debug_logs: bool,
+    include_touched_pixels: bool,
+):
+    with rasterio.open(input_image_path) as src:
+        profile = src.profile.copy()
+        nodata_val = profile.get("nodata", 0)
+        num_bands = src.count
 
-            if tap:
-                res_x, res_y = target_res
-                minx = np.floor(src.bounds.left / res_x) * res_x
-                miny = np.floor(src.bounds.bottom / res_y) * res_y
-                maxx = np.ceil(src.bounds.right / res_x) * res_x
-                maxy = np.ceil(src.bounds.top / res_y) * res_y
+        geoms = None
+        invert = False
 
-                dst_width = int((maxx - minx) / res_x)
-                dst_height = int((maxy - miny) / res_y)
-                dst_transform = rasterio.transform.from_origin(minx, maxy, res_x, res_y)
+        if vector_mask:
+            mode, path, *field = vector_mask
+            invert = mode == "exclude"
+            field_name = field[0] if field else None
+            with fiona.open(path, "r") as vector:
+                if field_name:
+                    geoms = [
+                        feat["geometry"]
+                        for feat in vector
+                        if field_name in feat["properties"] and image_name in str(feat["properties"][field_name])
+                    ]
+                else:
+                    geoms = [feat["geometry"] for feat in vector]
 
-                profile.update({
-                    "height": dst_height,
-                    "width": dst_width,
-                    "transform": dst_transform
-                })
+        with rasterio.open(output_image_path, "w", **profile) as dst:
 
-                temp_path = os.path.join(temp_dir, f"{raster_name}_tapped.tif")
-                tapped_paths.append(temp_path)
+            for band_idx in range(num_bands):
+                windows = _resolve_windows(src, window_size)
 
-                src_windows = list(_create_windows(src.width, src.height, *window_size)) if window_size else [Window(0, 0, src.width, src.height)]
-                dst_windows = list(_create_windows(dst_width, dst_height, *window_size)) if window_size else [Window(0, 0, dst_width, dst_height)]
+                args = [
+                    (
+                        win,
+                        band_idx,
+                        image_name,
+                        nodata_val,
+                        geoms,
+                        invert,
+                        include_touched_pixels
+                    )
+                    for win in windows
+                ]
 
-                with rasterio.open(temp_path, "w", **profile) as dst:
-                    for src_win, dst_win in zip(src_windows, dst_windows):
-                        reproject(
-                            source=rasterio.band(src, list(range(1, src.count + 1))),
-                            destination=rasterio.band(dst, list(range(1, src.count + 1))),
-                            src_transform=src.window_transform(src_win),
-                            src_crs=src.crs,
-                            dst_transform=dst_transform,
-                            dst_crs=src.crs,
-                            src_nodata=src.nodata,
-                            dst_nodata=src.nodata,
-                            resampling=Resampling[resampling_method],
-                            src_window=src_win,
-                            dst_window=dst_win
-                        )
-            else:
-                tapped_paths.append(in_path)
+                if window_parallel:
+                    with _get_executor(
+                        backend,
+                        max_workers,
+                        initializer=WorkerContext.init,
+                        initargs=({image_name: ("raster", input_image_path)},)
+                    ) as executor:
+                        futures = [executor.submit(_mask_raster_process_window, *arg) for arg in args]
+                        for future in as_completed(futures):
+                            window, data = future.result()
+                            dst.write(data, band_idx + 1, window=window)
+                    WorkerContext.close()
+                else:
+                    WorkerContext.init({image_name: ("raster", input_image_path)})
+                    for arg in args:
+                        window, data = _mask_raster_process_window(*arg)
+                        dst.write(data, band_idx + 1, window=window)
+                    WorkerContext.close()
 
-    for in_path, out_path in zip(tapped_paths, output_image_paths):
-        raster_name = os.path.splitext(os.path.basename(in_path))[0].replace('_tapped', '')
-        if debug_logs: print(f'Processing: {raster_name}')
-        with rasterio.open(in_path) as src:
-            profile = src.profile.copy()
-            os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
-            if window_size:
-                windows = list(_create_windows(src.width, src.height, *window_size))
-            else:
-                windows = [Window(0, 0, src.width, src.height)]
 
-            with rasterio.open(out_path, "w", **profile) as dst:
-                for window in windows:
-                    data = src.read(window=window)
-                    if gdf is not None:
-                        transform = src.window_transform(window)
+def _mask_raster_process_window(
+    win: Window,
+    band_idx: int,
+    image_name: str,
+    nodata: int | float,
+    geoms: list | None,
+    invert: bool,
+    include_touched_pixels: bool,
+):
+    src = WorkerContext.get(image_name)
+    mask_key = f"{int(win.col_off)}-{int(win.row_off)}-{int(win.width)}-{int(win.height)}"
 
-                        if split_mask_by_attribute:
-                            filtered_gdf = gdf[gdf[split_mask_by_attribute].str.strip() == raster_name.strip()]
-                            if filtered_gdf.empty:
-                                if debug_logs: print(f"No matching features for {raster_name}")
-                                dst.write(data, window=window)
-                                continue
-                            geometries = filtered_gdf.geometry.values
-                        else:
-                            geometries = gdf.geometry.values
+    mask_cache = WorkerContext.cache.setdefault("_mask_cache", {})
+    mask_hits = WorkerContext.cache.setdefault("_mask_hits", {})
 
-                        mask_array = geometry_mask(
-                            geometries,
-                            out_shape=(data.shape[1], data.shape[2]),
-                            transform=transform,
-                            invert=True,
-                            all_touched=include_touched_pixels
-                        )
+    if geoms:
+        if mask_key not in mask_cache:
+            transform = src.window_transform(win)
+            mask = geometry_mask(
+                geoms,
+                transform=transform,
+                invert=not invert,
+                out_shape=(int(win.height), int(win.width)),
+                all_touched=include_touched_pixels
+            )
+            mask_cache[mask_key] = mask
+            mask_hits[mask_key] = 0
 
-                        data = np.where(mask_array, data, src.nodata)
+        mask = mask_cache[mask_key]
+        data = src.read(band_idx + 1, window=win)
+        data = np.where(mask, data, nodata)
 
-                    dst.write(data, window=window)
+        # Track usage and clean up
+        mask_hits[mask_key] += 1
+        if mask_hits[mask_key] >= src.count:
+            del mask_cache[mask_key]
+            del mask_hits[mask_key]
+    else:
+        data = src.read(band_idx + 1, window=win)
 
-    if tap:
-        shutil.rmtree(temp_dir)
+    return win, data
+
+
+# def _mask_raster_process_window(
+#     win: Window,
+#     image_name: str,
+#     nodata: int | float,
+#     geoms: list | None,
+#     invert: bool,
+#     include_touched_pixels: bool,
+# ):
+#     src = WorkerContext.get(image_name)
+#     data = src.read(window=win)
+#
+#     if geoms:
+#         transform = src.window_transform(win)
+#         mask = geometry_mask(
+#             geoms,
+#             transform=transform,
+#             invert=not invert,
+#             out_shape=(data.shape[1], data.shape[2]),
+#             all_touched=include_touched_pixels
+#         )
+#         data = np.where(mask, data, nodata)
+#
+#     return win, data
 
 
 def _resolve_paths(

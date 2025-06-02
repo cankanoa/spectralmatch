@@ -1,4 +1,5 @@
-from typing import Tuple, List, Literal
+from typing import Tuple, List, Literal, Optional
+
 _UNSET = object()
 
 # Universal types
@@ -7,7 +8,7 @@ class Universal:
     CreateInFolderOrListFiles = Tuple[str, str] | List[str]
     SaveAsCog = bool # Default: True
     DebugLogs = bool # Default: False
-    VectorMask = Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None
+    VectorMask = Tuple[Literal["include", "exclude"], str, Optional[str]] | None
     WindowSize = int | Tuple[int, int] | Literal["internal"] | None
     WindowSizeWithBlock = int | Tuple[int, int] | Literal["internal", "block"] | None
     CustomNodataValue = float | int | None
