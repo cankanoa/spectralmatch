@@ -5,12 +5,10 @@
 
 # %% Setup
 import os
-
-from fiona.env import local
 from spectralmatch import *
 
 # Important: If this does not automatically find the correct CWD, manually copy the path to the /data_worldview folder
-working_directory = os.path.join(os.getcwd(), "data_worldview")
+working_directory = '/Users/kanoalindiwe/Downloads/Projects/spectralmatch/docs/examples/data_worldview'
 print(working_directory)
 
 input_folder = os.path.join(working_directory, "Input")
@@ -20,6 +18,8 @@ aligned_folder = os.path.join(working_directory, "Aligned")
 clipped_folder = os.path.join(working_directory, "Clipped")
 stats_folder = os.path.join(working_directory, "Stats")
 new_global_folder = os.path.join(working_directory, "GlobalMatch_New")
+new_local_folder = os.path.join(working_directory, "LocalMatch_New")
+
 
 window_size = 128
 num_workers = 5
@@ -77,10 +77,10 @@ global_regression(
 local_block_adjustment(
     (global_folder, "*.tif"),
     (local_folder, "$_Local.tif"),
+    number_of_blocks=50
     )
 
 # %% (OPTIONAL) Local match with a larger canvas than images bounds (perhaps to anticipate adding additional imagery so you don't have to recalculate local block maps each rematch)
-new_local_folder = os.path.join(working_directory, "LocalMatch_New")
 reference_map_path = os.path.join(new_local_folder, "ReferenceBlockMap", "ReferenceBlockMap.tif")
 local_maps_path = os.path.join(new_local_folder, "LocalBlockMap", "$_LocalBlockMap.tif")
 
@@ -94,10 +94,7 @@ local_block_adjustment(
     )
 
 # %% (OPTIONAL) Local match from saved block maps (this code just passes in local maps, but if a reference map is passed in, it will match images to the reference map without recomputing it)
-
-old_local_folder = os.path.join(working_directory, "LocalMatch")
-new_local_folder = os.path.join(working_directory, "LocalMatch_New")
-saved_reference_block_path = os.path.join(old_local_folder, "ReferenceBlockMap", "ReferenceBlockMap.tif")
+saved_reference_block_path = os.path.join(local_folder, "ReferenceBlockMap", "ReferenceBlockMap.tif")
 saved_local_block_paths = [os.path.join(os.path.join(new_local_folder, "LocalBlockMap"), f) for f in os.listdir(os.path.join(new_local_folder, "LocalBlockMap")) if f.lower().endswith(".tif")]
 
 local_block_adjustment(
@@ -109,8 +106,6 @@ local_block_adjustment(
 
 # %% (OPTIONAL) Local match with multiprocessing and windows
 
-new_local_folder = os.path.join(working_directory, "LocalMatch_New")
-
 local_block_adjustment(
     (global_folder, "*.tif"),
     (new_local_folder, "$_Local.tif"),
@@ -121,20 +116,20 @@ local_block_adjustment(
     )
 
 #%% Align rasters
-input_image_paths = search_paths(local_folder, "*.tif")
-output_clipped_image_paths = create_paths(aligned_folder, "$_Aligned.tif", input_image_paths)
 
-mask_rasters(
-    input_image_paths,
-    output_clipped_image_paths,
+align_rasters(
+    (local_folder, "*.tif"),
+    (aligned_folder, "$_Aligned.tif"),
     tap=True,
     resolution='highest',
     debug_logs=True,
     window_size=window_size,
+    image_parallel_workers=("process", num_workers),
+    window_parallel_workers=("process", num_workers),
     )
 
 # %% Generate voronoi center seamlines
-output_vector_mask = os.path.join(working_directory, "ImageClips.gpkg")
+output_vector_mask = os.path.join(working_directory, "ImageMasks.gpkg")
 debug_vectors_path = os.path.join(working_directory, "DebugVectors.gpkg")
 
 voronoi_center_seamline(
@@ -146,17 +141,15 @@ voronoi_center_seamline(
     )
 
 # %% Clip
-input_image_paths = search_paths(aligned_folder, "*.tif")
-output_clipped_image_paths = create_paths(clipped_folder, "$_Clipped.tif", input_image_paths)
-input_vector_mask_path = os.path.join(working_directory, "ImageClips.gpkg")
 
 mask_rasters(
-    input_image_paths,
-    output_clipped_image_paths,
-    vector_mask_path=input_vector_mask_path,
+    (aligned_folder, "*.tif"),
+    (clipped_folder, "$_Clipped.tif"),
+    vector_mask=("include", os.path.join(working_directory, "ImageMasks.gpkg"), "image"),
     debug_logs=True,
-    split_mask_by_attribute="image",
     window_size=window_size,
+    image_parallel_workers=("process", num_workers),
+    window_parallel_workers=("process", num_workers),
     )
 
 # %% Merge rasters
