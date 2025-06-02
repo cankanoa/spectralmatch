@@ -19,6 +19,7 @@ from rasterio.warp import calculate_default_transform, reproject
 from rasterio.coords import BoundingBox
 from multiprocessing import Pool, cpu_count, get_context
 from concurrent.futures import as_completed
+from rasterio.transform import Affine
 
 from .types_and_validation import Universal
 from .utils_multiprocessing import _create_windows, _resolve_windows, _get_executor, WorkerContext, _resolve_parallel_config
@@ -130,7 +131,7 @@ def align_rasters(
     input_images: Universal.SearchFolderOrListFiles,
     output_images: Universal.CreateInFolderOrListFiles,
     *,
-    resampling_method: Literal["nearest", "bilinear", "cubic"] = "nearest",
+    resampling_method: Literal["nearest", "bilinear", "cubic"] = "bilinear",
     tap: bool = False,
     resolution: Literal["highest", "average", "lowest"] = "highest",
     window_size: Universal.WindowSize = None,
@@ -143,6 +144,7 @@ def align_rasters(
 
     input_image_paths = _resolve_paths("search", input_images)
     output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
+    image_names = os.path.splitext(os.path.basename(input_image_paths[0]))[0]
 
     if debug_logs: print(f"{len(input_image_paths)} rasters to align")
 
@@ -167,6 +169,7 @@ def align_rasters(
 
     parallel_args = [
         (
+            image_name,
             window_parallel_workers,
             in_path,
             out_path,
@@ -176,7 +179,7 @@ def align_rasters(
             window_size,
             debug_logs,
         )
-        for in_path, out_path in zip(input_image_paths, output_image_paths)
+        for in_path, out_path, image_name in zip(input_image_paths, output_image_paths, image_names)
     ]
 
     if image_parallel_workers:
@@ -190,6 +193,7 @@ def align_rasters(
 
 
 def _align_process_image(
+    image_name: str,
     window_parallel: Universal.WindowParallelWorkers,
     in_path: str,
     out_path: str,
@@ -217,89 +221,109 @@ def _align_process_image(
             dst_width, dst_height = src.width, src.height
             dst_transform = src.transform
 
+        src_transform = src.transform
+
         profile.update({
             "height": dst_height,
             "width": dst_width,
             "transform": dst_transform
         })
 
-        windows_src = _resolve_windows(src, window_size)
-        windows_dst = _resolve_windows(
-            dataset=type("FakeDS", (), {
-                "width": dst_width,
-                "height": dst_height,
-                "transform": dst_transform,
-                "block_windows": lambda _: [],
-                "bounds": src.bounds
-            })(),
-            window_size=window_size,
-        )
-
         with rasterio.open(out_path, "w", **profile) as dst:
-            window_args = [
-                (
-                    src_win,
-                    dst_win,
-                    dst_transform,
-                    resampling_method,
-                    "src_key",
-                    (dst_win.height, dst_win.width),
-                    debug_logs,
-                )
-                for src_win, dst_win in zip(windows_src, windows_dst)
-            ]
+            for band_idx in range(src.count):
 
-            parallel = window_parallel is not None
-            backend, max_workers = (window_parallel or (None, None))[0:2]
+                windows_dst = _resolve_windows(dst, window_size)
 
-            if parallel and backend == "process":
-                with _get_executor(
-                        backend,
-                        max_workers,
-                        initializer=WorkerContext.init,
-                        initargs=({"src_key": ("raster", in_path)},)
-                ) as executor:
-                    futures = [executor.submit(_align_process_window, *args) for args in window_args]
-                    for args, future in zip(window_args, futures):
-                        buf = future.result()
-                        dst.write(buf, window=args[1])
-                WorkerContext.close()
-            else:
-                WorkerContext.init({"src_key": ("raster", in_path)})
-                for args in window_args:
-                    buf = _align_process_window(*args)
-                    dst.write(buf, window=args[1])
-                WorkerContext.close()
+                window_args = []
+                for dst_win in windows_dst:
+                    dst_bounds = rasterio.windows.bounds(dst_win, dst.transform)
+
+                    # Convert bounds to source window using inverse transform
+                    src_win = rasterio.windows.from_bounds(*dst_bounds, transform=src.transform)
+                    # src_win = src_win.round_offsets().round_lengths()  # Makes it integer-aligned
+
+                    window_args.append((
+                        src_win,
+                        dst_win,
+                        band_idx,
+                        dst_transform,
+                        resampling_method,
+                        src.nodata,
+                        debug_logs,
+                        image_name,
+                    ))
+
+                parallel = window_parallel is not None
+                backend, max_workers = (window_parallel or (None, None))[0:2]
+
+                if parallel and backend == "process":
+                    with _get_executor(
+                            backend,
+                            max_workers,
+                            initializer=WorkerContext.init,
+                            initargs=({image_name: ("raster", in_path)},)
+                    ) as executor:
+                        futures = [executor.submit(_align_process_window, *args) for args in window_args]
+                        for future in as_completed(futures):
+                            band, window, buf = future.result()
+                            dst.write(buf, band + 1, window=window)
+                    WorkerContext.close()
+                else:
+                    WorkerContext.init({image_name: ("raster", in_path)})
+                    for args in window_args:
+                        band, window, buf = _align_process_window(*args)
+                        dst.write(buf, band + 1, window=window)
+                    WorkerContext.close()
+
 
 def _align_process_window(
-    src_win: Window,
-    dst_win: Window,
+    src_window: Window,
+    dst_window: Window,
+    band_idx: int,
     dst_transform,
     resampling_method: str,
-    src_key: str,
-    dst_shape: Tuple[int, int],
-    debug_logs: bool = False,
-    ) -> np.ndarray:
+    nodata: int | float,
+    debug_logs: bool,
+    image_name: str,
+) -> tuple[int, Window, np.ndarray]:
+    """
+    Aligns a single raster window for one band using reproject with a shared dataset.
 
-    src = WorkerContext.get(src_key)
-    num_bands = src.count
-    dst_buffer = np.empty((num_bands, dst_shape[0], dst_shape[1]), dtype=src.dtypes[0])
+    Args:
+        src_window (Window): Source window to read.
+        dst_window (Window): Output window (used to compute offset transform and for saving).
+        band_idx (int): Band index to read.
+        dst_transform: The full transform of the output raster.
+        resampling_method: Reprojection resampling method.
+        nodata: NoData value.
+        debug_logs: Print debug info if True.
+        image_name: Key to fetch the raster from WorkerContext.
+
+    Returns:
+        Tuple[int, Window, np.ndarray]: Band index, destination window, and aligned data buffer.
+    """
+    src = WorkerContext.get(image_name)
+    dst_shape = (int(dst_window.height), int(dst_window.width))
+    dst_buffer = np.empty(dst_shape, dtype=src.dtypes[band_idx])
+
+    # Compute the transform specific to the current dst_window tile
+    dst_transform_window = dst_transform * Affine.translation(dst_window.col_off, dst_window.row_off)
 
     reproject(
-        source=rasterio.band(src, list(range(1, num_bands + 1))),
+        source=rasterio.band(src, band_idx + 1),
         destination=dst_buffer,
-        src_transform=src.window_transform(src_win),
+        src_transform=src.window_transform(src_window),
         src_crs=src.crs,
-        dst_transform=dst_transform,
+        dst_transform=dst_transform_window,
         dst_crs=src.crs,
-        src_nodata=src.nodata,
-        dst_nodata=src.nodata,
+        src_nodata=nodata,
+        dst_nodata=nodata,
         resampling=Resampling[resampling_method],
-        src_window=src_win,
+        src_window=src_window,
         dst_window=Window(0, 0, dst_shape[1], dst_shape[0]),
     )
 
-    return dst_buffer
+    return band_idx, dst_window, dst_buffer
 
 
 def merge_rasters(
