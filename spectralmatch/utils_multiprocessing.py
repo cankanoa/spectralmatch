@@ -12,7 +12,18 @@ from multiprocessing import Lock
 
 file_lock = Lock()
 
-def _choose_context(prefer_fork: bool = True) -> mp.context.BaseContext:
+def _choose_context(
+    prefer_fork: bool = True
+) -> mp.context.BaseContext:
+    """
+    Chooses the most appropriate multiprocessing context based on platform and preference.
+
+    Args:
+        prefer_fork (bool): If True, prefers "fork" context where available; default is True.
+
+    Returns:
+        mp.context.BaseContext: Selected multiprocessing context ("fork", "forkserver", or "spawn").
+    """
 
     if prefer_fork and sys.platform.startswith("linux"):
         return mp.get_context("fork")
@@ -30,6 +41,19 @@ def _choose_context(prefer_fork: bool = True) -> mp.context.BaseContext:
 def _resolve_parallel_config(
     config: Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None
 ) -> Tuple[bool, Optional[str], Optional[int]]:
+    """
+    Parses a parallel worker config into execution flags and worker count.
+
+    Args:
+        config (Tuple["process" | "thread", "cpu" | int] | None): Parallelization strategy; None disables parallelism.
+
+    Returns:
+        Tuple[bool, Optional[str], Optional[int]]:
+            - Whether to run in parallel,
+            - The backend ("process" or "thread"),
+            - Number of workers.
+    """
+
     if config is None:
         return False, None, None
     backend, workers = config
@@ -44,8 +68,19 @@ def _get_executor(
     initargs: Optional[tuple] = None,
 ):
     """
-    Returns a ThreadPoolExecutor or ProcessPoolExecutor depending on the backend.
-    Automatically handles initializer differences between thread and process pools.
+    Creates a parallel executor (process or thread) with optional initialization logic.
+
+    Args:
+        backend (str): Execution backend, either "process" or "thread".
+        max_workers (int): Maximum number of worker processes or threads.
+        initializer (Callable, optional): Function to initialize worker context.
+        initargs (tuple, optional): Arguments to pass to the initializer.
+
+    Returns:
+        Executor: An instance of ThreadPoolExecutor or ProcessPoolExecutor.
+
+    Raises:
+        ValueError: If the backend is not "process" or "thread".
     """
 
     if backend == "process":
@@ -72,6 +107,18 @@ def _run_parallel_images(
     image_parallel_workers: Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None,
     window_parallel_workers: Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None,
 ):
+    """
+    Runs a window-level processing function across multiple images, with optional image-level parallelism.
+
+    Args:
+        image_paths (List[str]): List of input image file paths.
+        run_parallel_windows (Callable): Function to run on each image, accepting (path, window_parallel_workers).
+        image_parallel_workers (Tuple["process" | "thread", "cpu" | int] | None): Strategy for image-level parallelism.
+        window_parallel_workers (Tuple["process" | "thread", "cpu" | int] | None): Passed to `run_parallel_windows` for window-level parallelism.
+
+    Returns:
+        None
+    """
     parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
 
     if parallel:
@@ -92,6 +139,17 @@ def _run_parallel_windows(
     process_fn: Callable[[Any], Any],
     window_parallel_workers: Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None,
 ):
+    """
+    Runs a processing function on a list of windows, with optional parallel execution.
+
+    Args:
+        windows (List[Any]): List of window-like objects to process.
+        process_fn (Callable[[Any], Any]): Function to run on each window.
+        window_parallel_workers (Tuple["process" | "thread", "cpu" | int] | None): Parallel execution strategy; None disables parallelism.
+
+    Returns:
+        None
+    """
     parallel, backend, max_workers = _resolve_parallel_config(window_parallel_workers)
 
     if parallel:

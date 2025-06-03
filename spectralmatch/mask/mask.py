@@ -10,10 +10,7 @@ from omnicloudmask import predict_from_array
 from rasterio.features import shapes
 from osgeo import gdal, ogr, osr
 from shapely.geometry import shape, Polygon, MultiPolygon, mapping
-from shapely.ops import unary_union
-from rasterio.mask import raster_geometry_mask
-from typing import Literal, Tuple
-from fiona.crs import from_epsg
+from typing import Literal
 
 
 def create_cloud_mask_with_omnicloudmask(
@@ -332,77 +329,3 @@ def post_process_threshold_to_vector(
                 dst.write(feat)
 
     return output_vector_path
-
-
-def mask_image_with_vector(
-    input_image_path: str,
-    input_vector_path: str | None,
-    output_image_path: str,
-    select_features: Tuple[Literal["include", "exclude"], str, any] | None = None,
-) -> str:
-    """
-    Masks a raster using vector geometries that match a specific filter.
-
-    Args:
-        input_image_path: Path to input raster.
-        input_vector_path: Path to vector file (e.g., .shp, .gpkg), or None to skip masking.
-        output_image_path: Path to save masked raster.
-        select_features: Optional tuple:
-            - ("include", field, value): Keep only pixels covered by features where field == value.
-            - ("exclude", field, value): Mask out pixels covered by features where field == value.
-            - None: Use all features and mask out covered pixels.
-
-    Returns:
-        Path to the masked raster file.
-    """
-    print("Start mask image with vector")
-
-    os.makedirs(os.path.dirname(output_image_path), exist_ok=True)
-
-    with rasterio.open(input_image_path) as src:
-        if input_vector_path is None:
-            print("No vector path provided — writing unmasked copy.")
-            with rasterio.open(output_image_path, 'w', **src.meta) as dst:
-                dst.write(src.read())
-            return output_image_path
-
-        with fiona.open(input_vector_path, 'r') as vector:
-            selected_geoms = []
-
-            for feature in vector:
-                include = True
-                if select_features:
-                    mode, field, value = select_features
-                    attr_val = feature["properties"].get(field)
-                    include = attr_val == value
-
-                if include:
-                    selected_geoms.append(shape(feature["geometry"]))
-
-        if not selected_geoms:
-            print("No matching geometries found — writing unmasked copy.")
-            with rasterio.open(output_image_path, 'w', **src.meta) as dst:
-                dst.write(src.read())
-            return output_image_path
-
-        invert = select_features[0] == "include" if select_features else False
-
-        geom_union = unary_union(selected_geoms)
-        geometries = [geom_union.__geo_interface__]
-
-        mask, transform, window = raster_geometry_mask(
-            src,
-            geometries,
-            invert=invert,
-            crop=False,
-            pad=False,
-            all_touched=False,
-        )
-
-        data = src.read()
-        data[:, mask] = src.nodata if src.nodata is not None else 0
-
-        with rasterio.open(output_image_path, 'w', **src.meta) as dst:
-            dst.write(data)
-
-    return output_image_path

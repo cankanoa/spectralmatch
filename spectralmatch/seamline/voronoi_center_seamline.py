@@ -4,40 +4,46 @@ import numpy as np
 import networkx as nx
 import fiona
 
+from fiona.errors import DriverError
 from rasterio.features import shapes
 from affine import Affine
+from shapely.geometry import MultiPoint
 from shapely.geometry import shape, Polygon, LineString, mapping, GeometryCollection, Point
 from shapely.ops import split, voronoi_diagram
 from itertools import combinations
 from typing import List, Tuple
 
 from ..handlers import search_paths
+from ..types_and_validation import Universal
 
 
 def voronoi_center_seamline(
-    input_images: Tuple[str, str] | List[str],
+    input_images: Universal.CreateInFolderOrListFiles,
     output_mask: str,
     *,
+    image_field_name: str = 'image',
     min_point_spacing: float = 10,
     min_cut_length: float = 0,
-    debug_logs: bool = False,
-    image_field_name: str = 'image',
+    debug_logs: Universal.DebugLogs = False,
     debug_vectors_path: str | None = None,
     )-> None:
     """
-    Generates a Voronoi-based seamline from the centers of edge-matching polygons (EMPs) and saves the result as a vector mask.
+    Generates a Voronoi-based seamline mask from edge-matching polygons (EMPs) and writes the result to a vector file.
 
     Args:
-        input_images (List[str]): List of input EMP vector file paths.
-        output_mask (str): Output path for the generated seamline vector mask.
-        min_point_spacing (float, optional): Minimum spacing between Voronoi points. Defaults to 10.
-        min_cut_length (float, optional): Minimum seamline segment length to retain. Defaults to 0.
-        debug_logs (bool, optional): If True, enables debug output. Defaults to False.
-        image_field_name (str, optional): Field name for the output image. Defaults to 'image'.
-        debug_vectors_path (str | None, optional): Output path for the generated seamline cutline. Defaults to None.
+        input_images (Tuple[str, str] | List[str]):
+            Specifies the input images either as:
+            - A tuple with a folder path and glob pattern to search for files (e.g., ("/input/folder", "*.tif")).
+            - A list of full file paths to individual input images.
+        output_mask (str): Output path for the final seamline polygon vector file.
+        min_point_spacing (float, optional): Minimum spacing between Voronoi seed points; default is 10.
+        min_cut_length (float, optional): Minimum cutline segment length to retain; default is 0.
+        debug_logs (Universal.DebugLogs, optional): Enables debug print statements if True; default is False.
+        image_field_name (str, optional): Name of the attribute field for image ID in output; default is 'image'.
+        debug_vectors_path (str | None, optional): Optional path to save debug layers (cutlines, intersections).
 
     Outputs:
-        Writes the seamline vector file to the specified output file.
+        Saves a polygon seamline layer to `output_mask`, and optionally saves intermediate cutlines to `debug_vectors_path`.
     """
 
     print("Start voronoi center seamline")
@@ -93,6 +99,16 @@ def _read_mask(
     path: str,
     debug_logs: bool = False
     ) -> Tuple[np.ndarray, Affine]:
+    """
+    Reads a raster mask and returns a binary array where valid data is True.
+
+    Args:
+        path (str): Path to the input raster file.
+        debug_logs (bool, optional): If True, enables debug output; default is False.
+
+    Returns:
+        Tuple[np.ndarray, Affine]: A binary mask array and the associated affine transform.
+    """
 
     with rasterio.open(path) as src:
         arr = src.read(1)
@@ -105,6 +121,17 @@ def _seamline_mask(
     transform: Affine,
     debug_logs: bool = False
     ) -> Polygon:
+    """
+    Extracts polygons from a binary mask and returns the largest as the EMP.
+
+    Args:
+        mask (np.ndarray): Binary mask where True indicates valid area.
+        transform (Affine): Affine transform associated with the mask.
+        debug_logs (bool, optional): If True, prints debug info; default is False.
+
+    Returns:
+        Polygon: The largest extracted polygon from the mask.
+    """
 
     polys = [shape(geom) for geom, val in shapes(mask.astype(np.uint8), mask=mask, transform=transform) if val == 1]
     if debug_logs: print(f"Extracted {len(polys)} polygons from mask")
@@ -119,6 +146,18 @@ def _densify_polygon(
     dist: float,
     debug_logs: bool = False
 ) -> List[Tuple[float, float]]:
+    """
+    Densifies the exterior of the largest polygon by inserting points at regular intervals.
+
+    Args:
+        poly (Polygon | GeometryCollection): Input geometry to densify.
+        dist (float): Maximum distance between inserted points.
+        debug_logs (bool, optional): If True, prints debug info; default is False.
+
+    Returns:
+        List[Tuple[float, float]]: List of (x, y) coordinates with added intermediate points.
+    """
+
     # Extract coordinates from valid polygon geometries
     if isinstance(poly, Polygon):
         geometries = [poly]
@@ -152,6 +191,21 @@ def _compute_centerline(
     crs = None,
     debug_vectors_path = None,
 ) -> LineString:
+    """
+    Computes a Voronoi-based centerline between two overlapping polygons.
+
+    Args:
+        a (Polygon): First polygon.
+        b (Polygon): Second polygon.
+        min_point_spacing (float): Minimum spacing between seed points for Voronoi generation.
+        min_cut_length (float): Minimum segment length to include in the centerline graph.
+        debug_logs (bool, optional): If True, prints debug information; default is False.
+        crs (optional): Coordinate reference system used for optional debug output.
+        debug_vectors_path (optional): Path to save debug Voronoi cells; if None, skips saving.
+
+    Returns:
+        LineString: Shortest centerline path computed through the Voronoi diagram of the overlap.
+    """
 
     voa = a.intersection(b)
     pts = _densify_polygon(voa, min_point_spacing, debug_logs)
@@ -183,7 +237,6 @@ def _compute_centerline(
 
     if debug_logs:
         print(f"Densified {len(pts)} points")
-        from shapely.geometry import MultiPoint
         print(f"Convex hull area: {MultiPoint(pts).convex_hull.area}")
 
     multi = voronoi_diagram(GeometryCollection([Point(p) for p in pts]), edges=False)
@@ -227,6 +280,18 @@ def _segment_emp(
     cuts: List[LineString],
     debug_logs: bool = False
     ) -> Polygon:
+    """
+    Segments an EMP polygon by sequentially applying centerline cuts, retaining the piece containing the centroid.
+
+    Args:
+        emp (Polygon): The original EMP polygon to segment.
+        cuts (List[LineString]): List of cutlines to apply.
+        debug_logs (bool, optional): If True, prints debug info; default is False.
+
+    Returns:
+        Polygon: The segmented portion of the EMP containing the original centroid.
+    """
+
     # sequentially cut EMP by each centerline, choosing the segment containing the EMP centroid
     for i, ln in enumerate(cuts):
         if not emp.intersects(ln):
@@ -268,7 +333,20 @@ def _save_intersection_points(
     crs,
     pair_id: str,
 ) -> None:
-    """Save intersection points between polygon boundaries to a GPKG."""
+    """
+    Saves intersection points between the boundaries of two polygons to a GeoPackage layer.
+
+    Args:
+        a (Polygon): First polygon.
+        b (Polygon): Second polygon.
+        path (str): Path to the output GeoPackage file.
+        crs: Coordinate reference system for the output.
+        pair_id (str): Identifier for the polygon pair, saved as an attribute.
+
+    Returns:
+        None
+    """
+
     inter = a.boundary.intersection(b.boundary)
     if isinstance(inter, Point):
         points = [inter]
@@ -301,8 +379,18 @@ def _save_voronoi_cells(
         crs,
         layer_name: str = "voronoi_cells"
 ) -> None:
-    """Save Voronoi polygons as features to a GPKG."""
-    from fiona.errors import DriverError
+    """
+    Saves Voronoi polygon geometries to a specified GeoPackage layer.
+
+    Args:
+        voronoi_cells (GeometryCollection): Collection of Voronoi polygon geometries.
+        path (str): Path to the output GeoPackage file.
+        crs: Coordinate reference system for the output layer.
+        layer_name (str, optional): Name of the layer to write; default is "voronoi_cells".
+
+    Returns:
+        None
+    """
 
     schema = {"geometry": "Polygon", "properties": {}}
 

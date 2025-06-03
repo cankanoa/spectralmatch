@@ -14,8 +14,7 @@ from concurrent.futures import as_completed
 from typing import Tuple, Optional, List, Literal
 from multiprocessing import shared_memory
 
-from ..utils import _check_raster_requirements, _get_nodata_value
-from ..handlers import _resolve_paths
+from ..handlers import _resolve_paths, _get_nodata_value, _check_raster_requirements
 from ..utils_multiprocessing import _resolve_parallel_config, _resolve_windows, _get_executor, WorkerContext, file_lock
 from ..types_and_validation import Universal, Match
 
@@ -602,6 +601,34 @@ def _apply_adjustment_process_image(
     backend: str,
     max_workers: int,
     ):
+    """
+    Applies local radiometric adjustment to a single image using reference and local block statistics.
+
+    Args:
+        name (str): Image identifier.
+        img_path (str): Path to the input image.
+        out_path (str): Path to save the adjusted output image.
+        num_bands (int): Number of bands in the image.
+        block_reference_mean (np.ndarray): Global reference block mean array.
+        block_local_mean (np.ndarray): Image-specific local block mean array.
+        bounds_image_block_space (tuple): Block-space bounding box for the image.
+        bounds_canvas_coords (tuple): Full canvas extent for normalization.
+        window_size: Tiling strategy for processing.
+        num_row (int): Number of block rows.
+        num_col (int): Number of block columns.
+        nodata_val (float): Value representing missing data.
+        alpha (float): Blending factor for adjustment.
+        correction_method (str): Method to apply ("gamma" or "linear").
+        calculation_dtype (str): Dtype used for internal computation.
+        output_dtype (str): Dtype used for writing output.
+        debug_logs (bool): If True, logs progress.
+        parallel (bool): Whether to use multiprocessing for window-level processing.
+        backend (str): Backend to use for parallelism.
+        max_workers (int): Number of workers to use if parallel.
+
+    Writes:
+        The adjusted image to `out_path`.
+    """
 
     if debug_logs: print(f"    {name}")
 
@@ -689,10 +716,22 @@ def _apply_adjustment_process_window(
     calculation_dtype: str,
     ):
     """
-    Applies local radiometric correction to a raster tile using bilinear interpolation between global and local block means.
+    Applies radiometric correction to a single raster window using bilinear-interpolated block statistics.
+
+    Args:
+        name (str): Image identifier.
+        window (Window): Raster window to process.
+        band_idx (int): Band index (0-based).
+        num_row (int): Number of block rows in the canvas.
+        num_col (int): Number of block columns in the canvas.
+        bounds_canvas_coords (tuple): Spatial extent of the full block canvas.
+        nodata_val (float | int): NoData value in the raster.
+        alpha (float): Blending factor for correction.
+        correction_method (str): Either "gamma" or "linear".
+        calculation_dtype (str): Data type for intermediate calculations.
 
     Returns:
-        tuple: (Window, band index, corrected tile as np.ndarray)
+        Tuple[Window, int, np.ndarray]: The window, band index, and corrected data array.
     """
     try:
         # if debug_logs: print(f"b{band_idx}w{w_id}[{window.col_off}:{window.row_off} {window.width}x{window.height}], ", end="", flush=True)
@@ -853,6 +892,29 @@ def _calculate_block_process_image(
     backend: Literal["thread", "process"],
     max_workers: int,
     ) -> Tuple[str, np.ndarray, np.ndarray]:
+    """
+    Computes per-block mean statistics for a single image by aggregating pixel values into a block grid.
+
+    Args:
+        name (str): Image identifier.
+        image_path (str): Path to the input raster.
+        bounds_canvas_coords (tuple): Full extent of the block canvas (minx, miny, maxx, maxy).
+        num_row (int): Number of block rows.
+        num_col (int): Number of block columns.
+        num_bands (int): Number of image bands.
+        window_size (tuple or "block" or None): Tiling strategy for processing.
+        debug_logs (bool): If True, prints progress info.
+        nodata_value (float): Value used to identify invalid pixels.
+        calculation_dtype (str): Numpy dtype for internal arrays.
+        vector_mask (tuple or None): Optional spatial mask to include/exclude regions.
+        block_valid_pixel_threshold (float): Minimum valid pixel ratio to include block.
+        parallel (bool): Whether to use multiprocessing for tiles.
+        backend (str): Parallel execution backend ("process" or "thread").
+        max_workers (int): Number of parallel workers.
+
+    Returns:
+        Tuple[str, np.ndarray, np.ndarray]: (Image name, block mean array, block pixel count array)
+    """
 
     if debug_logs: print(f'    {name}')
 
@@ -959,6 +1021,25 @@ def _calculate_block_process_window(
     block_shape: Tuple[int, int],
     bounds_canvas_coords: Tuple[float, float, float, float],
     ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    """
+    Aggregates pixel values within a raster window into a block grid for one band.
+
+    Args:
+        band_index (int): Band index to process (0-based).
+        window (Window): Raster window to read.
+        name (str): Image identifier used to retrieve dataset.
+        geoms (list or None): Optional vector geometries for masking.
+        invert (bool): Whether to invert the mask.
+        nodata_value (float): NoData value in the raster.
+        calculation_dtype (str): Data type for computation.
+        transform: Affine transform of the dataset.
+        block_shape (tuple): (num_row, num_col) of the block grid.
+        bounds_canvas_coords (tuple): Extent of the full canvas (minx, miny, maxx, maxy).
+
+    Returns:
+        Optional[Tuple[np.ndarray, np.ndarray]]: (Sum of values per block, count of valid pixels per block),
+        or None if the window has no valid pixels.
+    """
 
     num_row, num_col = block_shape
     x_min, y_min, x_max, y_max = bounds_canvas_coords
@@ -1054,21 +1135,23 @@ def _download_block_map(
     write_bands: Tuple[int, ...] | None = None,
     window: Window | None = None,
     ):
-
     """
-    Writes specified bands of a 3D block map to an existing or new raster, using the provided window.
+    Writes a 3D block map to a raster file, creating or updating specified bands within a target window.
 
     Args:
-        block_map (np.ndarray): Array of shape (window.height, window.width, num_bands).
-        bounding_rect (tuple): Full bounding box (minx, miny, maxx, maxy).
-        output_image_path (str): Destination file path.
-        projection (CRS): Output CRS.
-        dtype (str): Data type to use for output.
-        nodata_value (float): Nodata value to assign.
-        window (Window): Rasterio window for partial writing.
-        width (int): Width of full output image.
-        height (int): Height of full output image.
-        write_bands (Tuple[int, ...]): Band indices (1-based) to write to or None to write all.
+        block_map (np.ndarray): Block data of shape (rows, cols, bands).
+        bounding_rect (tuple): Spatial extent (minx, miny, maxx, maxy).
+        output_image_path (str): Path to the output raster file.
+        projection (rasterio.CRS): Coordinate reference system.
+        dtype (str): Data type for output.
+        nodata_value (float): NoData value to write.
+        width (int): Full raster width.
+        height (int): Full raster height.
+        write_bands (tuple[int] | None): 0-based band indices to write; all if None.
+        window (Window | None): Raster window to write into; defaults to full image.
+
+    Output:
+        Writes the `block_map` array to `output_image_path`, either creating a new raster or updating an existing one.
     """
 
     num_bands = block_map.shape[2]

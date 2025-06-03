@@ -135,6 +135,20 @@ def compare_spatial_spectral_difference_band_average(
     diff_label: str,
     subtitle: str,
 ):
+    """
+    Computes and visualizes the average per-band spectral difference between two coregistered, equal size images.
+
+    Args:
+        input_images (list): List of two image file paths to compare.
+        output_image_path (str): Path to save the resulting difference image (PNG).
+        title (str): Title for the plot.
+        diff_label (str): Label for the colorbar indicating the difference metric.
+        subtitle (str): Optional subtitle to display below the plot.
+
+    Returns:
+        None
+    """
+
     if len(input_images) != 2:
         raise ValueError("input_images must be a list of exactly two image paths.")
 

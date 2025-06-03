@@ -15,8 +15,7 @@ from rasterio.transform import rowcol
 from rasterio.features import geometry_mask
 from rasterio.coords import BoundingBox
 
-from ..utils import _check_raster_requirements, _get_nodata_value
-from ..handlers import _resolve_paths
+from ..handlers import _resolve_paths, _get_nodata_value, _check_raster_requirements
 from ..utils_multiprocessing import _resolve_parallel_config, _resolve_windows, _get_executor, WorkerContext
 from ..types_and_validation import Universal, Match
 
@@ -356,10 +355,23 @@ def solve_global_model(
     debug_logs: bool = False,
 ) -> np.ndarray:
     """
-    Solves global normalization model and returns per-image scale/offsets.
+    Computes global radiometric normalization parameters (scale and offset) for each image and band using least squares regression.
+
+    Args:
+        num_bands: Number of image bands.
+        num_total: Total number of images (including loaded).
+        all_image_names: Ordered list of all image names.
+        included_names: Subset of images used to constrain the model.
+        input_image_names: Names of input images to apply normalization to.
+        all_overlap_stats: Pairwise overlap statistics per band.
+        all_whole_stats: Whole-image stats (mean, std) per band.
+        custom_mean_factor: Weight for mean constraints.
+        custom_std_factor: Weight for std constraints.
+        overlapping_pairs: Pairs of overlapping images.
+        debug_logs: If True, prints debug information.
 
     Returns:
-        np.ndarray: all_params shape (bands, 2 * num_images, 1)
+        np.ndarray: Adjustment parameters of shape (bands, 2 * num_images, 1).
     """
     all_params = np.zeros((num_bands, 2 * num_total, 1), dtype=float)
     image_names_with_id = [(i, name) for i, name in enumerate(all_image_names)]
@@ -454,10 +466,26 @@ def _apply_adjustments_process_image(
     debug_logs: bool = False,
     ):
     """
-    Applies global normalization adjustments for a single image using per-band scale and offset.
+    Applies scale and offset adjustments to each band of an input image and writes the result to the output path.
+
+    Args:
+        image_name: Identifier for the image in the worker context.
+        input_image_path: Path to the input raster image.
+        output_image_path: Path to save the adjusted output image.
+        scale: Per-band scale factors (1D array of length num_bands).
+        offset: Per-band offset values (1D array of length num_bands).
+        num_bands: Number of image bands.
+        nodata_val: NoData value to preserve during adjustment.
+        window_size: Tiling strategy for processing (None, int, tuple, or "internal").
+        calculation_dtype: Data type for computation.
+        output_dtype: Output data type (defaults to input type if None).
+        window_parallel: Whether to parallelize over windows.
+        window_backend: Backend to use for window-level parallelism ("process").
+        window_max_workers: Number of parallel workers for window processing.
+        debug_logs: If True, prints debug info during processing.
 
     Returns:
-        str: Path to the written output image.
+        None
     """
     if debug_logs: print(f"    Processing {image_name}")
 
@@ -564,6 +592,7 @@ def _save_adjustments(
 
     with open(save_path, "w") as f:
         json.dump(full_model, f, indent=2)
+
 
 def _validate_adjustment_model_structure(model: dict) -> None:
     """
@@ -800,7 +829,27 @@ def _overlap_stats_process_image(
     debug_logs: bool,
     ):
     """
-    Calculates mean, standard deviation, and valid pixel count for overlapping regions between two images.
+    Computes per-band overlap statistics (mean, std, pixel count) between two images over their intersecting area.
+
+    Args:
+        parallel: Whether to use multiprocessing for window processing.
+        max_workers: Number of workers for parallel processing.
+        backend: Parallelization backend ("process").
+        num_bands: Number of image bands.
+        input_image_path_i: Path to the first image.
+        input_image_path_j: Path to the second image.
+        name_i: Identifier for the first image.
+        name_j: Identifier for the second image.
+        bound_i: BoundingBox of the first image.
+        bound_j: BoundingBox of the second image.
+        nodata_i: NoData value for the first image.
+        nodata_j: NoData value for the second image.
+        vector_mask: Optional mask to include/exclude regions, with optional field filter.
+        window_size: Windowing strategy for tile processing.
+        debug_logs: If True, prints overlap bounds and status.
+
+    Returns:
+        dict: Nested stats dictionary for each image pair and band.
     """
 
     stats = {name_i: {name_j: {}}, name_j: {name_i: {}}}
@@ -918,6 +967,28 @@ def _overlap_stats_process_window(
     invert: bool,
     interpolation_method: int = cv2.INTER_LINEAR,
     ) -> tuple[np.ndarray, np.ndarray] | None:
+    """
+    Processes a single overlapping window between two images, applying masks and interpolation if needed,
+    and returns valid pixel pairs for statistical comparison.
+
+    Args:
+        win: Window in image i's coordinate space.
+        band: Band index to process.
+        col_min_i: Column offset of overlap region in image i.
+        row_min_i: Row offset of overlap region in image i.
+        name_i: Image i identifier in WorkerContext.
+        name_j: Image j identifier in WorkerContext.
+        nodata_i: NoData value for image i.
+        nodata_j: NoData value for image j.
+        geoms_i: Optional list of geometries for masking image i.
+        geoms_j: Optional list of geometries for masking image j.
+        invert: Whether to invert the mask logic (exclude vs include).
+        interpolation_method: OpenCV interpolation method for resampling (default: cv2.INTER_LINEAR).
+
+    Returns:
+        Tuple of valid pixel arrays (image_i_values, image_j_values), or None if no valid pixels found.
+    """
+
     src_i = WorkerContext.get(name_i)
     src_j = WorkerContext.get(name_j)
 
@@ -967,17 +1038,16 @@ def _fit_windows_to_pixel_bounds(
     col_offset: int,
 ) -> list[Window]:
     """
-    Crops image-relative windows so they fit within the pixel bounds defined by (row_min, row_max) and (col_min, col_max),
-    using a provided offset to convert window-relative positions into image-global coordinates.
+    Adjusts a list of image-relative windows to ensure they fit within specified pixel bounds, based on a global offset.
 
     Args:
-        windows: List of rasterio Windows (image-relative).
-        row_min, row_max: Pixel row bounds of the overlap region in global image coordinates.
-        col_min, col_max: Pixel column bounds of the overlap region in global image coordinates.
-        row_offset, col_offset: Offsets from image-relative to global coordinates.
+        windows: List of rasterio Window objects (relative to an image region).
+        row_min, row_max: Global pixel row bounds to clip against.
+        col_min, col_max: Global pixel column bounds to clip against.
+        row_offset, col_offset: Offsets to convert window-relative coordinates to global coordinates.
 
     Returns:
-        List[Window]: Cropped windows within the specified pixel bounds.
+        List[Window]: Windows cropped to the specified global bounds.
     """
     adjusted_windows = []
     for win in windows:
@@ -1023,7 +1093,22 @@ def _whole_stats_process_image(
     debug_logs: bool = False,
     ):
     """
-    Computes mean, standard deviation, and valid pixel count for each band in a single image using optional window-level multiprocessing.
+    Calculates whole-image statistics (mean, std, and valid pixel count) per band, with optional masking and window-level parallelism.
+
+    Args:
+        parallel: Whether to enable multiprocessing for window processing.
+        max_workers: Number of parallel workers to use.
+        backend: Multiprocessing backend ("process").
+        input_image_path: Path to the input raster.
+        nodata: NoData value to exclude from stats.
+        num_bands: Number of bands to process.
+        image_name: Identifier for use in WorkerContext.
+        vector_mask: Optional mask tuple to include/exclude specific regions, with optional field filter.
+        window_size: Tiling strategy (None, int, tuple, or "internal").
+        debug_logs: If True, prints debug messages.
+
+    Returns:
+        dict: Per-band statistics {image_name: {band: {mean, std, size}}}.
     """
 
     stats = {image_name: {}}
@@ -1101,6 +1186,20 @@ def _whole_stats_process_window(
     geoms: list | None,
     invert: bool,
     ) -> np.ndarray | None:
+    """
+    Extracts valid pixel values from a raster window, optionally applying a geometry mask.
+
+    Args:
+        win: Rasterio window to read.
+        band_idx: Band index to read (0-based).
+        image_name: Identifier for the image in WorkerContext.
+        nodata: NoData value to exclude.
+        geoms: Optional list of geometries for masking.
+        invert: If True, inverts the mask (exclude instead of include).
+
+    Returns:
+        np.ndarray or None: 1D array of valid pixel values, or None if none found.
+    """
 
     data = WorkerContext.get(image_name)
     block = data.read(band_idx + 1, window=win)
