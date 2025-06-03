@@ -8,7 +8,7 @@ import os
 from spectralmatch import *
 
 # Important: If this does not automatically find the correct CWD, manually copy the path to the /data_worldview folder
-working_directory = '/Users/kanoalindiwe/Downloads/Projects/spectralmatch/docs/examples/data_worldview'
+working_directory = os.path.join(os.getcwd(), "data_worldview")
 print(working_directory)
 
 input_folder = os.path.join(working_directory, "Input")
@@ -17,102 +17,46 @@ local_folder = os.path.join(working_directory, "LocalMatch")
 aligned_folder = os.path.join(working_directory, "Aligned")
 clipped_folder = os.path.join(working_directory, "Clipped")
 stats_folder = os.path.join(working_directory, "Stats")
-new_global_folder = os.path.join(working_directory, "GlobalMatch_New")
-new_local_folder = os.path.join(working_directory, "LocalMatch_New")
 
 
 window_size = 128
-num_workers = 5
+num_image_workers = 5
+num_window_workers = 5
 
-
-# %% Global matching (minimal parameters)
+# %% Global matching
 
 global_regression(
     (input_folder, "*.tif"),
     (global_folder, "$_Global.tif"),
-    )
-
-# %% (OPTIONAL) Global matching all input images to the spectral profile of any number of specified images (regression will still be based on overlapping areas, however, only the *included* images statistics will influence the solution)
-
-global_regression(
-    (input_folder, "*.tif"),
-    (new_global_folder, "$_Global.tif"),
-    debug_logs=True,
-    specify_model_images=("include", ['worldview3_example_image_right']),
-    save_adjustments=os.path.join(new_global_folder, "GlobalAdjustments.json"),
-    )
-
-# %% (OPTIONAL) Global matching starting from precomputed statistics for images whole and overlap stats and increase images tendency to move towards the mean
-
-global_regression(
-    (input_folder, "*.tif"),
-    (new_global_folder, "$_Global.tif"),
-    custom_mean_factor = 3, # Default is 1; 3 often works better to 'move' the spectral mean of images closer together (applied when creating model)
-    custom_std_factor=1,
-    debug_logs=True,
-    load_adjustments=os.path.join(new_global_folder, "GlobalAdjustments.json"),
-    )
-# %% (OPTIONAL) Global matching starting from precomputed statistics for images whole and overlap stats and increase images tendency to move towards the mean
-
-global_regression(
-    (input_folder, "*.tif"),
-    (new_global_folder, "$_Global.tif"),
-    custom_mean_factor = 3, # Default is 1; 3 often works better to 'move' the spectral mean of images closer together (applied when creating model)
-    debug_logs=True,
-    load_adjustments=os.path.join(new_global_folder, "GlobalAdjustments.json"),
-    )
-
-# %% (OPTIONAL) Global match with multiprocessing and windows
-
-global_regression(
-    (input_folder, "*.tif"),
-    (new_global_folder, "$_Global.tif"),
     debug_logs=True,
     window_size=window_size,
-    image_parallel_workers=("process", num_workers),
-    window_parallel_workers=("process", num_workers),
+    image_parallel_workers=("process", num_image_workers),
+    window_parallel_workers=("process", num_window_workers),
+    save_as_cog=True,
+    # specify_model_images=("include", ['Worldview_2016-09-22']), # Global matching all input images to the spectral profile of any number of specified images (regression will still be based on overlapping areas, however, only the *included* images statistics will influence the solution)
+    # custom_mean_factor=3, # Default is 1; 3 often works better to 'move' the spectral mean of images closer together (applied when creating model)
+    custom_std_factor=3,
+    save_adjustments=os.path.join(global_folder, "GlobalAdjustments.json"), # Start from precomputed statistics for images whole and overlap stats
+    # load_adjustments=os.path.join(global_folder, "GlobalAdjustments.json"), # Load Statistics
     )
 
 # %% Local matching
+reference_map_path = os.path.join(local_folder, "ReferenceBlockMap", "ReferenceBlockMap.tif")
+local_maps_path = os.path.join(local_folder, "LocalBlockMap", "$_LocalBlockMap.tif")
+searched_paths = search_paths(os.path.join(local_folder, "LocalBlockMap"), "*.tif")
+
 local_block_adjustment(
     (global_folder, "*.tif"),
     (local_folder, "$_Local.tif"),
-    number_of_blocks=50
-    )
-
-# %% (OPTIONAL) Local match with a larger canvas than images bounds (perhaps to anticipate adding additional imagery so you don't have to recalculate local block maps each rematch)
-reference_map_path = os.path.join(new_local_folder, "ReferenceBlockMap", "ReferenceBlockMap.tif")
-local_maps_path = os.path.join(new_local_folder, "LocalBlockMap", "$_LocalBlockMap.tif")
-
-local_block_adjustment(
-    (global_folder, "*.tif"),
-    (new_local_folder, "$_Local.tif"),
-    number_of_blocks=(30,30),
     debug_logs=True,
-    override_bounds_canvas_coords = (193011.1444011169369332, 2184419.3597142999060452, 205679.2836037494416814, 2198309.8632259583100677),
+    window_size=window_size,
+    image_parallel_workers=("process", num_image_workers),
+    window_parallel_workers=("process", num_window_workers),
+    save_as_cog=True,
+    number_of_blocks=100, # Target number of blocks
+    # override_bounds_canvas_coords = (193011.1444011169369332, 2184419.3597142999060452, 205679.2836037494416814, 2198309.8632259583100677), # Local match with a larger canvas than images bounds (perhaps to anticipate adding additional imagery so you don't have to recalculate local block maps each rematch)
     save_block_maps=(reference_map_path, local_maps_path),
-    )
-
-# %% (OPTIONAL) Local match from saved block maps (this code just passes in local maps, but if a reference map is passed in, it will match images to the reference map without recomputing it)
-saved_reference_block_path = os.path.join(local_folder, "ReferenceBlockMap", "ReferenceBlockMap.tif")
-saved_local_block_paths = [os.path.join(os.path.join(new_local_folder, "LocalBlockMap"), f) for f in os.listdir(os.path.join(new_local_folder, "LocalBlockMap")) if f.lower().endswith(".tif")]
-
-local_block_adjustment(
-    (global_folder, "*.tif"),
-    (new_local_folder, "$_Local.tif"),
-    debug_logs=True,
-    load_block_maps=(None, saved_local_block_paths)
-    )
-
-# %% (OPTIONAL) Local match with multiprocessing and windows
-
-local_block_adjustment(
-    (global_folder, "*.tif"),
-    (new_local_folder, "$_Local.tif"),
-    debug_logs=True,
-    window_size = window_size,
-    image_parallel_workers = ("process", num_workers),
-    window_parallel_workers = ("process", num_workers),
+    # load_block_maps=(reference_map_path, searched_paths), # Local match from saved block maps (this code just passes in local maps, but if a reference map is passed in, it will match images to the reference map without recomputing it)
     )
 
 #%% Align rasters
@@ -121,11 +65,11 @@ align_rasters(
     (local_folder, "*.tif"),
     (aligned_folder, "$_Aligned.tif"),
     tap=True,
-    resolution='highest',
+    resolution='lowest',
     debug_logs=True,
     window_size=window_size,
-    image_parallel_workers=("process", num_workers),
-    window_parallel_workers=("process", num_workers),
+    image_parallel_workers=("process", num_image_workers),
+    window_parallel_workers=("process", num_window_workers),
     )
 
 # %% Generate voronoi center seamlines
@@ -141,15 +85,16 @@ voronoi_center_seamline(
     )
 
 # %% Clip
+input_mask_path = os.path.join(working_directory, "ImageMasks.gpkg")
 
 mask_rasters(
     (aligned_folder, "*.tif"),
     (clipped_folder, "$_Clipped.tif"),
-    vector_mask=("include", os.path.join(working_directory, "ImageMasks.gpkg"), "image"),
+    vector_mask=("include", input_mask_path, "image"),
     debug_logs=True,
     window_size=window_size,
-    image_parallel_workers=("process", num_workers),
-    window_parallel_workers=("process", num_workers),
+    image_parallel_workers=("process", num_image_workers),
+    window_parallel_workers=("process", num_window_workers),
     )
 
 # %% Merge rasters
@@ -158,8 +103,10 @@ output_merged_image_path = os.path.join(working_directory, "MergedImage.tif")
 merge_rasters(
     (clipped_folder, "*.tif"),
     output_merged_image_path,
-    window_size=window_size,
     debug_logs=True,
+    window_size=window_size,
+    image_parallel_workers=("process", num_image_workers),
+    window_parallel_workers=("process", num_window_workers),
 )
 
 # %% Pre-coded quick Statistics
