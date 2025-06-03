@@ -1,1 +1,1 @@
-::: spectralmatch.mask
+::: spectralmatch.mask.mask

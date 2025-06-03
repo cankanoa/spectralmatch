@@ -10,7 +10,69 @@ from omnicloudmask import predict_from_array
 from rasterio.features import shapes
 from osgeo import gdal, ogr, osr
 from shapely.geometry import shape, Polygon, MultiPolygon, mapping
-from typing import Literal
+from typing import Literal, Any
+
+import rasterio
+import numpy as np
+import os
+import re
+from rasterio.features import shapes
+from shapely.geometry import shape, mapping
+import fiona
+
+
+def custom_band_math(
+    input_images,
+    output_vector_mask: str,
+    custom_math: str,
+    threshold: float = 0.5,
+    debug_logs: bool = False,
+):
+    """
+    Applies custom band math expression to raster images and saves result as a vector mask.
+
+    Args:
+        input_images (str | list[str] | tuple): Path(s) to input raster(s).
+        output_vector_mask (str): Path to save the vector mask (GeoPackage or Shapefile).
+        custom_math (str): Math expression using b1, b2, ..., e.g., "(b1 / (b4 + 1e-6)) > 2".
+        threshold (float): Threshold to convert result to a binary mask if expression is continuous.
+        debug_logs (bool): Print debug logs if True.
+    """
+    # Resolve input path
+    path = input_images if isinstance(input_images, str) else input_images[0]
+    with rasterio.open(path) as src:
+        bands = [src.read(i + 1) for i in range(src.count)]
+        profile = src.profile
+        transform = src.transform
+        crs = src.crs
+
+    # Prepare band variables (b1, b2, ...) for eval
+    band_vars = {f"b{i+1}": band.astype(np.float32) for i, band in enumerate(bands)}
+
+    if debug_logs:
+        print(f"Evaluating: {custom_math}")
+
+    try:
+        result = eval(custom_math, {"np": np}, band_vars)
+    except Exception as e:
+        raise ValueError(f"Failed to evaluate expression '{custom_math}': {e}")
+
+    if result.dtype != bool:
+        result = result > threshold
+
+    result = result.astype(np.uint8)
+
+    # Polygonize the mask
+    mask_shapes = (
+        (shape(geom), val)
+        for geom, val in shapes(result, mask=result == 1, transform=transform)
+    )
+
+    schema = {"geometry": "Polygon", "properties": {"value": "int"}}
+    os.makedirs(os.path.dirname(output_vector_mask), exist_ok=True)
+    with fiona.open(output_vector_mask, "w", driver="GPKG", schema=schema, crs=crs) as dst:
+        for geom, val in mask_shapes:
+            dst.write({"geometry": mapping(geom), "properties": {"value": int(val)}})
 
 
 def create_cloud_mask_with_omnicloudmask(
@@ -21,7 +83,7 @@ def create_cloud_mask_with_omnicloudmask(
     output_mask_path,
     down_sample_m=None, # Down sample to 10 m if imagery has a spatial resolution < 10 m
     debug_logs: bool = False,
-    **omnicloud_kwargs,
+    **omnicloud_kwargs: Any,
     ):
     """
     Generates a cloud mask using OmniCloudMask from a multi-band image.

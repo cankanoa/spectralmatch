@@ -144,9 +144,6 @@ def compare_spatial_spectral_difference_band_average(
         title (str): Title for the plot.
         diff_label (str): Label for the colorbar indicating the difference metric.
         subtitle (str): Optional subtitle to display below the plot.
-
-    Returns:
-        None
     """
 
     if len(input_images) != 2:

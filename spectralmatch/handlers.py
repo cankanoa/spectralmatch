@@ -56,8 +56,8 @@ def search_paths(
         pattern (str): A glob pattern (e.g., "*.tif", "**/*.jpg").
         recursive (bool, optional): Whether to search for files recursively.
         match_to_paths (Tuple[List[str], str], optional): If provided, match `reference_paths` to `input_match_paths` using a regex applied to the basenames of `input_match_paths`. The extracted key must be a substring of the reference filename.
-         - reference_paths (List[str]): List of reference paths to align to.
-         - match_regex (str): Regex applied to basenames of input_match_paths to extract a key to match via *inclusion* in reference_paths (e.g. r"(.*)_LocalMatch\.gpkg$").
+            - reference_paths (List[str]): List of reference paths to align to.
+            - match_regex (str): Regex applied to basenames of input_match_paths to extract a key to match via *inclusion* in reference_paths (e.g. "(.*)_LocalMatch.gpkg$").
         debug_logs (bool, optional): Whether to print the matched file paths.
 
     Returns:
