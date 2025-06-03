@@ -1,8 +1,6 @@
 # Contributing Guide
 
-This project includes a [Makefile](https://github.com/spectralmatch/spectralmatch/blob/main/Makefile) to streamline development tasks. Makefiles allow you to automate and organize common tasks, in this case to help serve and deploy documentation, manage version tags, format and lint code, and run tests.
-
-> **Installation instructions are on their own [page](installation.md)**
+Thank you for your interest in contributing. The sections below outline how the library is structured, how to submit changes, and the conventions to follow when developing new features or improving existing functionality.
 
 ---
 
@@ -20,30 +18,163 @@ We welcome all contributions the project! Please be respectful and work towards 
 
 ---
 
-## Design Guidelines and Philosophy
+## Design Philosophy
 
-### Remember to: 
-
-- Keep code concise and simple
-- Adapt code for large datasets with windows, multiprocessing, progressive computations, etc
-- Keep code modular and have descriptive names
-- Use PEP 8 code formatting
-- Use functions that are already created when possible
-
-### When building a function:
-
+ - Keep code concise and simple
+ - Adapt code for large datasets with windows, multiprocessing, progressive computations, etc
+ - Keep code modular and have descriptive names
+ - Use PEP 8 code formatting
+ - Use functions that are already created when possible
  - Combine similar params into one multi-value parameter
- - Start functions by printing "Start {process}"
- - Use similar naming convention and input parameter format as other functions. For example: vector_mask_path, window_size, debug_logs, custom_nodata_value, parallel_workers, calculation_dtype, etc.
- - If True, debug_logs param should be used to enable printing info about the process
+ - Use similar naming convention and input parameter format as other functions.
  - Create docstrings (Google style), tests, and update the docs for new functionality
 
+---
+
+## Extensible Function Types
+
+In Relative Radiometric Normalization (RRN) methods often differ in how images are matched, pixels are selected, and seamlines are created. This library organizes those into distinct Python packages, while other operations like aligning rasters, applying masks, merging images, and calculating statistics are more consistent across techniques and are treated as standard utilities.
+
+### Matching functions
+
+Used to adjust the pixel values of images to ensure radiometric consistency across scenes. These functions compute differences between images and apply transformations so that brightness, contrast, or spectral characteristics align across datasets.
+
+
+### Masking functions (PIF/RCS)
+
+Used to define which parts of an image should be kept or discarded based on spatial criteria. These functions apply vector-based filters or logical rules to isolate regions of interest, remove clouds, or exclude invalid data from further processing.
+
+
+### Seamline functions
+
+Used to determine optimal boundaries between overlapping image regions. These functions generate cutlines that split image footprints in a way that minimizes visible seams and balances spatial coverage, often relying on geometric relationships between overlapping areas.
+
+---
+
+## Standard UI
+
+Reusable types are organized into the types and validation module. Use these types directly as the types of params inside functions where applicable. Use the appropriate _resolve... function to resolve these inputs into usable variables.
+
+### Input/Output
+The input_images parameter accepts either a tuple or a list. If given as a tuple, it should contain a folder path and a glob pattern to search for files (e.g., ("/input/folder", "*.tif")). Alternatively, it can be a list of full file paths to individual input images. The output_images parameter defines how output filenames are determined. It can also be a tuple, consisting of an output folder and a filename template where "\$" is replaced with each input image’s basename (e.g., ("/output/folder", "$_GlobalMatch.tif")). Alternatively, it may be a list of full output paths, which must match the number of input images.
+```python
+# Params
+input_images
+output_images
+
+# Types
+SearchFolderOrListFiles = Tuple[str, str] | List[str] # Required
+CreateInFolderOrListFiles = Tuple[str, str] | List[str] # Required
+
+# Resolve
+input_image_paths = _resolve_paths("search", input_images)
+output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
+```
+
+### Nodata Value
+The output_dtype parameter specifies the data type for output rasters and defaults to the input image’s data type if not provided or None. Functions should begin by printing "Start {process name}", while all other print statements should be conditional on debug_logs being True.
+```python
+# Param
+custom_nodata_value
+
+# Type
+DebugLogs = bool # Default: False
+
+# No resolve function necessary
+```
+
+### Debug Logs
+The debug_logs parameter enables printing of debug information and constraint matrices when set to True; it defaults to False.
+```python
+# Param
+debug_logs
+
+# Type
+DebugLogs = bool # Default: False
+
+# No resolve function necessary
+```
+
+### Vector Mask
+The vector_mask parameter limits statistics calculations to specific areas and is given as a tuple with two or three items: a literal "include" or "exclude" to define how the mask is applied, a string path to the vector file, and an optional field name used to match geometries based on the input image name (substring match allowed). Defaults to None for no mask.
+
+```python
+# Param
+vector_mask
+
+# Type
+VectorMask = Tuple[Literal["include", "exclude"], str, Optional[str]] | None
+
+# No resolve function necessary
+```
+
+### Parallel Workers
+The image_parallel_workers parameter defines the parallelization strategy at the image level. It accepts a tuple such as ("process", "cpu") to enable multiprocessing across all available CPU cores, or you can use "thread" as the backend if threading is preferred. Set it to None to disable image-level parallelism. The window_parallel_workers parameter controls parallelization within each image at the window level and follows the same format. Setting it to None disables window-level parallelism. Processing windows should be done one band at a time for scalability.
+```python
+# Params
+image_parallel_workers
+window_parallel_workers
+
+# Types
+ImageParallelWorkers = Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None
+WindowParallelWorkers = Tuple[Literal["process"], Literal["cpu"] | int] | None
+
+# Resolve
+image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
+window_parallel, window_backend, window_max_workers = _resolve_parallel_config(window_parallel_workers)
+```
+
+### Windows
+The window_size parameter sets the tile size for reading and writing, using an integer for square tiles, a tuple for custom dimensions, "internal" to use the raster’s native tiling (ideal for efficient streaming from COGs), or None to process the full image at once.
+```python
+# Param
+window_size
+
+# Types
+WindowSize = int | Tuple[int, int] | Literal["internal"] | None
+WindowSizeWithBlock = int | Tuple[int, int] | Literal["internal", "block"] | None
+
+# Resolve
+windows = _resolve_windows(rasterio.DatasetReader, window_size)
+```
+
+### COGs
+The save_as_cog parameter, when set to True, saves the output as a Cloud-Optimized GeoTIFF with correct band and block ordering.
+```python
+# Param
+SaveAsCog = bool # Default: True
+
+# Type
+SaveAsCog = bool # Default: True
+
+# No resolve function necessary
+```
+
+---
+
+## Validate Inputs
+The validate methods are used to check that input parameters follow expected formats before processing begins. There are different validation methods for different scopes—some are general-purpose (e.g., Universal.validate) and others apply to specific contexts like matching (Match.validate_match). These functions raise clear errors when inputs are misconfigured, helping catch issues early and enforce consistent usage patterns across the library.
+```python
+# Validate params example
+Universal.validate(
+    input_images=input_images,
+    output_images=output_images,
+    vector_mask=vector_mask,
+)
+Match.validate_match(
+    specify_model_images=specify_model_images,
+    )
+```
+
+---
 
 ## File Cleanup
 Temporary generated files can be deleted once they are no longer needed via this command:
 ```bash
 make clean
 ```
+
+---
 
 ## Docs
 

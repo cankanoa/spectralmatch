@@ -18,21 +18,24 @@
 
 - **Automated:** Works without manual intervention, making it ideal for large-scale applications.
 
+- **Multiprocessing:** Image, window, and band parallel processing. Cloud Optimized GeoTIFF reading and writing.
+
+- **Save Intermediate Steps:** Save image stats and block maps for quick reprocessing.
+
+- **Specify Model Images** Include all or specified images in the matching solution to bring all images to a central tendency or selected images spectral profile.
+
 - **Consistent Multi-Image Analysis:** Ensures uniformity across images by applying systematic corrections with minimal spectral distortion.
 
-- **Seamlessly Blended:** Creates smooth transitions between images without visible seams.
+- **Seamlessly Blended:** Creates smooth transitions between images.
 
 - **Unit Agnostic:** Works with any pixel unit and preserves the spectral information for accurate analysis. This inlcludes negative numbers and reflectance.
 
 - **Better Input for Machine Learning Models:** Provides high-quality, unbiased data for AI and analytical workflows.
 
-- **Minimizes Color Bias:** Avoids excessive color normalization and does not rely on a strict reference image.
+- **Sensor Agnostic:** Works with all optical sensors. In addition, images from different sensors can be combined for multisensor analysis.
 
-- **Sensor Agnostic:** Works with all optical sensors. In addition, images from differnt sensors can be combined for multisensor analysis.
+- **Mosaics:** Designed to process and blend vast image collections effectively.
 
-- **Parallel Processing:** Optimized for modern CPUs to handle large datasets efficiently.
-
-- **Large-Scale Mosaics:** Designed to process and blend vast image collections effectively.
 - **Time Series**: Normalize images across time with to compare spectral changes.
 
 ---
@@ -65,7 +68,7 @@ However, global correction alone cannot capture intra-image variability so a sec
 - **Local Adjustments:** Block-level color differences result from the global application of adjustments.
 
 ---
-## Quick Installation (Detailed instructions are in the [docs](https://spectralmatch.github.io/spectralmatch/installation/))
+## Quick Installation ([Other methods](https://spectralmatch.github.io/spectralmatch/installation/))
 
 ### Installation as a QGIS Plugin
 Install the spectralmatch plugin in [QGIS](https://qgis.org/download/) and use it in the Processing Toolbox.
