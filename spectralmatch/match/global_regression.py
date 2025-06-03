@@ -111,7 +111,7 @@ def global_regression(
     output_image_path_pairs = dict(zip(input_image_names, output_image_paths))
 
     # Check raster requirements
-    _check_raster_requirements(list(input_image_path_pairs.values()), debug_logs)
+    _check_raster_requirements(input_image_paths, debug_logs, check_geotransform=True, check_crs=True, check_bands=True, check_nodata=True)
 
     nodata_val = _get_nodata_value(list(input_image_path_pairs.values()), custom_nodata_value)
 

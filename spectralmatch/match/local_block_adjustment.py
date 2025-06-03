@@ -126,7 +126,7 @@ def local_block_adjustment(
     input_image_path_pairs = dict(zip(input_image_names, input_image_paths))
     output_image_path_pairs = dict(zip(input_image_names, output_image_paths))
 
-    _check_raster_requirements(input_image_paths, debug_logs)
+    _check_raster_requirements(input_image_paths, debug_logs, check_geotransform=True, check_crs=True, check_bands=True, check_nodata=True)
 
     if isinstance(window_size, int): window_size = (window_size, window_size)
     nodata_val = _get_nodata_value(input_image_paths, custom_nodata_value)

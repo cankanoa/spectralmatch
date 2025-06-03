@@ -1,5 +1,5 @@
 import pytest
-from spectralmatch.utils import _check_raster_requirements
+from spectralmatch.handlers import _check_raster_requirements
 from unittest.mock import MagicMock
 
 def _mock_raster(crs, count, nodata, transform=(0, 1, 0, 0, 0, -1)):

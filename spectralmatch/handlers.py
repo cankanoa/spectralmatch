@@ -163,42 +163,63 @@ def match_paths(
 def _check_raster_requirements(
     input_image_paths: list,
     debug_logs: bool,
-    ) -> bool:
+    check_geotransform: bool = False,
+    check_crs: bool = False,
+    check_bands: bool = False,
+    check_nodata: bool = False,
+    check_resolution: bool = False,
+) -> bool:
     """
     Validates a list of raster image paths to ensure they are compatible for processing.
 
     Args:
         input_image_paths (list[str]): Paths to input raster images.
         debug_logs (bool): If True, prints debug messages.
+        check_geotransform (bool): Check that all images have a valid geotransform.
+        check_crs (bool): Check that all images have the same CRS.
+        check_bands (bool): Check that all images have the same number of bands.
+        check_nodata (bool): Check that all images have the same nodata values per band.
+        check_resolution (bool): Check that all images have the same resolution.
 
     Returns:
-        bool: True if all input images meet geospatial and metadata consistency checks.
+        bool: True if all checks pass.
 
     Raises:
-        ValueError: If any image lacks a geotransform, has a mismatched CRS, band count, or nodata value.
+        ValueError: If any check fails.
     """
 
     if debug_logs: print(f"Found {len(input_image_paths)} images")
-    datasets = []
-    for path in input_image_paths:
-        data_in = rasterio.open(path)
-        datasets.append(data_in)
+
+    datasets = [rasterio.open(p) for p in input_image_paths]
 
     ref_crs = datasets[0].crs
     ref_count = datasets[0].count
+    ref_res = datasets[0].res
     ref_nodata = [datasets[0].nodata] * ref_count if datasets[0].nodata is not None else [None] * ref_count
 
     for i, ds in enumerate(datasets):
-        if ds.transform is None:
+        if check_geotransform and ds.transform is None:
             raise ValueError(f"Fail: Image {i} has no geotransform.")
-        if ds.crs != ref_crs:
+        if check_crs and ds.crs != ref_crs:
             raise ValueError(f"Fail: Image {i} has different CRS.")
-        if ds.count != ref_count:
+        if check_bands and ds.count != ref_count:
             raise ValueError(f"Fail: Image {i} has {ds.count} bands; expected {ref_count}.")
-        for b in range(ds.count):
-            if ds.nodata != ref_nodata[b]:
-                raise ValueError(f"Fail: Image {i}, band {b+1} has different nodata value.")
-    if debug_logs: print("Input data checks passed: geotransform are present, CRS match, band count match, nodata match")
+        if check_resolution and ds.res != ref_res:
+            raise ValueError(f"Fail: Image {i} has resolution {ds.res}; expected {ref_res}.")
+        if check_nodata:
+            for b in range(ds.count):
+                if ds.nodata != ref_nodata[b]:
+                    raise ValueError(f"Fail: Image {i}, band {b+1} has different nodata value.")
+
+    if debug_logs:
+        passed_checks = []
+        if check_geotransform: passed_checks.append("geotransform")
+        if check_crs: passed_checks.append("crs")
+        if check_bands: passed_checks.append("bands")
+        if check_nodata: passed_checks.append("nodata")
+        if check_resolution: passed_checks.append("resolution")
+        print(f"Input data checks passed: {', '.join(passed_checks)}")
+
     return True
 
 

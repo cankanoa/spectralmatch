@@ -14,7 +14,7 @@ from concurrent.futures import as_completed
 from rasterio.transform import Affine
 from rasterio.windows import from_bounds
 
-from .handlers import _resolve_paths
+from .handlers import _resolve_paths, _check_raster_requirements
 from .types_and_validation import Universal
 from .utils_multiprocessing import _resolve_windows, _get_executor, WorkerContext, _resolve_parallel_config
 
@@ -371,6 +371,8 @@ def merge_rasters(
 
     input_image_paths = _resolve_paths("search", input_images)
 
+    _check_raster_requirements(input_image_paths, debug_logs, check_geotransform=True, check_crs=True, check_bands=True, check_nodata=True)
+
     image_names = [os.path.splitext(os.path.basename(p))[0] for p in input_image_paths]
     input_image_path_pairs = dict(zip(image_names, input_image_paths))
 
@@ -508,9 +510,19 @@ def _merge_raster_process_window(
             return band_idx, None, None
         block[mask] = nodata_value
 
-    # Get spatial bounds of the window in the dst image
-    bounds = rasterio.windows.bounds(window, transform=src_transform)
-    dst_window = from_bounds(*bounds, transform=dst_transform)
+    row_off, col_off = int(window.row_off), int(window.col_off)
+    x, y = src_transform * (col_off, row_off)
+
+    # Convert world coordinates to destination pixel space
+    dst_col_off, dst_row_off = ~dst_transform * (x, y)
+
+    # Reuse original width/height
+    dst_window = Window(
+        col_off=int(round(dst_col_off)),
+        row_off=int(round(dst_row_off)),
+        width=window.width,
+        height=window.height
+    )
 
     return band_idx, dst_window, block
 
