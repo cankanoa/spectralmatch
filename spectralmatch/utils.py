@@ -440,6 +440,8 @@ def merge_rasters(
     init_worker = WorkerContext.init
     init_args_map = {name: ("raster", path) for name, path in input_image_path_pairs.items()}
 
+    with rasterio.open(output_image_path, "w", **meta):
+        pass
     with rasterio.open(output_image_path, "r+", **meta) as dst:
         if image_parallel:
             with _get_executor(
@@ -466,6 +468,7 @@ def merge_rasters(
                     merged = np.where(valid_mask, buf, existing)
                     dst.write(merged, band + 1, window=dst_window)
             WorkerContext.close()
+    if debug_logs: print("Raster merging complete")
 
 
 def _merge_raster_process_window(
@@ -508,8 +511,6 @@ def _merge_raster_process_window(
     # Get spatial bounds of the window in the dst image
     bounds = rasterio.windows.bounds(window, transform=src_transform)
     dst_window = from_bounds(*bounds, transform=dst_transform)
-
-    if debug_logs: print(f"[{image_name}] Band {band_idx+1}, Src Window {window}, Dst Window {dst_window}")
 
     return band_idx, dst_window, block
 
