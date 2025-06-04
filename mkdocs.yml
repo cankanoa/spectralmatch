@@ -20,11 +20,17 @@ plugins:
           python:
             options:
                 show_root_toc_entry: false
-    - git-revision-date
+    - git-revision-date-localized:
+        enabled: true
+        exclude:
+            - llm_prompt.md
     - mkdocs-jupyter:
         include_source: true
         execute: false
         ignore_h1_titles: true
+    - gen-files:
+          scripts:
+              - docs/create_llm_prompt.py
 
 markdown_extensions:
     - attr_list

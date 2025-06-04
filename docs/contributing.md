@@ -2,6 +2,8 @@
 
 Thank you for your interest in contributing. The sections below outline how the library is structured, how to submit changes, and the conventions to follow when developing new features or improving existing functionality.
 
+For convenience, you can copy [this](/spectralmatch/llm_prompt/) auto updated LLM priming prompt with function headers and docs.
+
 ---
 
 ## Collaboration Instructions
@@ -78,7 +80,7 @@ The output_dtype parameter specifies the data type for output rasters and defaul
 custom_nodata_value
 
 # Type
-DebugLogs = bool # Default: False
+CustomNodataValue = float | int | None # Default: None
 
 # No resolve function necessary
 ```
@@ -122,6 +124,47 @@ WindowParallelWorkers = Tuple[Literal["process"], Literal["cpu"] | int] | None
 # Resolve
 image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
 window_parallel, window_backend, window_max_workers = _resolve_parallel_config(window_parallel_workers)
+
+
+# Main process example
+image_args = [(arg, other_args, ...) for arg in inputs]
+if image_parallel:
+    with _get_executor(image_backend, image_max_workers) as executor:
+        futures = [executor.submit(_name_process_image, *arg) for arg in image_args]
+        for future in as_completed(futures):
+                result = future.result()
+else:
+        for arg in image_args:
+            result = _name_process_image(*arg)
+
+def _name_process_image(image_name, arg_1, arg_2, ...):
+    with rasterio.open(input_image_path) as src:
+        # Open output image as well if saving to image
+        windows = _resolve_windows(src, window_size)
+        window_args = [(window, other_args, ...) for window in windows]
+
+        with _get_executor(
+            window_backend, 
+            window_max_workers,
+            initializer=WorkerContext.init,
+            initargs=({image_name: ("raster", input_image_path)},)
+            ) as executor:
+            futures = [executor.submit(_name_process_window, *arg) for arg in window_args]
+            for future in as_completed(futures):
+                band, window, result = future.result()
+                # Save result to variable or dataset
+        else:
+            WorkerContext.init({image_name: ("raster", input_image_path)})
+            for arg in window_args:
+                band, window, buf = _name_process_window(*arg)
+                # Save result to variable or dataset
+            WorkerContext.close()
+
+def _name_process_window(image_name, arg_1, arg_2, ...):
+    ds = WorkerContext.get(image_name)
+    # Process result to return
+    
+    return band, window, block
 ```
 
 ### Windows
