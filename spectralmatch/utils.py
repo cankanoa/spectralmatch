@@ -128,7 +128,7 @@ def align_rasters(
 
     input_image_paths = _resolve_paths("search", input_images)
     output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
-    image_names = os.path.splitext(os.path.basename(input_image_paths[0]))[0]
+    image_names = [os.path.splitext(os.path.basename(p))[0] for p in input_image_paths]
 
     if debug_logs: print(f"{len(input_image_paths)} rasters to align")
 
