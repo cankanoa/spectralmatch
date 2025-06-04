@@ -4,7 +4,7 @@ import os
 import numpy as np
 import sys
 import json
-import cv2
+from skimage.transform import resize
 
 from concurrent.futures import as_completed
 from typing import List, Tuple, Literal
@@ -964,7 +964,7 @@ def _overlap_stats_process_window(
     geoms_i: list | None,
     geoms_j: list | None,
     invert: bool,
-    interpolation_method: int = cv2.INTER_LINEAR,
+    interpolation_method: int = 1,
     ) -> tuple[np.ndarray, np.ndarray] | None:
     """
     Processes a single overlapping window between two images, applying masks and interpolation if needed,
@@ -982,7 +982,7 @@ def _overlap_stats_process_window(
         geoms_i: Optional list of geometries for masking image i.
         geoms_j: Optional list of geometries for masking image j.
         invert: Whether to invert the mask logic (exclude vs include).
-        interpolation_method: OpenCV interpolation method for resampling (default: cv2.INTER_LINEAR).
+        interpolation_method: OpenCV interpolation method for resampling. 1 is bilinear interpolation.
 
     Returns:
         Tuple of valid pixel arrays (image_i_values, image_j_values), or None if no valid pixels found.
@@ -1012,11 +1012,13 @@ def _overlap_stats_process_window(
         block_j[~mask_j] = nodata_j
 
     if block_j.shape != block_i.shape:
-        block_j = cv2.resize(
+        block_j = resize(
             block_j,
-            (block_i.shape[1], block_i.shape[0]),
-            interpolation=interpolation_method
-        )
+            block_i.shape,
+            order=interpolation_method,
+            preserve_range=True,
+            anti_aliasing=False
+        ).astype(block_j.dtype)
     if block_j.shape != block_i.shape:
         raise ValueError(f"Block size mismatch after interpolation: block_i={block_i.shape}, block_j={block_j.shape}")
 
