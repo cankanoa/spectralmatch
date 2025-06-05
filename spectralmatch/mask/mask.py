@@ -2,6 +2,7 @@ import os
 import rasterio
 import numpy as np
 import fiona
+import geopandas as gpd
 
 from rasterio.enums import Resampling
 from rasterio.transform import from_origin

@@ -1,7 +1,7 @@
 import os
 import fiona
 import rasterio
-# import geopandas as gpd
+import geopandas as gpd
 import pandas as pd
 import numpy as np
 
