@@ -16,6 +16,7 @@ class Universal:
     WindowParallelWorkers = Tuple[Literal["process"], Literal["cpu"] | int] | None
     CalculationDtype = str
     OutputDtype = str | None
+    CreateNameAttribute: Tuple[str, str] | None
 
     @staticmethod
     def validate(
@@ -31,6 +32,7 @@ class Universal:
         window_parallel_workers=_UNSET,
         calculation_dtype=_UNSET,
         output_dtype=_UNSET,
+        create_name_attribute=_UNSET,
         ):
         if input_images is not _UNSET:
             if not isinstance(input_images, (tuple, list)):
@@ -114,6 +116,12 @@ class Universal:
         if output_dtype is not _UNSET and output_dtype is not None:
             if not isinstance(output_dtype, str):
                 raise ValueError("output_dtype must be a string or None.")
+
+        if create_name_attribute is not _UNSET:
+            if not isinstance(Universal.CreateNameAttribute, tuple) or len(Universal.CreateNameAttribute) != 2:
+                raise ValueError("CreateNameAttribute must be a tuple of two strings or None.")
+            if not all(isinstance(s, str) for s in Universal.CreateNameAttribute):
+                raise ValueError("Both elements of CreateNameAttribute must be strings.")
 
 # Match-specific only
 class Match:
