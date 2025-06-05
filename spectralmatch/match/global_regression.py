@@ -4,7 +4,7 @@ import os
 import numpy as np
 import sys
 import json
-# from skimage.transform import resize
+from skimage.transform import resize
 
 from concurrent.futures import as_completed
 from typing import List, Tuple, Literal
@@ -1011,14 +1011,14 @@ def _overlap_stats_process_window(
         mask_j = geometry_mask(geoms_j, transform=transform_j_win, invert=not invert, out_shape=block_j.shape)
         block_j[~mask_j] = nodata_j
 
-    # if block_j.shape != block_i.shape:
-        # block_j = resize(
-        #     block_j,
-        #     block_i.shape,
-        #     order=interpolation_method,
-        #     preserve_range=True,
-        #     anti_aliasing=False
-        # ).astype(block_j.dtype)
+    if block_j.shape != block_i.shape:
+        block_j = resize(
+            block_j,
+            block_i.shape,
+            order=interpolation_method,
+            preserve_range=True,
+            anti_aliasing=False
+        ).astype(block_j.dtype)
     if block_j.shape != block_i.shape:
         raise ValueError(f"Block size mismatch after interpolation: block_i={block_i.shape}, block_j={block_j.shape}")
 
