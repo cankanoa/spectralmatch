@@ -118,7 +118,7 @@ def match_paths(
     Args:
         input_match_paths (List[str]): List of candidate paths to extract keys from.
         reference_paths (List[str]): List of reference paths to align to.
-        match_regex (str): Regex applied to basenames of input_match_paths to extract a key to match via *inclusion* in reference_paths (e.g. r\"(.*)_LocalMatch\.gpkg$").
+        match_regex (str): Regex applied to basenames of input_match_paths to extract a key to match via *inclusion* in reference_paths (e.g. "(.*)_LocalMatch\\.gpkg$" (without one of the backslashes)).
         debug_logs (bool): If True, print matched and unmatched file basenames.
 
     Returns:

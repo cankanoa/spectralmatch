@@ -1,78 +1,126 @@
 import os
 import rasterio
-import geopandas as gpd
 import numpy as np
 import fiona
+import geopandas as gpd
 
 from rasterio.enums import Resampling
 from rasterio.transform import from_origin
 from omnicloudmask import predict_from_array
-from rasterio.features import shapes
 from osgeo import gdal, ogr, osr
 from shapely.geometry import shape, Polygon, MultiPolygon, mapping
-from typing import Literal, Any
-
-import rasterio
-import numpy as np
-import os
-import re
+from typing import Literal, Any, Tuple
 from rasterio.features import shapes
-from shapely.geometry import shape, mapping
-import fiona
+from concurrent.futures import as_completed
 
+from ..utils_multiprocessing import _get_executor, WorkerContext, _resolve_windows, _resolve_parallel_config
+from ..handlers import _resolve_paths
+from ..types_and_validation import Universal
 
-def custom_band_math(
-    input_images,
+def band_math(
+    input_images: Universal.SearchFolderOrListFiles,
     output_vector_mask: str,
     custom_math: str,
-    threshold: float = 0.5,
-    debug_logs: bool = False,
+    threshold: Tuple[str, float],
+    *,
+    debug_logs: Universal.DebugLogs = False,
+    custom_nodata_value: Universal.CustomNodataValue = None,
+    image_parallel_workers: Universal.ImageParallelWorkers = None,
+    window_parallel_workers: Universal.WindowParallelWorkers = None,
+    window_size: Universal.WindowSize = None,
 ):
-    """
-    Applies custom band math expression to raster images and saves result as a vector mask.
+    input_image_paths = _resolve_paths("search", input_images)
+    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
 
-    Args:
-        input_images (str | list[str] | tuple): Path(s) to input raster(s).
-        output_vector_mask (str): Path to save the vector mask (GeoPackage or Shapefile).
-        custom_math (str): Math expression using b1, b2, ..., e.g., "(b1 / (b4 + 1e-6)) > 2".
-        threshold (float): Threshold to convert result to a binary mask if expression is continuous.
-        debug_logs (bool): Print debug logs if True.
-    """
-    # Resolve input path
-    path = input_images if isinstance(input_images, str) else input_images[0]
-    with rasterio.open(path) as src:
-        bands = [src.read(i + 1) for i in range(src.count)]
-        profile = src.profile
+    image_args = [(path, output_vector_mask, custom_math, threshold, debug_logs, custom_nodata_value, window_parallel_workers, window_size)
+                  for path in input_image_paths]
+
+    if image_parallel:
+        with _get_executor(image_backend, image_max_workers) as executor:
+            futures = [executor.submit(band_math_process_image, *arg) for arg in image_args]
+            for future in as_completed(futures):
+                future.result()
+    else:
+        for arg in image_args:
+            band_math_process_image(*arg)
+
+
+def band_math_process_image(
+    input_image_path: str,
+    output_vector_mask: str,
+    custom_math: str,
+    threshold: Tuple[str, float],
+    debug_logs: bool,
+    custom_nodata_value,
+    window_parallel_workers,
+    window_size,
+):
+    with rasterio.open(input_image_path) as src:
         transform = src.transform
         crs = src.crs
+        windows = _resolve_windows(src, window_size)
 
-    # Prepare band variables (b1, b2, ...) for eval
-    band_vars = {f"b{i+1}": band.astype(np.float32) for i, band in enumerate(bands)}
+    window_parallel, window_backend, window_max_workers = _resolve_parallel_config(window_parallel_workers)
+    window_args = [(input_image_path, window, custom_math, threshold, debug_logs, custom_nodata_value)
+                   for window in windows]
 
-    if debug_logs:
-        print(f"Evaluating: {custom_math}")
+    all_shapes = []
+
+    if window_parallel:
+        with _get_executor(window_backend, window_max_workers, initializer=WorkerContext.init,
+                            initargs=({input_image_path: ("raster", input_image_path)},)) as executor:
+            futures = [executor.submit(band_math_process_window, *arg) for arg in window_args]
+            for future in as_completed(futures):
+                shapes_part = future.result()
+                all_shapes.extend(shapes_part)
+    else:
+        WorkerContext.init({input_image_path: ("raster", input_image_path)})
+        for arg in window_args:
+            shapes_part = band_math_process_window(*arg)
+            all_shapes.extend(shapes_part)
+        WorkerContext.close()
+
+    os.makedirs(os.path.dirname(output_vector_mask), exist_ok=True)
+    schema = {"geometry": "Polygon", "properties": {"value": "int"}}
+    with fiona.open(output_vector_mask, "w", driver="GPKG", schema=schema, crs=crs) as dst:
+        for geom, val in all_shapes:
+            dst.write({"geometry": mapping(geom), "properties": {"value": int(val)}})
+
+
+def band_math_process_window(
+    input_image_path: str,
+    window: rasterio.windows.Window,
+    custom_math: str,
+    threshold: Tuple[str, float],
+    debug_logs: bool,
+    custom_nodata_value,
+):
+    ds = WorkerContext.get(input_image_path)
+    bands = [ds.read(i + 1, window=window).astype(np.float32) for i in range(ds.count)]
+    band_vars = {f"b{i+1}": b for i, b in enumerate(bands)}
 
     try:
         result = eval(custom_math, {"np": np}, band_vars)
     except Exception as e:
         raise ValueError(f"Failed to evaluate expression '{custom_math}': {e}")
 
-    if result.dtype != bool:
-        result = result > threshold
+    method, value = threshold
+    if method == "percent":
+        flat = result[~np.isnan(result)].flatten()
+        t = np.percentile(flat, 100 - value)
+        if debug_logs:
+            print(f"Computed {value} percentile threshold: {t}")
+    elif method == "constant":
+        t = value
+    else:
+        raise ValueError(f"Unknown threshold method: {method}")
 
-    result = result.astype(np.uint8)
-
-    # Polygonize the mask
-    mask_shapes = (
+    binary_mask = (result > t).astype(np.uint8)
+    out_shapes = list(
         (shape(geom), val)
-        for geom, val in shapes(result, mask=result == 1, transform=transform)
+        for geom, val in shapes(binary_mask, mask=binary_mask == 1, transform=ds.window_transform(window))
     )
-
-    schema = {"geometry": "Polygon", "properties": {"value": "int"}}
-    os.makedirs(os.path.dirname(output_vector_mask), exist_ok=True)
-    with fiona.open(output_vector_mask, "w", driver="GPKG", schema=schema, crs=crs) as dst:
-        for geom, val in mask_shapes:
-            dst.write({"geometry": mapping(geom), "properties": {"value": int(val)}})
+    return out_shapes
 
 
 def create_cloud_mask_with_omnicloudmask(
