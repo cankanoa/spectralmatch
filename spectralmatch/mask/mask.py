@@ -3,6 +3,7 @@ import rasterio
 import numpy as np
 import fiona
 import geopandas as gpd
+import re
 
 from rasterio.enums import Resampling
 from rasterio.transform import from_origin
@@ -17,6 +18,7 @@ from ..utils_multiprocessing import _get_executor, WorkerContext, _resolve_windo
 from ..handlers import _resolve_paths, _resolve_nodata_value
 from ..types_and_validation import Universal
 
+
 def band_math(
     input_images: Universal.SearchFolderOrListFiles,
     output_images: Universal.CreateInFolderOrListFiles,
@@ -27,17 +29,22 @@ def band_math(
     image_parallel_workers: Universal.ImageParallelWorkers = None,
     window_parallel_workers: Universal.WindowParallelWorkers = None,
     window_size: Universal.WindowSize = None,
+    output_dtype: Universal.OutputDtype = None,
+    calculation_dtype: Universal.CalculationDtype = None,
 ):
     input_image_paths = _resolve_paths("search", input_images)
-    output_image_paths = _resolve_paths("create", output_images, input_image_paths)
+    output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
     image_names = _resolve_paths("name", input_image_paths)
 
     nodata_value = _resolve_nodata_value(rasterio.open(input_image_paths[0]), custom_nodata_value)
 
     image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
 
+    # Extract referenced bands from custom_math (e.g., b1, b2, ...)
+    band_indices = sorted({int(match[1:]) for match in re.findall(r"\bb\d+\b", custom_math)})
+
     image_args = [
-        (in_path, out_path, name, custom_math, debug_logs, nodata_value, window_parallel_workers, window_size)
+        (in_path, out_path, name, custom_math, debug_logs, nodata_value, window_parallel_workers, window_size, band_indices)
         for in_path, out_path, name in zip(input_image_paths, output_image_paths, image_names)
     ]
 
@@ -60,6 +67,7 @@ def band_math_process_image(
     nodata_value,
     window_parallel_workers,
     window_size,
+    band_indices,
 ):
     with rasterio.open(input_image_path) as src:
         profile = src.profile.copy()
@@ -71,7 +79,7 @@ def band_math_process_image(
         with rasterio.open(output_image_path, "w", **profile) as dst:
             windows = _resolve_windows(src, window_size)
             args = [
-                (name, window, custom_math, debug_logs, nodata_value)
+                (name, window, custom_math, debug_logs, nodata_value, band_indices)
                 for window in windows
             ]
 
@@ -80,12 +88,12 @@ def band_math_process_image(
                     futures = [executor.submit(band_math_process_window, *arg) for arg in args]
                     for future in futures:
                         band, window, data = future.result()
-                        dst.write(data[np.newaxis, :, :], band, window=window)
+                        dst.write(data.astype("float32"), band, window=window)
             else:
                 WorkerContext.init({name: ("raster", input_image_path)})
                 for arg in args:
                     band, window, data = band_math_process_window(*arg)
-                    dst.write(data[np.newaxis, :, :], band, window=window)
+                    dst.write(data.astype("float32"), band, window=window)
                 WorkerContext.close()
 
 
@@ -95,10 +103,13 @@ def band_math_process_window(
     custom_math: str,
     debug_logs: bool,
     nodata_value,
+    band_indices,
 ):
     ds = WorkerContext.get(name)
-    bands = [ds.read(i + 1, window=window).astype(np.float32) for i in range(ds.count)]
-    band_vars = {f"b{i+1}": b for i, b in enumerate(bands)}
+
+
+    bands = [ds.read(i, window=window).astype(np.float32) for i in band_indices]
+    band_vars = {f"b{i}": b for i, b in zip(band_indices, bands)}
 
     try:
         result = eval(custom_math, {"np": np}, band_vars)
