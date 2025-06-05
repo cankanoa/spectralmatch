@@ -9,6 +9,25 @@ from typing import List, Optional, Literal, Tuple, Union
 from spectralmatch.types_and_validation import Universal
 
 
+def _resolve_output_dtype(
+    dataset: rasterio.io.DatasetReader,
+    custom_output_dtype: Universal.CustomOutputDtype,
+):
+    """
+    Resolves the output dtype for a raster operation.
+
+    Args:
+        dataset (rasterio.io.DatasetReader): The input dataset to derive default dtype from.
+        custom_output_dtype (str | None): A user-specified output dtype, or None to use dataset dtype.
+
+    Returns:
+        str: The resolved output dtype.
+    """
+    if custom_output_dtype is not None:
+        return custom_output_dtype
+    return dataset.dtypes[0]
+
+
 def _resolve_nodata_value(
     dataset: rasterio.io.DatasetReader,
     custom_nodata_value: Universal.CustomNodataValue
@@ -49,6 +68,9 @@ def _resolve_paths(
     Returns:
         List[str]: List of resolved input.
     """
+    if not isinstance(args, tuple) and args is not None:
+        raise ValueError(f"Args to pass must be a tuple")
+
     if isinstance(input, list):
         resolved = input
     elif mode == "search":

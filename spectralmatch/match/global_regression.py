@@ -25,7 +25,7 @@ def global_regression(
     output_images: Universal.CreateInFolderOrListFiles,
     *,
     calculation_dtype: Universal.CalculationDtype = "float32",
-    output_dtype: Universal.OutputDtype = None,
+    output_dtype: Universal.CustomOutputDtype = None,
     vector_mask: Universal.VectorMask = None,
     debug_logs: Universal.DebugLogs = False,
     custom_nodata_value: Universal.CustomNodataValue = None,

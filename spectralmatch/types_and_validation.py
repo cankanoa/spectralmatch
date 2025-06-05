@@ -15,7 +15,7 @@ class Universal:
     ImageParallelWorkers = Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None
     WindowParallelWorkers = Tuple[Literal["process"], Literal["cpu"] | int] | None
     CalculationDtype = str
-    OutputDtype = str | None
+    CustomOutputDtype = str | None
     CreateNameAttribute: Tuple[str, str] | None
 
     @staticmethod
@@ -31,7 +31,7 @@ class Universal:
         image_parallel_workers=_UNSET,
         window_parallel_workers=_UNSET,
         calculation_dtype=_UNSET,
-        output_dtype=_UNSET,
+        custom_output_dtype=_UNSET,
         create_name_attribute=_UNSET,
         ):
         if input_images is not _UNSET:
@@ -113,9 +113,9 @@ class Universal:
             if not isinstance(calculation_dtype, str):
                 raise ValueError("calculation_dtype must be a string.")
 
-        if output_dtype is not _UNSET and output_dtype is not None:
-            if not isinstance(output_dtype, str):
-                raise ValueError("output_dtype must be a string or None.")
+        if custom_output_dtype is not _UNSET and custom_output_dtype is not None:
+            if not isinstance(custom_output_dtype, str):
+                raise ValueError("custom_output_dtype must be a string or None.")
 
         if create_name_attribute is not _UNSET:
             if not isinstance(Universal.CreateNameAttribute, tuple) or len(Universal.CreateNameAttribute) != 2:
