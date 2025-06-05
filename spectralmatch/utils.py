@@ -20,12 +20,12 @@ from .utils_multiprocessing import _resolve_windows, _get_executor, WorkerContex
 
 
 def merge_vectors(
-        input_vector_paths: List[str],
-        merged_vector_path: str,
-        method: Literal["intersection", "union", "keep_all"],
-        debug_logs: bool = False,
-        create_name_attribute: Optional[Tuple[str, str]] = None,
-) -> None:
+    input_vector_paths: List[str],
+    merged_vector_path: str,
+    method: Literal["intersection", "union", "keep_all"],
+    debug_logs: bool = False,
+    create_name_attribute: Optional[Tuple[str, str]] = None,
+    ) -> None:
     """
     Merge multiple vector files using the specified geometric method.
 
@@ -42,47 +42,47 @@ def merge_vectors(
     """
     print(f"Start vector merge")
 
-    # os.makedirs(os.path.dirname(merged_vector_path), exist_ok=True)
-    #
-    # geoms = []
-    # input_names = []
-    #
-    # for path in input_vector_paths:
-    #     gdf = gpd.read_file(path)
-    #     if create_name_attribute:
-    #         name = os.path.splitext(os.path.basename(path))[0]
-    #         input_names.append(name)
-    #     geoms.append(gdf)
-    #
-    # # Prepare the full combined name value once
-    # combined_name_value = None
-    # if create_name_attribute:
-    #     field_name, sep = create_name_attribute
-    #     combined_name_value = sep.join(input_names)
-    #
-    # if method == "keep_all":
-    #     merged = gpd.GeoDataFrame(pd.concat(geoms, ignore_index=True), crs=geoms[0].crs)
-    #     if create_name_attribute:
-    #         merged[field_name] = combined_name_value
-    #
-    # elif method == "union":
-    #     merged = gpd.GeoDataFrame(pd.concat(geoms, ignore_index=True), crs=geoms[0].crs)
-    #     if create_name_attribute:
-    #         merged[field_name] = combined_name_value
-    #
-    # elif method == "intersection":
-    #     merged = geoms[0]
-    #     for gdf in geoms[1:]:
-    #         shared_cols = set(merged.columns).intersection(gdf.columns) - {"geometry"}
-    #         gdf = gdf.drop(columns=shared_cols)
-    #         merged = gpd.overlay(merged, gdf, how="intersection", keep_geom_type=True)
-    #     if create_name_attribute:
-    #         merged[field_name] = combined_name_value
-    #
-    # else:
-    #     raise ValueError(f"Unsupported merge method: {method}")
-    #
-    # merged.to_file(merged_vector_path)
+    os.makedirs(os.path.dirname(merged_vector_path), exist_ok=True)
+
+    geoms = []
+    input_names = []
+
+    for path in input_vector_paths:
+        gdf = gpd.read_file(path)
+        if create_name_attribute:
+            name = os.path.splitext(os.path.basename(path))[0]
+            input_names.append(name)
+        geoms.append(gdf)
+
+    # Prepare the full combined name value once
+    combined_name_value = None
+    if create_name_attribute:
+        field_name, sep = create_name_attribute
+        combined_name_value = sep.join(input_names)
+
+    if method == "keep_all":
+        merged = gpd.GeoDataFrame(pd.concat(geoms, ignore_index=True), crs=geoms[0].crs)
+        if create_name_attribute:
+            merged[field_name] = combined_name_value
+
+    elif method == "union":
+        merged = gpd.GeoDataFrame(pd.concat(geoms, ignore_index=True), crs=geoms[0].crs)
+        if create_name_attribute:
+            merged[field_name] = combined_name_value
+
+    elif method == "intersection":
+        merged = geoms[0]
+        for gdf in geoms[1:]:
+            shared_cols = set(merged.columns).intersection(gdf.columns) - {"geometry"}
+            gdf = gdf.drop(columns=shared_cols)
+            merged = gpd.overlay(merged, gdf, how="intersection", keep_geom_type=True)
+        if create_name_attribute:
+            merged[field_name] = combined_name_value
+
+    else:
+        raise ValueError(f"Unsupported merge method: {method}")
+
+    merged.to_file(merged_vector_path)
 
 
 def align_rasters(
