@@ -323,6 +323,7 @@ def global_regression(
             window_parallel,
             window_backend,
             window_max_workers,
+            save_as_cog,
             debug_logs,
         )
         for idx, (name, img_path) in enumerate(input_image_path_pairs.items())
@@ -456,12 +457,13 @@ def _apply_adjustments_process_image(
     offset: np.ndarray,
     num_bands: int,
     nodata_val: int | float,
-    window_size: int | Tuple[int, int] | Literal["internal"] | None,
+    window_size: Universal.WindowSizeWithBlock,
     calculation_dtype: str,
     output_dtype: str | None,
     window_parallel: bool,
     window_backend: str,
     window_max_workers: int,
+    save_as_cog: Universal.SaveAsCog,
     debug_logs: bool = False,
     ):
     """
@@ -489,12 +491,28 @@ def _apply_adjustments_process_image(
     if debug_logs: print(f"    Processing {image_name}")
 
     with rasterio.open(input_image_path) as src:
+        block_y, block_x = (w := next(_resolve_windows(src, window_size))).height, w.width
+
         meta = src.meta.copy()
-        meta.update({
+        if save_as_cog:
+            meta.update({
             "count": num_bands,
             "dtype": output_dtype or src.dtypes[0],
-            "nodata": nodata_val
-        })
+            "nodata": nodata_val,
+            "driver": "GTiff",
+            "BIGTIFF": "IF_SAFER",
+            "BLOCKXSIZE": block_x,
+            "BLOCKYSIZE": block_y,
+            "COMPRESS": "DEFLATE",
+            "TILED": True,
+            })
+        else:
+            meta.update({
+            "count": num_bands,
+            "dtype": output_dtype or src.dtypes[0],
+            "nodata": nodata_val,
+            "driver": "GTiff",
+            })
 
         with rasterio.open(output_image_path, "w", **meta) as dst:
 

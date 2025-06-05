@@ -310,6 +310,7 @@ def local_block_adjustment(
             window_parallel,
             window_backend,
             window_max_workers,
+            save_as_cog,
         )
         for name in input_image_path_pairs
     ]
@@ -600,6 +601,7 @@ def _apply_adjustment_process_image(
     parallel: bool,
     backend: str,
     max_workers: int,
+    save_as_cog: bool,
     ):
     """
     Applies local radiometric adjustment to a single image using reference and local block statistics.
@@ -633,8 +635,27 @@ def _apply_adjustment_process_image(
     if debug_logs: print(f"    {name}")
 
     with rasterio.open(img_path) as src:
+        block_y, block_x = (w := next(_resolve_windows(src, window_size))).height, w.width
         meta = src.meta.copy()
-        meta.update({"count": num_bands, "dtype": output_dtype or src.dtypes[0], "nodata": nodata_val})
+        if save_as_cog:
+            meta.update({
+            "count": num_bands,
+            "dtype": output_dtype or src.dtypes[0],
+            "nodata": nodata_val,
+            "driver": "GTiff",
+            "BIGTIFF": "IF_SAFER",
+            "BLOCKXSIZE": block_x,
+            "BLOCKYSIZE": block_y,
+            "COMPRESS": "DEFLATE",
+            "TILED": True,
+            })
+        else:
+            meta.update({
+            "count": num_bands,
+            "dtype": output_dtype or src.dtypes[0],
+            "nodata": nodata_val,
+            "driver": "GTiff",
+            })
 
         # Mask global block reference to image bounds
         block_reference_mean_masked = np.where(
