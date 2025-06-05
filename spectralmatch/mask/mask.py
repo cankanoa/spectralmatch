@@ -6,7 +6,7 @@ import fiona
 from rasterio.enums import Resampling
 from rasterio.transform import from_origin
 from omnicloudmask import predict_from_array
-# from osgeo import gdal, ogr, osr
+from osgeo import gdal, ogr, osr
 from shapely.geometry import shape, Polygon, MultiPolygon, mapping
 from typing import Literal, Any, Tuple
 from rasterio.features import shapes
@@ -198,132 +198,132 @@ def create_cloud_mask_with_omnicloudmask(
         dst.write(pred_mask, 1)
 
 
-# def post_process_raster_cloud_mask_to_vector(
-#     input_image_path: str,
-#     output_vector_path: str,
-#     minimum_mask_size_percentile: float = None,
-#     polygon_buffering_in_map_units: dict = None,
-#     value_mapping: dict = None
-#     ) -> ogr.DataSource:
-#     """
-#     Converts a raster cloud mask to a vector layer with optional filtering, buffering, and merging.
-#
-#     Args:
-#         input_image_path (str): Path to the input cloud mask raster.
-#         output_vector_path (str): Path to the output vector layer.
-#         minimum_mask_size_percentile (float, optional): Percentile threshold to filter small polygons by area.
-#         polygon_buffering_in_map_units (dict, optional): Mapping of raster values to buffer distances.
-#         value_mapping (dict, optional): Mapping of original raster values to new values before vectorization.
-#
-#     Outputs:
-#         Saves a vector layer to the output path.
-#     """
-#
-#     print("Start post-processing raster cloud mask")
-#     with rasterio.open(input_image_path) as src:
-#         raster_data = src.read(1)
-#         transform = src.transform
-#         crs = src.crs
-#
-#     if value_mapping is not None:
-#         include_mask = np.full(raster_data.shape, True, dtype=bool)
-#         mapped = np.copy(raster_data)
-#         for orig_value, new_value in value_mapping.items():
-#             if new_value is None:
-#                 include_mask &= raster_data != orig_value  # Exclude from processing
-#             else:
-#                 mapped[raster_data == orig_value] = new_value
-#         raster_data = mapped
-#     else:
-#         include_mask = None
-#
-#     results = (
-#         {'properties': {'value': v}, 'geometry': s}
-#         for s, v in shapes(raster_data, mask=include_mask, transform=transform, connectivity=4)
-#     )
-#     features = list(results)
-#     if not features:
-#         print("No features were detected in the raster mask.")
-#         return None
-#
-#
-#     gdf = gpd.GeoDataFrame.from_features(features, crs=crs)
-#
-#     gdf['area'] = gdf.geometry.area
-#     if minimum_mask_size_percentile is not None:
-#         area_threshold = np.percentile(gdf['area'], minimum_mask_size_percentile)
-#         print(f"Area threshold (at {minimum_mask_size_percentile}th percentile): {area_threshold:.2f}")
-#         gdf = gdf[gdf['area'] >= area_threshold].copy()
-#
-#     if polygon_buffering_in_map_units is not None:
-#         gdf['geometry'] = gdf.apply(
-#             lambda row: row['geometry'].buffer(polygon_buffering_in_map_units.get(row['value'], 0))
-#             if row['value'] in polygon_buffering_in_map_units else row['geometry'],
-#             axis=1
-#         )
-#
-#     merged_features = []
-#     for val, group in gdf.groupby('value'):
-#         # Use union_all() to merge the geometries within the group.
-#         # (Requires Shapely 2.0 or later; otherwise use shapely.ops.unary_union on group.geometry.tolist())
-#         union_geom = group.geometry.union_all()
-#         # If the union produces a single Polygon, add it directly;
-#         # if it produces a MultiPolygon, split it into individual features.
-#         if union_geom.geom_type == 'Polygon':
-#             merged_features.append({'value': val, 'geometry': union_geom})
-#         elif union_geom.geom_type == 'MultiPolygon':
-#             for geom in union_geom.geoms:
-#                 merged_features.append({'value': val, 'geometry': geom})
-#         else:
-#             # In case of unexpected geometry types, skip or handle accordingly.
-#             print(f"Unexpected geometry type for value {val}: {union_geom.geom_type}")
-#     # Create a new GeoDataFrame from merged features.
-#     gdf = gpd.GeoDataFrame(merged_features, crs=gdf.crs)
-#
-#
-#     ogr_driver = ogr.GetDriverByName("Memory")
-#     mem_ds = ogr_driver.CreateDataSource("in_memory")
-#
-#     # Determine an appropriate OGR geometry type using the first feature.
-#     first_geom = gdf.geometry.iloc[0]
-#     if first_geom.geom_type == "Polygon":
-#         ogr_geom_type = ogr.wkbPolygon
-#     elif first_geom.geom_type == "MultiPolygon":
-#         ogr_geom_type = ogr.wkbMultiPolygon
-#     else:
-#         ogr_geom_type = ogr.wkbUnknown
-#
-#     # Convert the CRS to OGR SpatialReference.
-#     sr = osr.SpatialReference()
-#     try:
-#         sr.ImportFromWkt(crs.to_wkt())
-#     except AttributeError:
-#         sr.ImportFromEPSG(4326)
-#
-#     mem_layer = mem_ds.CreateLayer("post_processed", sr, ogr_geom_type)
-#
-#     # Add attribute field for 'value' (and any other non-geometry columns if needed).
-#     # Here we add 'value' for example.
-#     field_defn = ogr.FieldDefn("value", ogr.OFTInteger)
-#     mem_layer.CreateField(field_defn)
-#
-#     # Add each row from the GeoDataFrame as an OGR feature.
-#     for idx, row in gdf.iterrows():
-#         feat = ogr.Feature(mem_layer.GetLayerDefn())
-#         ogr_geom = ogr.CreateGeometryFromWkt(row['geometry'].wkt)
-#         feat.SetGeometry(ogr_geom)
-#         feat.SetField("value", row['value'])
-#         mem_layer.CreateFeature(feat)
-#         feat = None
-#
-#     driver = ogr.GetDriverByName("GPKG")
-#     if os.path.exists(output_vector_path):
-#         driver.DeleteDataSource(output_vector_path)
-#     out_ds = driver.CreateDataSource(output_vector_path)
-#     out_ds.CopyLayer(mem_layer, "post_processed")
-#     out_ds = None
-#
-#     return output_vector_path
+def post_process_raster_cloud_mask_to_vector(
+    input_image_path: str,
+    output_vector_path: str,
+    minimum_mask_size_percentile: float = None,
+    polygon_buffering_in_map_units: dict = None,
+    value_mapping: dict = None
+    ) -> ogr.DataSource:
+    """
+    Converts a raster cloud mask to a vector layer with optional filtering, buffering, and merging.
+
+    Args:
+        input_image_path (str): Path to the input cloud mask raster.
+        output_vector_path (str): Path to the output vector layer.
+        minimum_mask_size_percentile (float, optional): Percentile threshold to filter small polygons by area.
+        polygon_buffering_in_map_units (dict, optional): Mapping of raster values to buffer distances.
+        value_mapping (dict, optional): Mapping of original raster values to new values before vectorization.
+
+    Outputs:
+        Saves a vector layer to the output path.
+    """
+
+    print("Start post-processing raster cloud mask")
+    with rasterio.open(input_image_path) as src:
+        raster_data = src.read(1)
+        transform = src.transform
+        crs = src.crs
+
+    if value_mapping is not None:
+        include_mask = np.full(raster_data.shape, True, dtype=bool)
+        mapped = np.copy(raster_data)
+        for orig_value, new_value in value_mapping.items():
+            if new_value is None:
+                include_mask &= raster_data != orig_value  # Exclude from processing
+            else:
+                mapped[raster_data == orig_value] = new_value
+        raster_data = mapped
+    else:
+        include_mask = None
+
+    results = (
+        {'properties': {'value': v}, 'geometry': s}
+        for s, v in shapes(raster_data, mask=include_mask, transform=transform, connectivity=4)
+    )
+    features = list(results)
+    if not features:
+        print("No features were detected in the raster mask.")
+        return None
+
+
+    gdf = gpd.GeoDataFrame.from_features(features, crs=crs)
+
+    gdf['area'] = gdf.geometry.area
+    if minimum_mask_size_percentile is not None:
+        area_threshold = np.percentile(gdf['area'], minimum_mask_size_percentile)
+        print(f"Area threshold (at {minimum_mask_size_percentile}th percentile): {area_threshold:.2f}")
+        gdf = gdf[gdf['area'] >= area_threshold].copy()
+
+    if polygon_buffering_in_map_units is not None:
+        gdf['geometry'] = gdf.apply(
+            lambda row: row['geometry'].buffer(polygon_buffering_in_map_units.get(row['value'], 0))
+            if row['value'] in polygon_buffering_in_map_units else row['geometry'],
+            axis=1
+        )
+
+    merged_features = []
+    for val, group in gdf.groupby('value'):
+        # Use union_all() to merge the geometries within the group.
+        # (Requires Shapely 2.0 or later; otherwise use shapely.ops.unary_union on group.geometry.tolist())
+        union_geom = group.geometry.union_all()
+        # If the union produces a single Polygon, add it directly;
+        # if it produces a MultiPolygon, split it into individual features.
+        if union_geom.geom_type == 'Polygon':
+            merged_features.append({'value': val, 'geometry': union_geom})
+        elif union_geom.geom_type == 'MultiPolygon':
+            for geom in union_geom.geoms:
+                merged_features.append({'value': val, 'geometry': geom})
+        else:
+            # In case of unexpected geometry types, skip or handle accordingly.
+            print(f"Unexpected geometry type for value {val}: {union_geom.geom_type}")
+    # Create a new GeoDataFrame from merged features.
+    gdf = gpd.GeoDataFrame(merged_features, crs=gdf.crs)
+
+
+    ogr_driver = ogr.GetDriverByName("Memory")
+    mem_ds = ogr_driver.CreateDataSource("in_memory")
+
+    # Determine an appropriate OGR geometry type using the first feature.
+    first_geom = gdf.geometry.iloc[0]
+    if first_geom.geom_type == "Polygon":
+        ogr_geom_type = ogr.wkbPolygon
+    elif first_geom.geom_type == "MultiPolygon":
+        ogr_geom_type = ogr.wkbMultiPolygon
+    else:
+        ogr_geom_type = ogr.wkbUnknown
+
+    # Convert the CRS to OGR SpatialReference.
+    sr = osr.SpatialReference()
+    try:
+        sr.ImportFromWkt(crs.to_wkt())
+    except AttributeError:
+        sr.ImportFromEPSG(4326)
+
+    mem_layer = mem_ds.CreateLayer("post_processed", sr, ogr_geom_type)
+
+    # Add attribute field for 'value' (and any other non-geometry columns if needed).
+    # Here we add 'value' for example.
+    field_defn = ogr.FieldDefn("value", ogr.OFTInteger)
+    mem_layer.CreateField(field_defn)
+
+    # Add each row from the GeoDataFrame as an OGR feature.
+    for idx, row in gdf.iterrows():
+        feat = ogr.Feature(mem_layer.GetLayerDefn())
+        ogr_geom = ogr.CreateGeometryFromWkt(row['geometry'].wkt)
+        feat.SetGeometry(ogr_geom)
+        feat.SetField("value", row['value'])
+        mem_layer.CreateFeature(feat)
+        feat = None
+
+    driver = ogr.GetDriverByName("GPKG")
+    if os.path.exists(output_vector_path):
+        driver.DeleteDataSource(output_vector_path)
+    out_ds = driver.CreateDataSource(output_vector_path)
+    out_ds.CopyLayer(mem_layer, "post_processed")
+    out_ds = None
+
+    return output_vector_path
 
 
 def create_ndvi_mask(
