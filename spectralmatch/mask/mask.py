@@ -15,7 +15,7 @@ from rasterio.features import shapes
 from concurrent.futures import as_completed
 
 from ..utils_multiprocessing import _get_executor, WorkerContext, _resolve_windows, _resolve_parallel_config
-from ..handlers import _resolve_paths, _resolve_nodata_value
+from ..handlers import _resolve_paths, _resolve_nodata_value, _resolve_output_dtype
 from ..types_and_validation import Universal
 
 
@@ -29,14 +29,16 @@ def band_math(
     image_parallel_workers: Universal.ImageParallelWorkers = None,
     window_parallel_workers: Universal.WindowParallelWorkers = None,
     window_size: Universal.WindowSize = None,
-    output_dtype: Universal.OutputDtype = None,
+    custom_output_dtype: Universal.CustomOutputDtype = None,
     calculation_dtype: Universal.CalculationDtype = None,
 ):
     input_image_paths = _resolve_paths("search", input_images)
     output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
     image_names = _resolve_paths("name", input_image_paths)
 
-    nodata_value = _resolve_nodata_value(rasterio.open(input_image_paths[0]), custom_nodata_value)
+    with rasterio.open(input_image_paths[0]) as ds:
+        nodata_value = _resolve_nodata_value(ds, custom_nodata_value)
+        output_dtype = _resolve_output_dtype(ds, custom_output_dtype)
 
     image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
 
@@ -44,7 +46,7 @@ def band_math(
     band_indices = sorted({int(match[1:]) for match in re.findall(r"\bb\d+\b", custom_math)})
 
     image_args = [
-        (in_path, out_path, name, custom_math, debug_logs, nodata_value, window_parallel_workers, window_size, band_indices)
+        (in_path, out_path, name, custom_math, debug_logs, nodata_value, window_parallel_workers, window_size, band_indices, output_dtype, calculation_dtype)
         for in_path, out_path, name in zip(input_image_paths, output_image_paths, image_names)
     ]
 
@@ -68,10 +70,12 @@ def band_math_process_image(
     window_parallel_workers,
     window_size,
     band_indices,
+    output_dtype,
+    calculation_dtype,
 ):
     with rasterio.open(input_image_path) as src:
         profile = src.profile.copy()
-        profile.update(dtype="float32", count=1)
+        profile.update(dtype=output_dtype, count=1)
 
         window_parallel, window_backend, window_max_workers = _resolve_parallel_config(window_parallel_workers)
 
@@ -79,7 +83,7 @@ def band_math_process_image(
         with rasterio.open(output_image_path, "w", **profile) as dst:
             windows = _resolve_windows(src, window_size)
             args = [
-                (name, window, custom_math, debug_logs, nodata_value, band_indices)
+                (name, window, custom_math, debug_logs, nodata_value, band_indices, calculation_dtype)
                 for window in windows
             ]
 
@@ -88,12 +92,12 @@ def band_math_process_image(
                     futures = [executor.submit(band_math_process_window, *arg) for arg in args]
                     for future in futures:
                         band, window, data = future.result()
-                        dst.write(data.astype("float32"), band, window=window)
+                        dst.write(data.astype(output_dtype), band, window=window)
             else:
                 WorkerContext.init({name: ("raster", input_image_path)})
                 for arg in args:
                     band, window, data = band_math_process_window(*arg)
-                    dst.write(data.astype("float32"), band, window=window)
+                    dst.write(data.astype(output_dtype), band, window=window)
                 WorkerContext.close()
 
 
@@ -104,15 +108,15 @@ def band_math_process_window(
     debug_logs: bool,
     nodata_value,
     band_indices,
+    calculation_dtype
 ):
     ds = WorkerContext.get(name)
 
-
-    bands = [ds.read(i, window=window).astype(np.float32) for i in band_indices]
+    bands = [ds.read(i, window=window).astype(calculation_dtype) for i in band_indices]
     band_vars = {f"b{i}": b for i, b in zip(band_indices, bands)}
 
     try:
-        result = eval(custom_math, {"np": np}, band_vars)
+        result = eval(custom_math, {"np": np}, band_vars).astype(calculation_dtype)
     except Exception as e:
         raise ValueError(f"Failed to evaluate expression '{custom_math}': {e}")
 
