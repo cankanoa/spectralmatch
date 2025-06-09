@@ -13,10 +13,8 @@ from ..types_and_validation import Universal
 def threshold_raster(
     input_images: Universal.SearchFolderOrListFiles,
     output_images: Universal.CreateInFolderOrListFiles,
-    operator: str,
-    threshold: float | str,
+    threshold_math: str,
     *,
-    band_index: int = 1,
     debug_logs: Universal.DebugLogs = False,
     custom_nodata_value: Universal.CustomNodataValue = None,
     image_parallel_workers: Universal.ImageParallelWorkers = None,
@@ -24,7 +22,27 @@ def threshold_raster(
     window_size: Universal.WindowSize = None,
     custom_output_dtype: Universal.CustomOutputDtype = None,
     calculation_dtype: Universal.CalculationDtype = "float32",
-):
+    ):
+    """
+    Applies a thresholding operation to input raster images using a mathematical expression string.
+
+    Args:
+        input_images (SearchFolderOrListFiles): Input image paths or folder + pattern.
+        output_images (CreateInFolderOrListFiles): Output image paths or folder + pattern.
+        threshold_math (str): A logical expression string using bands (e.g., "b1 > 5", "b1 > 5 & b2 < 10").
+            Supports:
+                - Band references: b1, b2, ...
+                - Operators: >, <, >=, <=, ==, !=, &, |, ~, and parentheses
+                - Percentile-based thresholds: use e.g. "5%b1" to use the 5th percentile of band 1
+        debug_logs (bool, optional): If True, prints debug messages.
+        custom_nodata_value (float | int | None, optional): Override the dataset's nodata value.
+        image_parallel_workers (ImageParallelWorkers, optional): Parallelism config for image-level processing.
+        window_parallel_workers (WindowParallelWorkers, optional): Parallelism config for window-level processing.
+        window_size (WindowSize, optional): Window tiling strategy for memory-efficient processing.
+        custom_output_dtype (CustomOutputDtype, optional): Output data type override.
+        calculation_dtype (CalculationDtype, optional): Internal computation dtype.
+    """
+
     input_image_paths = _resolve_paths("search", input_images)
     output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
     image_names = _resolve_paths("name", input_image_paths)
@@ -36,8 +54,7 @@ def threshold_raster(
     image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
 
     image_args = [
-        (in_path, out_path, name, operator, threshold, band_index, debug_logs, nodata_value,
-         window_parallel_workers, window_size, output_dtype, calculation_dtype)
+        (in_path, out_path, name, threshold_math, debug_logs, nodata_value, window_parallel_workers, window_size, output_dtype, calculation_dtype)
         for in_path, out_path, name in zip(input_image_paths, output_image_paths, image_names)
     ]
 
@@ -55,39 +72,57 @@ def _threshold_process_image(
     input_image_path: str,
     output_image_path: str,
     name: str,
-    operator: str,
-    threshold: float,
-    band_index: int | str,
+    threshold_math: str,
     debug_logs: bool,
     nodata_value,
     window_parallel_workers,
     window_size,
     output_dtype,
     calculation_dtype,
-):
+    ):
+    """
+    Processes a single input raster image using a threshold expression and writes the result to disk.
+
+    Args:
+        input_image_path (str): Path to input raster image.
+        output_image_path (str): Path to save the output thresholded image.
+        name (str): Image name for worker context.
+        threshold_math (str): Expression string to evaluate pixel-wise conditions.
+        debug_logs (bool): Enable debug logging.
+        nodata_value (float | int | None): Value considered as nodata.
+        window_parallel_workers: Parallel config for window-level processing.
+        window_size: Window tiling size for memory efficiency.
+        output_dtype: Output raster data type.
+        calculation_dtype: Data type used for internal calculations.
+    """
     with rasterio.open(input_image_path) as src:
-        if isinstance(threshold, str) and threshold.endswith('%'):
-            threshold = _calculate_threshold_from_percent(
+        profile = src.profile.copy()
+        profile.update(dtype=output_dtype, count=1, nodata=nodata_value if nodata_value is not None else None)
+
+        window_parallel, window_backend, window_max_workers = _resolve_parallel_config(window_parallel_workers)
+
+        percent_pattern = re.compile(r"(\d+(\.\d+)?)%b(\d+)")
+
+        def replace_percent_with_threshold(match):
+            percent, _, band_num = match.groups()
+            value = _calculate_threshold_from_percent(
                 input_image_path,
-                threshold,
-                band_index,
+                f"{percent}%",
+                int(band_num),
                 debug_logs=debug_logs,
                 nodata_value=nodata_value,
                 window_parallel_workers=window_parallel_workers,
                 window_size=window_size,
-                calculation_dtype=calculation_dtype,
+                calculation_dtype=calculation_dtype
             )
+            return str(value)
 
-        profile = src.profile.copy()
-        profile.update(dtype=output_dtype, count=1)
+        evaluated_threshold_math = percent_pattern.sub(replace_percent_with_threshold, threshold_math)
 
-        window_parallel, window_backend, window_max_workers = _resolve_parallel_config(window_parallel_workers)
-
-        os.makedirs(os.path.dirname(output_image_path), exist_ok=True)
         with rasterio.open(output_image_path, "w", **profile) as dst:
             windows = _resolve_windows(src, window_size)
             args = [
-                (name, window, operator, threshold, band_index, debug_logs, nodata_value, calculation_dtype)
+                (name, window, evaluated_threshold_math, debug_logs, nodata_value, calculation_dtype)
                 for window in windows
             ]
 
@@ -110,27 +145,40 @@ def _threshold_process_image(
 def _threshold_process_window(
     name: str,
     window: rasterio.windows.Window,
-    operator: str,
-    threshold: float,
-    band_index: int,
+    threshold_math: str,
     debug_logs: bool,
     nodata_value,
     calculation_dtype
-):
+    ):
+    """
+    Applies the threshold logic to a single image window.
+
+    Args:
+        name (str): Image identifier for WorkerContext access.
+        window (rasterio.windows.Window): Window to read and process.
+        threshold_math (str): Logical expression for thresholding using b1, b2, etc.
+        debug_logs (bool): Enable debug logs.
+        nodata_value (float | int | None): Value considered as nodata.
+        calculation_dtype: Dtype to cast bands for threshold computation.
+
+    Returns:
+        Tuple[int, rasterio.windows.Window, np.ndarray]: Band index, processed window, thresholded data mask (1 for true, 0 for false).
+    """
     ds = WorkerContext.get(name)
-    band = ds.read(band_index, window=window).astype(calculation_dtype)
+    bands = {f"b{i+1}": ds.read(i+1, window=window).astype(calculation_dtype) for i in range(ds.count)}
 
     if nodata_value is not None:
-        nodata_mask = band == nodata_value
+        nodata_mask = np.any([b == nodata_value for b in bands.values()], axis=0)
     else:
-        nodata_mask = np.zeros_like(band, dtype=bool)
+        nodata_mask = np.zeros_like(next(iter(bands.values())), dtype=bool)
 
-    try:
-        expr = f"band {operator} {threshold}"
-        result = eval(expr, {"band": band, "np": np}).astype(calculation_dtype)
-        result[nodata_mask] = np.nan
-    except Exception as e:
-        raise ValueError(f"Failed threshold operation '{expr}': {e}")
+    expr = threshold_math
+    for k, v in bands.items():
+        if isinstance(v, np.ndarray):
+            expr = expr.replace(f"{k}", f"bands['{k}']")
+
+    result = eval(expr, {"np": np, "bands": bands}).astype(calculation_dtype)
+    result[nodata_mask] = nodata_value
 
     return 1, window, result
 
@@ -146,9 +194,25 @@ def _calculate_threshold_from_percent(
     window_size=None,
     calculation_dtype="float32",
     bins: int = 1000,
-) -> float:
+    ) -> float:
+    """
+    Calculates a threshold value based on a percentile of valid (non-nodata) pixel values in a raster.
 
-    assert threshold.endswith('%'), f"Invalid threshold format: {threshold}"
+    Args:
+        input_image_path (str): Path to input raster image.
+        threshold (str): Percent string (e.g., "5%") indicating the percentile to compute.
+        band_index (int): Band index to evaluate.
+        debug_logs (bool, optional): If True, prints debug info.
+        nodata_value (float | int | None, optional): Value treated as nodata.
+        window_parallel_workers: Optional parallel config.
+        window_size: Tiling strategy.
+        calculation_dtype (str): Internal dtype used for calculations.
+        bins (int): Number of bins for histogram.
+
+    Returns:
+        float: Threshold value corresponding to the requested percentile.
+    """
+
     percent = float(threshold.strip('%'))
 
     hist_total = np.zeros(bins, dtype=np.int64)
