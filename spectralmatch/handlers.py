@@ -9,8 +9,51 @@ from typing import List, Optional, Literal, Tuple, Union
 from spectralmatch.types_and_validation import Universal
 
 
+def _resolve_output_dtype(
+    dataset: rasterio.io.DatasetReader,
+    custom_output_dtype: Universal.CustomOutputDtype,
+):
+    """
+    Resolves the output dtype for a raster operation.
+
+    Args:
+        dataset (rasterio.io.DatasetReader): The input dataset to derive default dtype from.
+        custom_output_dtype (str | None): A user-specified output dtype, or None to use dataset dtype.
+
+    Returns:
+        str: The resolved output dtype.
+    """
+    if custom_output_dtype is not None:
+        return custom_output_dtype
+    return dataset.dtypes[0]
+
+
+def _resolve_nodata_value(
+    dataset: rasterio.io.DatasetReader,
+    custom_nodata_value: Universal.CustomNodataValue
+) -> float | int | None:
+    """
+    Determine the appropriate nodata value for a raster dataset.
+
+    Priority is given to a user-provided custom nodata value. If not provided, the function attempts to use the nodata value defined in the dataset metadata. Returns None if neither is available.
+
+    Args:
+        dataset (rasterio.io.DatasetReader): The opened raster dataset.
+        custom_nodata_value (float | int | None): Optional user-defined nodata value.
+
+    Returns:
+        float | int | None: The resolved nodata value, or None if unavailable.
+    """
+    if custom_nodata_value is not None:
+        return custom_nodata_value
+    elif dataset.nodata is not None:
+        return dataset.nodata
+    else:
+        return None
+
+
 def _resolve_paths(
-    mode: Literal["search", "create", "match"],
+    mode: Literal["search", "create", "match", "name"],
     input: Universal.SearchFolderOrListFiles | Universal.CreateInFolderOrListFiles,
     args: Tuple | None = None,
 ) -> List[str]:
@@ -18,13 +61,16 @@ def _resolve_paths(
     Resolves a list of input based on the mode and input format.
 
     Args:
-        mode (Literal["search", "create", "match"]): Type of operation to perform.
+        mode (Literal["search", "create", "match", "name"]): Type of operation to perform.
         input (Tuple[str, str] | List[str]): Either a list of file input or a tuple specifying folder/template info.
         args (Tuple): Additional arguments passed to the called function.
 
     Returns:
         List[str]: List of resolved input.
     """
+    if not isinstance(args, tuple) and args is not None:
+        raise ValueError(f"Args to pass must be a tuple")
+
     if isinstance(input, list):
         resolved = input
     elif mode == "search":
@@ -33,7 +79,10 @@ def _resolve_paths(
         resolved = create_paths(input[0], input[1], *(args or ()))
     elif mode == "match":
         resolved = match_paths(*(args or ()))
-    else: raise ValueError(f"Invalid mode: {mode}")
+    elif mode == "name":
+        resolved = [os.path.splitext(os.path.basename(p))[0] for p in input]
+    else:
+        raise ValueError(f"Invalid mode: {mode}")
 
     if len(resolved) == 0:
         warnings.warn(f"No results found for paths.", RuntimeWarning)

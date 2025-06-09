@@ -336,7 +336,7 @@ def merge_rasters(
     window_parallel_workers: Universal.WindowParallelWorkers = None,
     window_size: Universal.WindowSize = None,
     debug_logs: Universal.DebugLogs = False,
-    output_dtype: Universal.OutputDtype = None,
+    output_dtype: Universal.CustomOutputDtype = None,
     custom_nodata_value: Universal.CustomNodataValue = None,
 ) -> None:
     """
@@ -349,7 +349,7 @@ def merge_rasters(
         window_parallel_workers (Universal.WindowParallelWorkers, optional): Strategy for within-image window merging.
         window_size (Universal.WindowSize, optional): Tiling strategy for processing windows.
         debug_logs (Universal.DebugLogs, optional): If True, prints debug output.
-        output_dtype (Universal.OutputDtype, optional): Output data type; defaults to input type if None.
+        output_dtype (Universal.CustomOutputDtype, optional): Output data type; defaults to input type if None.
         custom_nodata_value (Universal.CustomNodataValue, optional): NoData value to use; defaults to first input's value.
 
     Returns:

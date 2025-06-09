@@ -3,6 +3,7 @@ import rasterio
 import numpy as np
 import fiona
 import geopandas as gpd
+import re
 
 from rasterio.enums import Resampling
 from rasterio.transform import from_origin
@@ -14,114 +15,8 @@ from rasterio.features import shapes
 from concurrent.futures import as_completed
 
 from ..utils_multiprocessing import _get_executor, WorkerContext, _resolve_windows, _resolve_parallel_config
-from ..handlers import _resolve_paths
+from ..handlers import _resolve_paths, _resolve_nodata_value, _resolve_output_dtype
 from ..types_and_validation import Universal
-
-def band_math(
-    input_images: Universal.SearchFolderOrListFiles,
-    output_vector_mask: str,
-    custom_math: str,
-    threshold: Tuple[str, float],
-    *,
-    debug_logs: Universal.DebugLogs = False,
-    custom_nodata_value: Universal.CustomNodataValue = None,
-    image_parallel_workers: Universal.ImageParallelWorkers = None,
-    window_parallel_workers: Universal.WindowParallelWorkers = None,
-    window_size: Universal.WindowSize = None,
-):
-    input_image_paths = _resolve_paths("search", input_images)
-    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
-
-    image_args = [(path, output_vector_mask, custom_math, threshold, debug_logs, custom_nodata_value, window_parallel_workers, window_size)
-                  for path in input_image_paths]
-
-    if image_parallel:
-        with _get_executor(image_backend, image_max_workers) as executor:
-            futures = [executor.submit(band_math_process_image, *arg) for arg in image_args]
-            for future in as_completed(futures):
-                future.result()
-    else:
-        for arg in image_args:
-            band_math_process_image(*arg)
-
-
-def band_math_process_image(
-    input_image_path: str,
-    output_vector_mask: str,
-    custom_math: str,
-    threshold: Tuple[str, float],
-    debug_logs: bool,
-    custom_nodata_value,
-    window_parallel_workers,
-    window_size,
-):
-    with rasterio.open(input_image_path) as src:
-        transform = src.transform
-        crs = src.crs
-        windows = _resolve_windows(src, window_size)
-
-    window_parallel, window_backend, window_max_workers = _resolve_parallel_config(window_parallel_workers)
-    window_args = [(input_image_path, window, custom_math, threshold, debug_logs, custom_nodata_value)
-                   for window in windows]
-
-    all_shapes = []
-
-    if window_parallel:
-        with _get_executor(window_backend, window_max_workers, initializer=WorkerContext.init,
-                            initargs=({input_image_path: ("raster", input_image_path)},)) as executor:
-            futures = [executor.submit(band_math_process_window, *arg) for arg in window_args]
-            for future in as_completed(futures):
-                shapes_part = future.result()
-                all_shapes.extend(shapes_part)
-    else:
-        WorkerContext.init({input_image_path: ("raster", input_image_path)})
-        for arg in window_args:
-            shapes_part = band_math_process_window(*arg)
-            all_shapes.extend(shapes_part)
-        WorkerContext.close()
-
-    os.makedirs(os.path.dirname(output_vector_mask), exist_ok=True)
-    schema = {"geometry": "Polygon", "properties": {"value": "int"}}
-    with fiona.open(output_vector_mask, "w", driver="GPKG", schema=schema, crs=crs) as dst:
-        for geom, val in all_shapes:
-            dst.write({"geometry": mapping(geom), "properties": {"value": int(val)}})
-
-
-def band_math_process_window(
-    input_image_path: str,
-    window: rasterio.windows.Window,
-    custom_math: str,
-    threshold: Tuple[str, float],
-    debug_logs: bool,
-    custom_nodata_value,
-):
-    ds = WorkerContext.get(input_image_path)
-    bands = [ds.read(i + 1, window=window).astype(np.float32) for i in range(ds.count)]
-    band_vars = {f"b{i+1}": b for i, b in enumerate(bands)}
-
-    try:
-        result = eval(custom_math, {"np": np}, band_vars)
-    except Exception as e:
-        raise ValueError(f"Failed to evaluate expression '{custom_math}': {e}")
-
-    method, value = threshold
-    if method == "percent":
-        flat = result[~np.isnan(result)].flatten()
-        t = np.percentile(flat, 100 - value)
-        if debug_logs:
-            print(f"Computed {value} percentile threshold: {t}")
-    elif method == "constant":
-        t = value
-    else:
-        raise ValueError(f"Unknown threshold method: {method}")
-
-    binary_mask = (result > t).astype(np.uint8)
-    out_shapes = list(
-        (shape(geom), val)
-        for geom, val in shapes(binary_mask, mask=binary_mask == 1, transform=ds.window_transform(window))
-    )
-    return out_shapes
-
 
 def create_cloud_mask_with_omnicloudmask(
     input_image_path,
