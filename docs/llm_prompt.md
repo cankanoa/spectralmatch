@@ -10,7 +10,7 @@ Use this text to prompt LLM models with context about this codebase which includ
   </div>
 
   <div style="margin-top: 1em;">
-    <a href="/">⬅ To Readme</a>
+    <a href="/spectralmatch">← To Readme</a>
   </div>
   <pre id="copy-target" style="max-height: 300px; overflow: auto; background: #f5f5f5; padding: 1em; border-radius: 6px; border: 1px solid #ccc;">
 {prompt_content}
