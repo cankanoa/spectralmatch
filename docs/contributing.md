@@ -73,8 +73,22 @@ input_image_paths = _resolve_paths("search", input_images)
 output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
 ```
 
+### Output dtype
+The custom_output_dtype parameter specifies the data type for output rasters and defaults to the input image’s data type if not provided.
+```python
+# Param
+custom_output_dtype
+
+# Type
+CustomOutputDtype = str | None # Default: None
+
+# Resolve
+output_dtype = _resolve_output_dtype(rasterio.DatasetReader, custom_output_dtype)
+```
+
+
 ### Nodata Value
-The output_dtype parameter specifies the data type for output rasters and defaults to the input image’s data type if not provided or None. Functions should begin by printing "Start {process name}", while all other print statements should be conditional on debug_logs being True.
+The custom_nodata_value parameter overrides the input nodata value from the first raster in the input rasters if set. 
 ```python
 # Param
 custom_nodata_value
@@ -82,11 +96,12 @@ custom_nodata_value
 # Type
 CustomNodataValue = float | int | None # Default: None
 
-# No resolve function necessary
+# Resolve
+nodata_value = _resolve_nodata_value(rasterio.DatasetReader, custom_nodata_value)
 ```
 
 ### Debug Logs
-The debug_logs parameter enables printing of debug information and constraint matrices when set to True; it defaults to False.
+The debug_logs parameter enables printing of debug information; it defaults to False. Functions should begin by printing "Start {process name}", while all other print statements should be conditional on debug_logs being True.
 ```python
 # Param
 debug_logs
@@ -164,7 +179,7 @@ def _name_process_window(image_name, arg_1, arg_2, ...):
     ds = WorkerContext.get(image_name)
     # Process result to return
     
-    return band, window, block
+    return band, window, data
 ```
 
 ### Windows
