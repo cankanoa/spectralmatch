@@ -1155,6 +1155,7 @@ def _download_block_map(
     height: int,
     write_bands: Tuple[int, ...] | None = None,
     window: Window | None = None,
+    delete_output: bool = True,
     ):
     """
     Writes a 3D block map to a raster file, creating or updating specified bands within a target window.
@@ -1178,6 +1179,7 @@ def _download_block_map(
     num_bands = block_map.shape[2]
     if block_map.ndim != 3: raise ValueError("block_map must be a 3D array with shape (num_row, num_col, num_bands).")
     if not os.path.exists(os.path.dirname(output_image_path)): os.makedirs(os.path.dirname(output_image_path), exist_ok=True)
+    if delete_output and os.path.exists(output_image_path): os.remove(output_image_path)
     if write_bands is None: write_bands = tuple(range(0, num_bands))
     if window is None: window = Window(0, 0, width, height)
 

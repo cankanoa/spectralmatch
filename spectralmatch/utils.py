@@ -22,7 +22,7 @@ from .utils_multiprocessing import _resolve_windows, _get_executor, WorkerContex
 def merge_vectors(
     input_vector_paths: List[str],
     merged_vector_path: str,
-    method: Literal["intersection", "union", "keep_all"],
+    method: Literal["intersection", "union", "keep"],
     debug_logs: bool = False,
     create_name_attribute: Optional[Tuple[str, str]] = None,
     ) -> None:
@@ -32,7 +32,7 @@ def merge_vectors(
     Args:
         input_vector_paths (List[str]): Paths to input vector files.
         merged_vector_path (str): Path to save merged output.
-        method (Literal["intersection", "union", "keep_all"]): Merge strategy.
+        method (Literal["intersection", "union", "keep"]): Merge strategy.
         debug_logs (bool): If True, print debug information.
         create_name_attribute (Optional[Tuple[str, str]]): Tuple of (field_name, separator).
             If set, adds a field with all input filenames (no extension), joined by separator.
@@ -60,10 +60,18 @@ def merge_vectors(
         field_name, sep = create_name_attribute
         combined_name_value = sep.join(input_names)
 
-    if method == "keep_all":
-        merged = gpd.GeoDataFrame(pd.concat(geoms, ignore_index=True), crs=geoms[0].crs)
-        if create_name_attribute:
-            merged[field_name] = combined_name_value
+    if method == "keep":
+        merged_dfs = []
+        field_name = create_name_attribute[0] if create_name_attribute else None
+
+        for path in input_vector_paths:
+            gdf = gpd.read_file(path)
+            if field_name:
+                name = os.path.splitext(os.path.basename(path))[0]
+                gdf[field_name] = name
+            merged_dfs.append(gdf)
+
+        merged = gpd.GeoDataFrame(pd.concat(merged_dfs, ignore_index=True), crs=merged_dfs[0].crs)
 
     elif method == "union":
         merged = gpd.GeoDataFrame(pd.concat(geoms, ignore_index=True), crs=geoms[0].crs)

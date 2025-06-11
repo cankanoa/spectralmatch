@@ -1,8 +1,12 @@
 import os
 import rasterio
 import numpy as np
+import fiona
 import re
 
+from shapely.geometry import shape, Polygon, MultiPolygon, mapping
+from typing import Literal, Tuple
+from rasterio.features import shapes
 from concurrent.futures import as_completed
 
 from ..utils_multiprocessing import _get_executor, WorkerContext, _resolve_windows, _resolve_parallel_config
@@ -365,6 +369,80 @@ def band_math_process_window(
 
     if nodata_value is not None:
         nodata_mask = np.any([b == nodata_value for b in bands], axis=0)
-        result[nodata_mask] = np.nan
+        result[nodata_mask] = nodata_value
 
     return 1, window, result
+
+
+def post_process_threshold_to_vector(
+    input_image_path: str,
+    output_vector_path: str,
+    threshold_val: float | int,
+    operator_str: Literal["=", "<=", ">", ">=", "=="] = "<=",
+    ) -> str:
+    """
+    Converts a thresholded raster mask to a vector layer using Rasterio and Fiona.
+
+    Args:
+        input_image_path (str): Path to the input single-band raster.
+        output_vector_path (str): Path to save the output vector file (GeoPackage).
+        threshold_val (float | int): Threshold value to apply.
+        operator_str (str): One of the comparison operators.
+
+    Returns:
+        str: Path to the saved vector file.
+    """
+    print("Start post process threshold")
+
+    with rasterio.open(input_image_path) as src:
+        image = src.read(1)
+        transform = src.transform
+        crs = src.crs
+
+        # Apply threshold
+        if operator_str == "<":
+            mask = image < threshold_val
+        elif operator_str == "<=":
+            mask = image <= threshold_val
+        elif operator_str == ">":
+            mask = image > threshold_val
+        elif operator_str == ">=":
+            mask = image >= threshold_val
+        elif operator_str == "==":
+            mask = image == threshold_val
+        else:
+            raise ValueError("Unsupported operator_str")
+
+        mask = mask.astype(np.uint8)
+
+        # Generate vector shapes
+        results = []
+        for s, v in shapes(mask, mask=mask, transform=transform):
+            if v != 1:
+                continue
+            geom = shape(s)
+            if isinstance(geom, Polygon):
+                results.append({"properties": {"DN": int(v)}, "geometry": mapping(geom)})
+            elif isinstance(geom, MultiPolygon):
+                for part in geom.geoms:
+                    results.append({"properties": {"DN": int(v)}, "geometry": mapping(part)})
+
+        schema = {
+            "geometry": "Polygon",
+            "properties": {"DN": "int"},
+        }
+
+        if os.path.exists(output_vector_path):
+            os.remove(output_vector_path)
+
+        with fiona.open(
+            output_vector_path, "w",
+            driver="GPKG",
+            crs=crs,
+            schema=schema,
+            layer="mask"
+        ) as dst:
+            for feat in results:
+                dst.write(feat)
+
+    return output_vector_path

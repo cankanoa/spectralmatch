@@ -33,6 +33,7 @@ class Universal:
         calculation_dtype=_UNSET,
         custom_output_dtype=_UNSET,
         create_name_attribute=_UNSET,
+        output_dtype=_UNSET,
         ):
         if input_images is not _UNSET:
             if not isinstance(input_images, (tuple, list)):
@@ -122,6 +123,10 @@ class Universal:
                 raise ValueError("CreateNameAttribute must be a tuple of two strings or None.")
             if not all(isinstance(s, str) for s in Universal.CreateNameAttribute):
                 raise ValueError("Both elements of CreateNameAttribute must be strings.")
+        if output_dtype is not _UNSET and output_dtype is not None:
+            if not isinstance(output_dtype, str):
+                raise ValueError("output_dtype must be a string or None.")
+
 
 # Match-specific only
 class Match:
