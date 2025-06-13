@@ -349,7 +349,7 @@ def _band_math_process_image(
 
     with rasterio.open(input_image_path) as src:
         profile = src.profile.copy()
-        profile.update(dtype=output_dtype, count=1)
+        profile.update(dtype=output_dtype, count=1, nodata=nodata_value)
 
         window_parallel, window_backend, window_max_workers = _resolve_parallel_config(window_parallel_workers)
 
