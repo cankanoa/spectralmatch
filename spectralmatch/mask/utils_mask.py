@@ -3,6 +3,7 @@ import rasterio
 import numpy as np
 import fiona
 import re
+import geopandas as gpd
 
 from shapely.geometry import shape, Polygon, MultiPolygon, mapping
 from typing import Literal, Tuple
@@ -266,109 +267,217 @@ def _calculate_threshold_from_percent(
     return value
 
 
-def band_math(
+def process_raster_values_to_vector_polygons(
     input_images: Universal.SearchFolderOrListFiles,
-    output_images: Universal.CreateInFolderOrListFiles,
-    custom_math: str,
+    output_vectors: Universal.CreateInFolderOrListFiles,
     *,
-    debug_logs: Universal.DebugLogs = False,
     custom_nodata_value: Universal.CustomNodataValue = None,
+    custom_output_dtype: Universal.CustomOutputDtype = None,
     image_parallel_workers: Universal.ImageParallelWorkers = None,
     window_parallel_workers: Universal.WindowParallelWorkers = None,
-    window_size: Universal.WindowSize = None,
-    custom_output_dtype: Universal.CustomOutputDtype = None,
-    calculation_dtype: Universal.CalculationDtype = None,
-):
-    input_image_paths = _resolve_paths("search", input_images)
-    output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
-    image_names = _resolve_paths("name", input_image_paths)
+    window_size: Universal.WindowSizeWithBlock = None,
+    debug_logs: Universal.DebugLogs = False,
+    extraction_expression: str,
+    filter_by_polygon_size: str = None,
+    polygon_buffer: float = 0.0,
+    value_mapping: dict = None,
+    ):
+    """
+    Converts raster values into vector polygons based on an expression and optional filtering logic.
 
-    with rasterio.open(input_image_paths[0]) as ds:
-        nodata_value = _resolve_nodata_value(ds, custom_nodata_value)
-        output_dtype = _resolve_output_dtype(ds, custom_output_dtype)
+    Args:
+        input_images (Universal.SearchFolderOrListFiles): Either a (folder, pattern) tuple to search for rasters or a list of raster file paths.
+        output_vectors (Universal.CreateInFolderOrListFiles): Output folder or list of file paths where the vector polygons will be saved.
+        custom_nodata_value (Universal.CustomNodataValue, optional): Custom NoData value to override the default from the raster metadata.
+        custom_output_dtype (Universal.CustomOutputDtype, optional): Desired output data type. If not set, defaults to raster’s dtype.
+        image_parallel_workers (Universal.ImageParallelWorkers, optional): Controls parallelism across input images. Can be an integer, executor string, or boolean.
+        window_parallel_workers (Universal.WindowParallelWorkers, optional): Controls parallelism within a single image by processing windows in parallel.
+        window_size (Universal.WindowSizeWithBlock, optional): Size of each processing block (width, height), or a strategy string such as "block" or "whole".
+        debug_logs (Universal.DebugLogs, optional): Whether to print debug logs to the console.
+        extraction_expression (str): Logical expression to identify pixels of interest using band references (e.g., "b1 > 10 & b2 < 50").
+        filter_by_polygon_size (str, optional): Area filter for resulting polygons. Can be a number (e.g., ">100") or percentile (e.g., "95%").
+        polygon_buffer (float, optional): Distance in coordinate units to buffer the resulting polygons. Default is 0.
+        value_mapping (dict, optional): Mapping from original raster values to new values. Use `None` to convert to NoData.
+
+    """
+
+    print("Start raster value extraction to polygons")
+
+    Universal.validate(
+        input_images=input_images,
+        output_images=output_vectors,
+        custom_nodata_value=custom_nodata_value,
+        custom_output_dtype=custom_output_dtype,
+        image_parallel_workers=image_parallel_workers,
+        window_parallel_workers=window_parallel_workers,
+        window_size=window_size,
+        debug_logs=debug_logs,
+
+    )
+
+    input_image_paths = _resolve_paths("search", input_images)
+    output_image_paths = _resolve_paths("create", output_vectors, (input_image_paths,))
 
     image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
-
-    # Extract referenced bands from custom_math (e.g., b1, b2, ...)
-    band_indices = sorted({int(match[1:]) for match in re.findall(r"\bb\d+\b", custom_math)})
+    window_parallel, window_backend, window_max_workers = _resolve_parallel_config(window_parallel_workers)
 
     image_args = [
-        (in_path, out_path, name, custom_math, debug_logs, nodata_value, window_parallel_workers, window_size, band_indices, output_dtype, calculation_dtype)
-        for in_path, out_path, name in zip(input_image_paths, output_image_paths, image_names)
+        (in_path, out_path, extraction_expression, filter_by_polygon_size, polygon_buffer, value_mapping, custom_nodata_value, custom_output_dtype, window_parallel, window_backend, window_max_workers, window_size, debug_logs)
+        for in_path, out_path in zip(input_image_paths, output_image_paths)
     ]
 
     if image_parallel:
         with _get_executor(image_backend, image_max_workers) as executor:
-            futures = [executor.submit(_band_math_process_image, *arg) for arg in image_args]
+            futures = [executor.submit(_process_image_to_polygons, *args) for args in image_args]
             for future in as_completed(futures):
                 future.result()
     else:
-        for arg in image_args:
-            _band_math_process_image(*arg)
+        for args in image_args:
+            _process_image_to_polygons(*args)
 
 
-def _band_math_process_image(
-    input_image_path: str,
-    output_image_path: str,
-    name: str,
-    custom_math: str,
-    debug_logs: bool,
-    nodata_value,
-    window_parallel_workers,
+def _process_image_to_polygons(
+    input_image_path,
+    output_vector_path,
+    extraction_expression,
+    filter_by_polygon_size,
+    polygon_buffer,
+    value_mapping,
+    custom_nodata_value,
+    custom_output_dtype,
+    window_parallel,
+    window_backend,
+    window_max_workers,
     window_size,
-    band_indices,
-    output_dtype,
-    calculation_dtype,
-):
+    debug_logs,
+    ):
+    """
+    Processes a single raster file and extracts polygons based on logical expressions and optional filters.
+
+    Args:
+        input_image_path (str): Path to the input raster image.
+        output_vector_path (str): Output file path for the resulting vector file (GeoPackage format).
+        extraction_expression (str): Logical expression using band indices (e.g., "b1 > 5 & b2 < 10").
+        filter_by_polygon_size (str): Area filter for polygons. Supports direct comparisons (">100") or percentiles ("90%").
+        polygon_buffer (float): Amount of buffer to apply to polygons in projection units.
+        value_mapping (dict): Dictionary mapping original raster values to new ones. Set value to `None` to mark as NoData.
+        custom_nodata_value: Custom NoData value to use during processing.
+        custom_output_dtype: Output data type for raster if relevant in future I/O steps.
+        window_parallel: Whether to parallelize over raster windows.
+        window_backend: Backend used for window-level parallelism (e.g., "thread", "process").
+        window_max_workers: Max number of parallel workers for window-level processing.
+        window_size: Tuple or strategy defining how the raster should be split into windows.
+        debug_logs (bool): Whether to print debug logging information.
+    """
+
+    if debug_logs:
+        print(f"Processing {input_image_path}")
+
     with rasterio.open(input_image_path) as src:
-        profile = src.profile.copy()
-        profile.update(dtype=output_dtype, count=1)
+        crs = src.crs
+        nodata_value = _resolve_nodata_value(src, custom_nodata_value)
+        dtype = _resolve_output_dtype(src, custom_output_dtype)
 
-        window_parallel, window_backend, window_max_workers = _resolve_parallel_config(window_parallel_workers)
+        band_indices = sorted(set(int(b[1:]) for b in re.findall(r"b\d+", extraction_expression)))
+        band_indices = sorted(set(band_indices))
 
-        os.makedirs(os.path.dirname(output_image_path), exist_ok=True)
-        with rasterio.open(output_image_path, "w", **profile) as dst:
-            windows = _resolve_windows(src, window_size)
-            args = [
-                (name, window, custom_math, debug_logs, nodata_value, band_indices, calculation_dtype)
-                for window in windows
-            ]
+        windows = _resolve_windows(src, window_size)
+        window_args = [(w, band_indices, extraction_expression, value_mapping, nodata_value) for w in windows]
 
-            if window_parallel:
-                with _get_executor(window_backend, window_max_workers, initializer=WorkerContext.init, initargs=({name: ("raster", input_image_path)},)) as executor:
-                    futures = [executor.submit(_band_math_process_window, *arg) for arg in args]
-                    for future in futures:
-                        band, window, data = future.result()
-                        dst.write(data.astype(output_dtype), band, window=window)
-            else:
-                WorkerContext.init({name: ("raster", input_image_path)})
-                for arg in args:
-                    band, window, data = _band_math_process_window(*arg)
-                    dst.write(data.astype(output_dtype), band, window=window)
-                WorkerContext.close()
+        polygons = []
+        if window_parallel:
+            with _get_executor(
+                window_backend,
+                window_max_workers,
+                initializer=WorkerContext.init,
+                initargs=({"input": ("raster", input_image_path)},),
+            ) as executor:
+                futures = [executor.submit(_process_window, *args) for args in window_args]
+                for f in as_completed(futures):
+                    polygons.extend(f.result())
+        else:
+            WorkerContext.init({"input": ("raster", input_image_path)})
+            for args in window_args:
+                polygons.extend(_process_window(*args))
+            WorkerContext.close()
+
+    if not polygons:
+        if debug_logs: print("No features found.")
+        return
+
+    gdf = gpd.GeoDataFrame(polygons, crs=crs)
+    merged = gdf.dissolve(by="value", as_index=False)
+
+    if filter_by_polygon_size:
+        if filter_by_polygon_size.endswith("%"):
+            pct = float(filter_by_polygon_size.strip("%"))
+            area_thresh = np.percentile(merged.geometry.area, pct)
+        else:
+            op, val = filter_by_polygon_size[:2], filter_by_polygon_size[2:]
+            if not op[1] in "=<>":
+                op, val = filter_by_polygon_size[:1], filter_by_polygon_size[1:]
+            area_thresh = float(val)
+
+        op_map = {
+            "<": lambda x: x < area_thresh,
+            "<=" : lambda x: x <= area_thresh,
+            ">": lambda x: x > area_thresh,
+            ">=" : lambda x: x >= area_thresh,
+            "==" : lambda x: x == area_thresh,
+            "!=" : lambda x: x != area_thresh,
+        }
+        merged = merged[op_map[op](merged.geometry.area)]
+
+    if polygon_buffer:
+        merged["geometry"] = merged.geometry.buffer(polygon_buffer)
+
+    if os.path.exists(output_vector_path):
+        os.remove(output_vector_path)
+
+    merged.to_file(output_vector_path, driver="GPKG", layer="mask")
 
 
-def _band_math_process_window(
-    name: str,
-    window: rasterio.windows.Window,
-    custom_math: str,
-    debug_logs: bool,
-    nodata_value,
+def _process_window(
+    window,
     band_indices,
-    calculation_dtype
-):
-    ds = WorkerContext.get(name)
+    expression,
+    value_mapping,
+    nodata_value
+    ):
+    """
+    Processes a single window of a raster image to extract polygons matching an expression.
 
-    bands = [ds.read(i, window=window).astype(calculation_dtype) for i in band_indices]
-    band_vars = {f"b{i}": b for i, b in zip(band_indices, bands)}
+    Args:
+        window (rasterio.windows.Window): Raster window to process.
+        band_indices (list[int]): List of band indices required by the expression (e.g., [1, 2]).
+        expression (str): Logical expression involving bands (e.g., "b1 > 10 & b2 < 50").
+        value_mapping (dict): Dictionary mapping original raster values to new ones or to NoData.
+        nodata_value (int | float): NoData value to exclude from analysis.
 
-    try:
-        result = eval(custom_math, {"np": np}, band_vars).astype(calculation_dtype)
-    except Exception as e:
-        raise ValueError(f"Failed to evaluate expression '{custom_math}': {e}")
+    Returns:
+        list[dict]: List of dictionaries with keys `"value"` and `"geometry"` representing polygons.
+    """
 
-    if nodata_value is not None:
-        nodata_mask = np.any([b == nodata_value for b in bands], axis=0)
-        result[nodata_mask] = nodata_value
+    src = WorkerContext.get("input")
+    bands = [src.read(i, window=window) for i in band_indices]
+    data = np.stack(bands, axis=0)
 
-    return 1, window, result
+    if value_mapping:
+        for orig, val in value_mapping.items():
+            if val is None:
+                data[data == orig] = nodata_value
+            else:
+                data[data == orig] = val
+
+    pattern = re.compile(r"b(\d+)")
+    expr = pattern.sub(lambda m: f"data[{int(m.group(1)) - 1}]", expression)
+    mask = eval(expr).astype(np.uint8)
+
+    results = []
+    for s, v in shapes(mask, mask=mask, transform=src.window_transform(window)):
+        if v != 1:
+            continue
+        geom = shape(s)
+        results.append({"value": 1, "geometry": geom})
+
+    return results

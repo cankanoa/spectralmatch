@@ -280,7 +280,7 @@ def global_regression(
             print(f"    {i:<4}\t{source:<6}\t{included:<8}\t{name}")
 
     # Build model
-    all_params = solve_global_model(
+    all_params = _solve_global_model(
         num_bands,
         num_total,
         all_image_names,
@@ -341,7 +341,7 @@ def global_regression(
     return output_image_paths
 
 
-def solve_global_model(
+def _solve_global_model(
     num_bands: int,
     num_total: int,
     all_image_names: list[str],

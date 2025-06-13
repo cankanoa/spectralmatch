@@ -56,10 +56,12 @@ nav:
         - Landsat Time Series: examples/example_landsat_time_series.py
         - Benchmark Multithreading: examples/benchmark.py
     - API Reference:
+        - Data Handlers: api/handlers.md
+        - Create Masks: api/mask.md
         - Matching Algorithms: api/match.md
-        - Create Mask and Pseudo-Invariant Features: api/mask.md
-        - Creating Statistical Figures: api/statistics.md
-        - Data Handlers for IO: api/handlers.md
+        - Create Seamlines: api/seamline.md
+        - Utilities: api/utils.md
+        - Statistical Figures: api/statistics.md
 
 extra_css:
     - docs/overrides/custom.css

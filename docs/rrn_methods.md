@@ -1,4 +1,4 @@
-# Dimensions of Relative Radiometric Normalization (RRN) Methods
+# Relative Radiometric Normalization (RRN) Methods
 
 RRN methods differ not only in the algorithms used to adjust image values but also in the requirements images must have and other techniques that can be used in conjunction. The following taxonomy summarizes the core dimensions along which RRN techniques vary:
 

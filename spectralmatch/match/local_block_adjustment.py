@@ -241,7 +241,7 @@ def local_block_adjustment(
     else:
         block_local_means = local_blocks_to_load
 
-    bounds_images_block_space = get_bounding_rect_images_block_space(block_local_means)
+    bounds_images_block_space = _get_bounding_rect_images_block_space(block_local_means)
 
     # Compute reference block
     if debug_logs: print("Computing reference block map")
@@ -526,7 +526,7 @@ def _get_pre_computed_block_maps(
     return block_local_means, block_reference_mean, num_row, num_col, bounds_canvas_coords
 
 
-def get_bounding_rect_images_block_space(
+def _get_bounding_rect_images_block_space(
     block_local_means: dict[str, np.ndarray]
 ) -> dict[str, tuple[int, int, int, int]]:
     """

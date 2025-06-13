@@ -28,7 +28,7 @@ install-setup:
 docs-serve:
 	mkdir -p $(MAKEFILE_DIR)docs/images
 	cp -r $(MAKEFILE_DIR)images/* $(MAKEFILE_DIR)docs/images/
-	mkdocs serve -a localhost:8006
+	mkdocs serve -a localhost:8001
 
 docs-build:
 	mkdir -p $(MAKEFILE_DIR)docs/images

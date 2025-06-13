@@ -17,27 +17,21 @@
 
 ## Features
 
-- **Automated:** Works without manual intervention, making it ideal for large-scale applications.
+- **Automated, Efficient, and Scalable:** Designed for large-scale workflows with no manual steps, leveraging multiprocessing and Cloud Optimized GeoTIFF support for fast, efficient processing across images, windows, and bands. 
 
-- **Multiprocessing:** Image, window, and band parallel processing. Cloud Optimized GeoTIFF reading and writing.
+- **Resumable Processing:** Save image stats and block maps for quicker reprocessing.
 
-- **Save Intermediate Steps:** Save image stats and block maps for quick reprocessing.
+- **Integrated Seamline and Cloud Masking:** Generate seamlines and detect clouds within the same workflow.
 
 - **Specify Model Images** Include all or specified images in the matching solution to bring all images to a central tendency or selected images spectral profile.
 
-- **Consistent Multi-Image Analysis:** Ensures uniformity across images by applying systematic corrections with minimal spectral distortion.
+- **Consistent Multi-image Analysis:** Performs minimal necessary adjustments to achieve inter-image consistency while preserving the original spectral characteristics.
 
-- **Seamlessly Blended:** Creates smooth transitions between images.
+- **Sensor and Unit Agnostic:** Supports optical imagery from handheld cameras, drones, crewed aircraft, and satellites for reliable single sensor and multi-sensor analysis, while preserving spectral integrity across all pixel units—including negative values and reflectance.
 
-- **Unit Agnostic:** Works with any pixel unit and preserves the spectral information for accurate analysis. This inlcludes negative numbers and reflectance.
+- **Enhanced Imagery:** Helpful when performing mosaics and time series analysis by blending large image collections and normalizing them over time, providing consistent, high-quality data for machine learning and other analytical tasks.
 
-- **Better Input for Machine Learning Models:** Provides high-quality, unbiased data for AI and analytical workflows.
-
-- **Sensor Agnostic:** Works with all optical sensors. In addition, images from different sensors can be combined for multisensor analysis.
-
-- **Mosaics:** Designed to process and blend vast image collections effectively.
-
-- **Time Series**: Normalize images across time with to compare spectral changes.
+- **Open Source and Collaborative:** Free under the MIT License with a modular design that supports community contributions and easy development of new features and workflows.
 
 ---
 
