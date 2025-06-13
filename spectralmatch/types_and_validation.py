@@ -57,6 +57,18 @@ class Universal:
             if not isinstance(save_as_cog, bool):
                 raise ValueError("save_as_cog must be a boolean.")
 
+            if save_as_cog:
+                if window_size is _UNSET or window_size is None:
+                    raise ValueError("When save_as_cog=True, window_size must be set.")
+                if isinstance(window_size, int):
+                    if window_size % 16 != 0:
+                        raise ValueError("When save_as_cog=True, window_size must be a multiple of 16.")
+                elif isinstance(window_size, tuple):
+                    if len(window_size) != 2 or window_size[0] != window_size[1]:
+                        raise ValueError("When save_as_cog=True, window_size must be square (width == height).")
+                    if any(w % 16 != 0 for w in window_size):
+                        raise ValueError("When save_as_cog=True, window_size dimensions must be multiples of 16.")
+
         if debug_logs is not _UNSET:
             if not isinstance(debug_logs, bool):
                 raise ValueError("debug_logs must be a boolean.")

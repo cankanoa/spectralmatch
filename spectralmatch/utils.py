@@ -20,29 +20,29 @@ from .utils_multiprocessing import _resolve_windows, _get_executor, WorkerContex
 
 
 def merge_vectors(
-    input_vector_paths: List[str],
+    input_vectors: Universal.SearchFolderOrListFiles,
     merged_vector_path: str,
     method: Literal["intersection", "union", "keep"],
     debug_logs: bool = False,
     create_name_attribute: Optional[Tuple[str, str]] = None,
-    ) -> None:
+) -> None:
     """
     Merge multiple vector files using the specified geometric method.
 
     Args:
-        input_vector_paths (List[str]): Paths to input vector files.
+        input_vectors (SearchFolderOrListFiles): Input vectors, either as a list of paths or a (folder, pattern) tuple.
         merged_vector_path (str): Path to save merged output.
         method (Literal["intersection", "union", "keep"]): Merge strategy.
         debug_logs (bool): If True, print debug information.
-        create_name_attribute (Optional[Tuple[str, str]]): Tuple of (field_name, separator).
-            If set, adds a field with all input filenames (no extension), joined by separator.
+        create_name_attribute (Optional[Tuple[str, str]]): Tuple of (field_name, separator) to add a combined name field.
 
     Returns:
         None
     """
-    print(f"Start vector merge")
+    print("Start vector merge")
 
     os.makedirs(os.path.dirname(merged_vector_path), exist_ok=True)
+    input_vector_paths = _resolve_paths("search", input_vectors)
 
     geoms = []
     input_names = []
@@ -54,7 +54,6 @@ def merge_vectors(
             input_names.append(name)
         geoms.append(gdf)
 
-    # Prepare the full combined name value once
     combined_name_value = None
     if create_name_attribute:
         field_name, sep = create_name_attribute
@@ -63,14 +62,12 @@ def merge_vectors(
     if method == "keep":
         merged_dfs = []
         field_name = create_name_attribute[0] if create_name_attribute else None
-
         for path in input_vector_paths:
             gdf = gpd.read_file(path)
             if field_name:
                 name = os.path.splitext(os.path.basename(path))[0]
                 gdf[field_name] = name
             merged_dfs.append(gdf)
-
         merged = gpd.GeoDataFrame(pd.concat(merged_dfs, ignore_index=True), crs=merged_dfs[0].crs)
 
     elif method == "union":

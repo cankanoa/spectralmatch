@@ -58,7 +58,7 @@ Used to determine optimal boundaries between overlapping image regions. These fu
 Reusable types are organized into the types and validation module. Use these types directly as the types of params inside functions where applicable. Use the appropriate _resolve... function to resolve these inputs into usable variables.
 
 ### Input/Output
-The input_images parameter accepts either a tuple or a list. If given as a tuple, it should contain a folder path and a glob pattern to search for files (e.g., ("/input/folder", "*.tif")). Alternatively, it can be a list of full file paths to individual input images. The output_images parameter defines how output filenames are determined. It can also be a tuple, consisting of an output folder and a filename template where "\$" is replaced with each input image’s basename (e.g., ("/output/folder", "$_GlobalMatch.tif")). Alternatively, it may be a list of full output paths, which must match the number of input images.
+The input_images parameter accepts either a tuple or a list. If given as a tuple, it should contain a folder path and a glob pattern to search for files (e.g., ("/input/folder", "*.tif")). Alternatively, it can be a list of full file paths to individual input images. The output_images parameter defines how output filenames are determined. It can also be a tuple, consisting of an output folder and a filename template where "\$" is replaced with each input image’s basename (e.g., ("/output/folder", "$_GlobalMatch.tif")). Alternatively, it may be a list of full output paths, which must match the number of input images. The _resolve_paths function handles creating folders for output files.
 ```python
 # Params
 input_images
@@ -71,6 +71,7 @@ CreateInFolderOrListFiles = Tuple[str, str] | List[str] # Required
 # Resolve
 input_image_paths = _resolve_paths("search", input_images)
 output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
+image_names = _resolve_paths("name", input_image_paths)
 ```
 
 ### Output dtype
@@ -101,7 +102,7 @@ nodata_value = _resolve_nodata_value(rasterio.DatasetReader, custom_nodata_value
 ```
 
 ### Debug Logs
-The debug_logs parameter enables printing of debug information; it defaults to False. Functions should begin by printing "Start {process name}", while all other print statements should be conditional on debug_logs being True.
+The debug_logs parameter enables printing of debug information; it defaults to False. Functions should begin by printing "Start {process name}", while all other print statements should be conditional on debug_logs being True. When printing the image being processed, use the image name and not the image path.
 ```python
 # Param
 debug_logs

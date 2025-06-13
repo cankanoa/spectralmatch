@@ -635,7 +635,7 @@ def _apply_adjustment_process_image(
     if debug_logs: print(f"    {name}")
 
     with rasterio.open(img_path) as src:
-        block_y, block_x = (w := next(_resolve_windows(src, window_size))).height, w.width
+        block_y, block_x = (w := next(iter(_resolve_windows(src, window_size)))).height, w.width
         meta = src.meta.copy()
         if save_as_cog:
             meta.update({

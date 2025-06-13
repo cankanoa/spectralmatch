@@ -491,7 +491,7 @@ def _apply_adjustments_process_image(
     if debug_logs: print(f"    Processing {image_name}")
 
     with rasterio.open(input_image_path) as src:
-        block_y, block_x = (w := next(_resolve_windows(src, window_size))).height, w.width
+        block_y, block_x = (w := next(iter(_resolve_windows(src, window_size)))).height, w.width
 
         meta = src.meta.copy()
         if save_as_cog:
@@ -514,6 +514,7 @@ def _apply_adjustments_process_image(
             "driver": "GTiff",
             })
 
+        if os.path.exists(output_image_path): os.remove(output_image_path)
         with rasterio.open(output_image_path, "w", **meta) as dst:
 
             for band in range(num_bands):
