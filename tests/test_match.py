@@ -6,22 +6,6 @@ from .utils_test import create_dummy_raster
 
 
 # global_regression
-@pytest.fixture
-def simple_raster_set(tmp_path):
-    input_dir = tmp_path / "input"
-    output_dir = tmp_path / "output"
-    input_dir.mkdir()
-    output_dir.mkdir()
-
-    paths = []
-    for name in ["A", "B"]:
-        path = input_dir / f"{name}.tif"
-        create_dummy_raster(path, width=16, height=16, count=1, fill_value=100 if name == "A" else 120)
-        paths.append(str(path))
-
-    return paths, str(output_dir)
-
-
 def test_global_regression_full_options_save_model(tmp_path):
     input_dir = tmp_path / "in"
     output_dir = tmp_path / "out"

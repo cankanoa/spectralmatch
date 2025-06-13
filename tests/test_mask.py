@@ -216,6 +216,17 @@ def test_process_polygons_with_buffer(dummy_raster_for_vector, tmp_path):
     gdf = gpd.read_file(output_path)
     assert gdf.geometry.iloc[0].buffer(-0.5).area < gdf.geometry.iloc[0].area
 
+def test_invalid_filter_by_polygon_size_raises(dummy_raster_for_vector, tmp_path):
+    input_path = str(dummy_raster_for_vector)
+    output_path = str(tmp_path / "error.gpkg")
+
+    with pytest.raises(ValueError):
+        process_raster_values_to_vector_polygons(
+            input_images=[input_path],
+            output_vectors=[output_path],
+            extraction_expression="b1 > 0",
+            filter_by_polygon_size="50%" # Invalid
+        )
 
 # threshold_raster
 def test_threshold_raster_basic(dummy_gradient_raster, tmp_path):
