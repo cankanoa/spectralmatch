@@ -1,5 +1,7 @@
 import math
 import os
+import warnings
+
 import numpy as np
 import rasterio
 import traceback
@@ -252,7 +254,7 @@ def local_block_adjustment(
 
     if save_block_maps:
         _download_block_map(
-            np.nan_to_num(block_reference_mean, nan=nodata_val),
+            np.nan_to_num(block_reference_mean, nan=nodata_val) if nodata_val is not None else block_reference_mean,
             bounds_canvas_coords,
             reference_map_path,
             projection,
@@ -263,7 +265,7 @@ def local_block_adjustment(
         )
         for name, block_local_mean in block_local_means.items():
             _download_block_map(
-                np.nan_to_num(block_local_mean, nan=nodata_val),
+                np.nan_to_num(block_local_mean, nan=nodata_val) if nodata_val is not None else block_local_mean,
                 bounds_canvas_coords,
                 local_map_path.replace("$", name),
                 projection,

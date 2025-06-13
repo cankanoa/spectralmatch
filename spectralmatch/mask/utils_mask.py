@@ -294,7 +294,7 @@ def process_raster_values_to_vector_polygons(
         window_size (Universal.WindowSizeWithBlock, optional): Size of each processing block (width, height), or a strategy string such as "block" or "whole".
         debug_logs (Universal.DebugLogs, optional): Whether to print debug logs to the console.
         extraction_expression (str): Logical expression to identify pixels of interest using band references (e.g., "b1 > 10 & b2 < 50").
-        filter_by_polygon_size (str, optional): Area filter for resulting polygons. Can be a number (e.g., ">100") or percentile (e.g., "95%").
+        filter_by_polygon_size (str, optional): Area filter for resulting polygons. Can be a number (e.g., ">100") or percentile (e.g., ">95%").
         polygon_buffer (float, optional): Distance in coordinate units to buffer the resulting polygons. Default is 0.
         value_mapping (dict, optional): Mapping from original raster values to new values. Use `None` to convert to NoData.
 
@@ -408,22 +408,25 @@ def _process_image_to_polygons(
     merged = gdf.dissolve(by="value", as_index=False)
 
     if filter_by_polygon_size:
-        if filter_by_polygon_size.endswith("%"):
-            pct = float(filter_by_polygon_size.strip("%"))
+        match = re.match(r"([<>]=?|==|!=)\s*(\d+(?:\.\d+)?%?)", filter_by_polygon_size.strip())
+        if not match:
+            raise ValueError(f"Invalid filter_by_polygon_size format: {filter_by_polygon_size}")
+
+        op, val = match.groups()
+
+        if val.endswith("%"):
+            pct = float(val.strip("%"))
             area_thresh = np.percentile(merged.geometry.area, pct)
         else:
-            op, val = filter_by_polygon_size[:2], filter_by_polygon_size[2:]
-            if not op[1] in "=<>":
-                op, val = filter_by_polygon_size[:1], filter_by_polygon_size[1:]
             area_thresh = float(val)
 
         op_map = {
             "<": lambda x: x < area_thresh,
-            "<=" : lambda x: x <= area_thresh,
+            "<=": lambda x: x <= area_thresh,
             ">": lambda x: x > area_thresh,
-            ">=" : lambda x: x >= area_thresh,
-            "==" : lambda x: x == area_thresh,
-            "!=" : lambda x: x != area_thresh,
+            ">=": lambda x: x >= area_thresh,
+            "==": lambda x: x == area_thresh,
+            "!=": lambda x: x != area_thresh,
         }
         merged = merged[op_map[op](merged.geometry.area)]
 

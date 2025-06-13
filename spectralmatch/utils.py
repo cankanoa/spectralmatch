@@ -16,6 +16,7 @@ from rasterio.transform import Affine
 from .handlers import _resolve_paths, _check_raster_requirements
 from .types_and_validation import Universal
 from .utils_multiprocessing import _resolve_windows, _get_executor, WorkerContext, _resolve_parallel_config
+from .handlers import _resolve_nodata_value
 
 
 def merge_vectors(
@@ -540,6 +541,7 @@ def mask_rasters(
     image_parallel_workers: Universal.ImageParallelWorkers = None,
     window_parallel_workers: Universal.WindowParallelWorkers = None,
     include_touched_pixels: bool = False,
+    custom_nodata_value: Universal.CustomNodataValue = None,
     ) -> None:
     """
     Applies a vector-based mask to one or more rasters, with support for image- and window-level parallelism.
@@ -566,6 +568,7 @@ def mask_rasters(
         window_size=window_size,
         image_parallel_workers=image_parallel_workers,
         window_parallel_workers=window_parallel_workers,
+        custom_nodata_value=custom_nodata_value,
     )
 
     input_image_paths = _resolve_paths("search", input_images)
@@ -592,7 +595,8 @@ def mask_rasters(
             vector_mask,
             window_size,
             debug_logs,
-            include_touched_pixels
+            include_touched_pixels,
+            custom_nodata_value,
         )
         for name in input_image_names
     ]
@@ -618,6 +622,7 @@ def _mask_raster_process_image(
     window_size: Universal.WindowSize,
     debug_logs: bool,
     include_touched_pixels: bool,
+    custom_nodata_value: Universal.CustomNodataValue,
 ):
     """
     Processes a single raster image by applying a vector mask, optionally in parallel by window.
@@ -640,7 +645,10 @@ def _mask_raster_process_image(
 
     with rasterio.open(input_image_path) as src:
         profile = src.profile.copy()
-        nodata_val = profile.get("nodata", 0)
+        nodata_val = _resolve_nodata_value(src, custom_nodata_value)
+        assert nodata_val is not None, "Nodata value must be set via custom_nodata_value or in the raster metadata."
+
+        profile["nodata"] = nodata_val
         num_bands = src.count
 
         geoms = None
