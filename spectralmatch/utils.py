@@ -5,14 +5,13 @@ import geopandas as gpd
 import pandas as pd
 import numpy as np
 
-from typing import List, Optional, Literal, Tuple
+from typing import Optional, Literal, Tuple
 from rasterio.windows import Window
 from rasterio.enums import Resampling
 from rasterio.features import geometry_mask
 from rasterio.warp import reproject
 from concurrent.futures import as_completed
 from rasterio.transform import Affine
-from rasterio.windows import from_bounds
 
 from .handlers import _resolve_paths, _check_raster_requirements
 from .types_and_validation import Universal

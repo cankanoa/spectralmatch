@@ -2,15 +2,12 @@ import re
 import rasterio
 import os
 import numpy as np
-import geopandas as gpd
 
 from omnicloudmask import predict_from_array
-from rasterio.features import shapes
 from rasterio.enums import Resampling
 from rasterio.transform import from_origin
 from concurrent.futures import as_completed
 from typing import Any
-from shapely.geometry import shape
 from typing import Tuple
 
 from ..types_and_validation import Universal

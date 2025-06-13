@@ -8,7 +8,6 @@ import fiona
 from scipy.ndimage import map_coordinates, gaussian_filter
 from rasterio.windows import Window
 from rasterio.transform import from_origin
-from rasterio.crs import CRS
 from rasterio.features import geometry_mask
 from concurrent.futures import as_completed
 from typing import Tuple, Optional, List, Literal

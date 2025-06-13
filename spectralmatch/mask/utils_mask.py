@@ -1,12 +1,11 @@
 import os
 import rasterio
 import numpy as np
-import fiona
 import re
 import geopandas as gpd
 
-from shapely.geometry import shape, Polygon, MultiPolygon, mapping
-from typing import Literal, Tuple
+from shapely.geometry import shape
+from typing import Tuple
 from rasterio.features import shapes
 from concurrent.futures import as_completed
 
