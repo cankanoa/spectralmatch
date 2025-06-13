@@ -56,7 +56,7 @@ However, global correction alone cannot capture intra-image variability so a sec
 
 - **Minimized Color Differences:** The best color correction is achieved when color differences are minimized.
 
-- **Geometric Alignment:** Images are assumed to be geometrically aligned with known relative positions.
+- **Geometric Alignment:** Images are assumed to be geometrically aligned with known relative positions via a geotransform. However, they only need to be roughly aligned as pixel co-registration is not required.
 
 - **Global Consistency:** Overlapping color differences are consistent across the entire image.
 
