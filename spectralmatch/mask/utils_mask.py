@@ -9,7 +9,12 @@ from typing import Tuple
 from rasterio.features import shapes
 from concurrent.futures import as_completed
 
-from ..utils_multiprocessing import _get_executor, WorkerContext, _resolve_windows, _resolve_parallel_config
+from ..utils_multiprocessing import (
+    _get_executor,
+    WorkerContext,
+    _resolve_windows,
+    _resolve_parallel_config,
+)
 from ..handlers import _resolve_paths, _resolve_nodata_value, _resolve_output_dtype
 from ..types_and_validation import Universal
 
@@ -26,7 +31,7 @@ def threshold_raster(
     window_size: Universal.WindowSize = None,
     custom_output_dtype: Universal.CustomOutputDtype = None,
     calculation_dtype: Universal.CalculationDtype = "float32",
-    ):
+):
     """
     Applies a thresholding operation to input raster images using a mathematical expression string.
 
@@ -55,16 +60,33 @@ def threshold_raster(
         nodata_value = _resolve_nodata_value(ds, custom_nodata_value)
         output_dtype = _resolve_output_dtype(ds, custom_output_dtype)
 
-    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
+    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(
+        image_parallel_workers
+    )
 
     image_args = [
-        (in_path, out_path, name, threshold_math, debug_logs, nodata_value, window_parallel_workers, window_size, output_dtype, calculation_dtype)
-        for in_path, out_path, name in zip(input_image_paths, output_image_paths, image_names)
+        (
+            in_path,
+            out_path,
+            name,
+            threshold_math,
+            debug_logs,
+            nodata_value,
+            window_parallel_workers,
+            window_size,
+            output_dtype,
+            calculation_dtype,
+        )
+        for in_path, out_path, name in zip(
+            input_image_paths, output_image_paths, image_names
+        )
     ]
 
     if image_parallel:
         with _get_executor(image_backend, image_max_workers) as executor:
-            futures = [executor.submit(_threshold_process_image, *arg) for arg in image_args]
+            futures = [
+                executor.submit(_threshold_process_image, *arg) for arg in image_args
+            ]
             for future in as_completed(futures):
                 future.result()
     else:
@@ -83,7 +105,7 @@ def _threshold_process_image(
     window_size,
     output_dtype,
     calculation_dtype,
-    ):
+):
     """
     Processes a single input raster image using a threshold expression and writes the result to disk.
 
@@ -101,9 +123,15 @@ def _threshold_process_image(
     """
     with rasterio.open(input_image_path) as src:
         profile = src.profile.copy()
-        profile.update(dtype=output_dtype, count=1, nodata=nodata_value if nodata_value is not None else None)
+        profile.update(
+            dtype=output_dtype,
+            count=1,
+            nodata=nodata_value if nodata_value is not None else None,
+        )
 
-        window_parallel, window_backend, window_max_workers = _resolve_parallel_config(window_parallel_workers)
+        window_parallel, window_backend, window_max_workers = _resolve_parallel_config(
+            window_parallel_workers
+        )
 
         percent_pattern = re.compile(r"(\d+(\.\d+)?)%b(\d+)")
 
@@ -117,24 +145,38 @@ def _threshold_process_image(
                 nodata_value=nodata_value,
                 window_parallel_workers=window_parallel_workers,
                 window_size=window_size,
-                calculation_dtype=calculation_dtype
+                calculation_dtype=calculation_dtype,
             )
             return str(value)
 
-        evaluated_threshold_math = percent_pattern.sub(replace_percent_with_threshold, threshold_math)
+        evaluated_threshold_math = percent_pattern.sub(
+            replace_percent_with_threshold, threshold_math
+        )
 
         with rasterio.open(output_image_path, "w", **profile) as dst:
             windows = _resolve_windows(src, window_size)
             args = [
-                (name, window, evaluated_threshold_math, debug_logs, nodata_value, calculation_dtype)
+                (
+                    name,
+                    window,
+                    evaluated_threshold_math,
+                    debug_logs,
+                    nodata_value,
+                    calculation_dtype,
+                )
                 for window in windows
             ]
 
             if window_parallel:
-                with _get_executor(window_backend, window_max_workers,
-                                   initializer=WorkerContext.init,
-                                   initargs=({name: ("raster", input_image_path)},)) as executor:
-                    futures = [executor.submit(_threshold_process_window, *arg) for arg in args]
+                with _get_executor(
+                    window_backend,
+                    window_max_workers,
+                    initializer=WorkerContext.init,
+                    initargs=({name: ("raster", input_image_path)},),
+                ) as executor:
+                    futures = [
+                        executor.submit(_threshold_process_window, *arg) for arg in args
+                    ]
                     for future in futures:
                         band, window, data = future.result()
                         dst.write(data.astype(output_dtype), band, window=window)
@@ -152,8 +194,8 @@ def _threshold_process_window(
     threshold_math: str,
     debug_logs: bool,
     nodata_value,
-    calculation_dtype
-    ):
+    calculation_dtype,
+):
     """
     Applies the threshold logic to a single image window.
 
@@ -169,7 +211,10 @@ def _threshold_process_window(
         Tuple[int, rasterio.windows.Window, np.ndarray]: Band index, processed window, thresholded data mask (1 for true, 0 for false).
     """
     ds = WorkerContext.get(name)
-    bands = {f"b{i+1}": ds.read(i+1, window=window).astype(calculation_dtype) for i in range(ds.count)}
+    bands = {
+        f"b{i+1}": ds.read(i + 1, window=window).astype(calculation_dtype)
+        for i in range(ds.count)
+    }
 
     if nodata_value is not None:
         nodata_mask = np.any([b == nodata_value for b in bands.values()], axis=0)
@@ -198,7 +243,7 @@ def _calculate_threshold_from_percent(
     window_size=None,
     calculation_dtype="float32",
     bins: int = 1000,
-    ) -> float:
+) -> float:
     """
     Calculates a threshold value based on a percentile of valid (non-nodata) pixel values in a raster.
 
@@ -217,7 +262,7 @@ def _calculate_threshold_from_percent(
         float: Threshold value corresponding to the requested percentile.
     """
 
-    percent = float(threshold.strip('%'))
+    percent = float(threshold.strip("%"))
 
     hist_total = np.zeros(bins, dtype=np.int64)
     min_val, max_val = None, None
@@ -261,7 +306,9 @@ def _calculate_threshold_from_percent(
     value = bin_edges[min(bin_index, bins - 1)]
 
     if debug_logs:
-        print(f"[threshold %] {threshold} → {value:.4f} using {bins} bins in range ({min_val:.4f}, {max_val:.4f})")
+        print(
+            f"[threshold %] {threshold} → {value:.4f} using {bins} bins in range ({min_val:.4f}, {max_val:.4f})"
+        )
 
     return value
 
@@ -280,7 +327,7 @@ def process_raster_values_to_vector_polygons(
     filter_by_polygon_size: str = None,
     polygon_buffer: float = 0.0,
     value_mapping: dict = None,
-    ):
+):
     """
     Converts raster values into vector polygons based on an expression and optional filtering logic.
 
@@ -311,23 +358,43 @@ def process_raster_values_to_vector_polygons(
         window_parallel_workers=window_parallel_workers,
         window_size=window_size,
         debug_logs=debug_logs,
-
     )
 
     input_image_paths = _resolve_paths("search", input_images)
     output_image_paths = _resolve_paths("create", output_vectors, (input_image_paths,))
 
-    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
-    window_parallel, window_backend, window_max_workers = _resolve_parallel_config(window_parallel_workers)
+    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(
+        image_parallel_workers
+    )
+    window_parallel, window_backend, window_max_workers = _resolve_parallel_config(
+        window_parallel_workers
+    )
 
     image_args = [
-        (in_path, out_path, extraction_expression, filter_by_polygon_size, polygon_buffer, value_mapping, custom_nodata_value, custom_output_dtype, window_parallel, window_backend, window_max_workers, window_size, debug_logs)
+        (
+            in_path,
+            out_path,
+            extraction_expression,
+            filter_by_polygon_size,
+            polygon_buffer,
+            value_mapping,
+            custom_nodata_value,
+            custom_output_dtype,
+            window_parallel,
+            window_backend,
+            window_max_workers,
+            window_size,
+            debug_logs,
+        )
         for in_path, out_path in zip(input_image_paths, output_image_paths)
     ]
 
     if image_parallel:
         with _get_executor(image_backend, image_max_workers) as executor:
-            futures = [executor.submit(_process_image_to_polygons, *args) for args in image_args]
+            futures = [
+                executor.submit(_process_image_to_polygons, *args)
+                for args in image_args
+            ]
             for future in as_completed(futures):
                 future.result()
     else:
@@ -349,7 +416,7 @@ def _process_image_to_polygons(
     window_max_workers,
     window_size,
     debug_logs,
-    ):
+):
     """
     Processes a single raster file and extracts polygons based on logical expressions and optional filters.
 
@@ -377,11 +444,16 @@ def _process_image_to_polygons(
         nodata_value = _resolve_nodata_value(src, custom_nodata_value)
         dtype = _resolve_output_dtype(src, custom_output_dtype)
 
-        band_indices = sorted(set(int(b[1:]) for b in re.findall(r"b\d+", extraction_expression)))
+        band_indices = sorted(
+            set(int(b[1:]) for b in re.findall(r"b\d+", extraction_expression))
+        )
         band_indices = sorted(set(band_indices))
 
         windows = _resolve_windows(src, window_size)
-        window_args = [(w, band_indices, extraction_expression, value_mapping, nodata_value) for w in windows]
+        window_args = [
+            (w, band_indices, extraction_expression, value_mapping, nodata_value)
+            for w in windows
+        ]
 
         polygons = []
         if window_parallel:
@@ -391,7 +463,9 @@ def _process_image_to_polygons(
                 initializer=WorkerContext.init,
                 initargs=({"input": ("raster", input_image_path)},),
             ) as executor:
-                futures = [executor.submit(_process_window, *args) for args in window_args]
+                futures = [
+                    executor.submit(_process_window, *args) for args in window_args
+                ]
                 for f in as_completed(futures):
                     polygons.extend(f.result())
         else:
@@ -401,16 +475,21 @@ def _process_image_to_polygons(
             WorkerContext.close()
 
     if not polygons:
-        if debug_logs: print("No features found.")
+        if debug_logs:
+            print("No features found.")
         return
 
     gdf = gpd.GeoDataFrame(polygons, crs=crs)
     merged = gdf.dissolve(by="value", as_index=False)
 
     if filter_by_polygon_size:
-        match = re.match(r"([<>]=?|==|!=)\s*(\d+(?:\.\d+)?%?)", filter_by_polygon_size.strip())
+        match = re.match(
+            r"([<>]=?|==|!=)\s*(\d+(?:\.\d+)?%?)", filter_by_polygon_size.strip()
+        )
         if not match:
-            raise ValueError(f"Invalid filter_by_polygon_size format: {filter_by_polygon_size}")
+            raise ValueError(
+                f"Invalid filter_by_polygon_size format: {filter_by_polygon_size}"
+            )
 
         op, val = match.groups()
 
@@ -439,13 +518,7 @@ def _process_image_to_polygons(
     merged.to_file(output_vector_path, driver="GPKG", layer="mask")
 
 
-def _process_window(
-    window,
-    band_indices,
-    expression,
-    value_mapping,
-    nodata_value
-    ):
+def _process_window(window, band_indices, expression, value_mapping, nodata_value):
     """
     Processes a single window of a raster image to extract polygons matching an expression.
 

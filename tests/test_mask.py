@@ -6,7 +6,13 @@ import geopandas as gpd
 
 from rasterio.transform import from_origin
 
-from spectralmatch import band_math, create_cloud_mask_with_omnicloudmask, process_raster_values_to_vector_polygons, threshold_raster, create_ndvi_raster
+from spectralmatch import (
+    band_math,
+    create_cloud_mask_with_omnicloudmask,
+    process_raster_values_to_vector_polygons,
+    threshold_raster,
+    create_ndvi_raster,
+)
 from .utils_test import create_dummy_raster
 
 
@@ -31,17 +37,18 @@ def dummy_red_nir_raster(tmp_path):
     transform = from_origin(0, 32, 1, 1)
 
     with rasterio.open(
-        path, 'w',
-        driver='GTiff',
+        path,
+        "w",
+        driver="GTiff",
         height=height,
         width=width,
         count=2,
-        dtype='uint16',
+        dtype="uint16",
         transform=transform,
-        crs='EPSG:4326'
+        crs="EPSG:4326",
     ) as dst:
-        dst.write(np.full((height, width), 1000, dtype='uint16'), 1)  # NIR
-        dst.write(np.full((height, width), 500, dtype='uint16'), 2)   # Red
+        dst.write(np.full((height, width), 1000, dtype="uint16"), 1)  # NIR
+        dst.write(np.full((height, width), 500, dtype="uint16"), 2)  # Red
     return path
 
 
@@ -76,27 +83,27 @@ def dummy_gradient_raster(tmp_path):
     transform = from_origin(0, 16, 1, 1)
 
     with rasterio.open(
-        path, "w",
+        path,
+        "w",
         driver="GTiff",
         height=16,
         width=16,
         count=1,
         dtype="uint8",
         crs="EPSG:4326",
-        transform=transform
+        transform=transform,
     ) as dst:
         dst.write(data, 1)
 
     return path
+
 
 # band_math
 def test_band_math_basic(dummy_multiband_raster, tmp_path):
     input_path = str(dummy_multiband_raster)
     output_path = str(tmp_path / "output.tif")
     band_math(
-        input_images=[input_path],
-        output_images=[output_path],
-        custom_math="b1 + b2"
+        input_images=[input_path], output_images=[output_path], custom_math="b1 + b2"
     )
 
     with rasterio.open(output_path) as out:
@@ -112,7 +119,7 @@ def test_band_math_dtype(dummy_multiband_raster, tmp_path):
         input_images=[input_path],
         output_images=[output_path],
         custom_math="b1 * 2",
-        custom_output_dtype="uint16"
+        custom_output_dtype="uint16",
     )
 
     with rasterio.open(output_path) as out:
@@ -126,7 +133,7 @@ def test_band_math_nodata(dummy_multiband_raster, tmp_path):
         input_images=[input_path],
         output_images=[output_path],
         custom_math="b1 + b2",
-        custom_nodata_value=99
+        custom_nodata_value=99,
     )
 
     with rasterio.open(output_path) as out:
@@ -144,7 +151,7 @@ def test_create_cloud_mask(dummy_rgbn_raster, tmp_path):
         red_band_index=1,
         green_band_index=2,
         nir_band_index=3,
-        debug_logs=True
+        debug_logs=True,
     )
 
     assert os.path.exists(output_path)
@@ -161,7 +168,7 @@ def test_create_ndvi_raster_basic(dummy_red_nir_raster, tmp_path):
         input_images=[input_path],
         output_images=[output_path],
         nir_band_index=1,
-        red_band_index=2
+        red_band_index=2,
     )
 
     assert tmp_path.joinpath("ndvi.tif").exists()
@@ -169,6 +176,7 @@ def test_create_ndvi_raster_basic(dummy_red_nir_raster, tmp_path):
         ndvi_data = ds.read(1)
         assert ndvi_data.shape == (32, 32)
         assert np.allclose(ndvi_data, (1000 - 500) / (1000 + 500), atol=1e-3)
+
 
 # process_raster_values_to_vector_polygons
 def test_process_raster_values_to_polygons_basic(dummy_raster_for_vector, tmp_path):
@@ -178,7 +186,7 @@ def test_process_raster_values_to_polygons_basic(dummy_raster_for_vector, tmp_pa
     process_raster_values_to_vector_polygons(
         input_images=[input_path],
         output_vectors=[output_path],
-        extraction_expression="b1 > 0"
+        extraction_expression="b1 > 0",
     )
 
     assert tmp_path.joinpath("out.gpkg").exists()
@@ -187,7 +195,9 @@ def test_process_raster_values_to_polygons_basic(dummy_raster_for_vector, tmp_pa
     assert gdf.geometry.iloc[0].is_valid
 
 
-def test_process_polygons_with_value_mapping_and_filter(dummy_raster_for_vector, tmp_path):
+def test_process_polygons_with_value_mapping_and_filter(
+    dummy_raster_for_vector, tmp_path
+):
     input_path = str(dummy_raster_for_vector)
     output_path = str(tmp_path / "filtered.gpkg")
 
@@ -196,11 +206,12 @@ def test_process_polygons_with_value_mapping_and_filter(dummy_raster_for_vector,
         output_vectors=[output_path],
         extraction_expression="b1 >= 2",
         filter_by_polygon_size="<50%",
-        value_mapping={2: 5}
+        value_mapping={2: 5},
     )
 
     gdf = gpd.read_file(output_path)
     assert all(gdf.area > 4)
+
 
 def test_process_polygons_with_buffer(dummy_raster_for_vector, tmp_path):
     input_path = str(dummy_raster_for_vector)
@@ -210,11 +221,12 @@ def test_process_polygons_with_buffer(dummy_raster_for_vector, tmp_path):
         input_images=[input_path],
         output_vectors=[output_path],
         extraction_expression="b1 == 1",
-        polygon_buffer=0.5
+        polygon_buffer=0.5,
     )
 
     gdf = gpd.read_file(output_path)
     assert gdf.geometry.iloc[0].buffer(-0.5).area < gdf.geometry.iloc[0].area
+
 
 def test_invalid_filter_by_polygon_size_raises(dummy_raster_for_vector, tmp_path):
     input_path = str(dummy_raster_for_vector)
@@ -225,8 +237,9 @@ def test_invalid_filter_by_polygon_size_raises(dummy_raster_for_vector, tmp_path
             input_images=[input_path],
             output_vectors=[output_path],
             extraction_expression="b1 > 0",
-            filter_by_polygon_size="50%" # Invalid
+            filter_by_polygon_size="50%",  # Invalid
         )
+
 
 # threshold_raster
 def test_threshold_raster_basic(dummy_gradient_raster, tmp_path):
@@ -253,7 +266,7 @@ def test_threshold_raster_compound(dummy_gradient_raster, tmp_path):
     threshold_raster(
         input_images=[input_path],
         output_images=[output_path],
-        threshold_math="(b1 > 5) & (b1 < 10)"
+        threshold_math="(b1 > 5) & (b1 < 10)",
     )
 
     with rasterio.open(output_path) as out:
@@ -269,7 +282,7 @@ def test_threshold_raster_percentile(dummy_gradient_raster, tmp_path):
     threshold_raster(
         input_images=[input_path],
         output_images=[output_path],
-        threshold_math="b1 > 95%b1"
+        threshold_math="b1 > 95%b1",
     )
 
     with rasterio.open(output_path) as out:

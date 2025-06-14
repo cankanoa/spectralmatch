@@ -12,7 +12,12 @@ from typing import Tuple
 
 from ..types_and_validation import Universal
 from ..handlers import _resolve_paths, _resolve_output_dtype, _resolve_nodata_value
-from ..utils_multiprocessing import _resolve_parallel_config, _get_executor, WorkerContext, _resolve_windows
+from ..utils_multiprocessing import (
+    _resolve_parallel_config,
+    _get_executor,
+    WorkerContext,
+    _resolve_windows,
+)
 
 
 def create_cloud_mask_with_omnicloudmask(
@@ -26,7 +31,7 @@ def create_cloud_mask_with_omnicloudmask(
     debug_logs: Universal.DebugLogs = False,
     image_parallel_workers: Universal.ImageParallelWorkers = None,
     **omnicloud_kwargs: Any,
-    ):
+):
     """
     Generates cloud masks from input images using OmniCloudMask, with optional downsampling and multiprocessing.
 
@@ -47,17 +52,19 @@ def create_cloud_mask_with_omnicloudmask(
 
     print("Start omnicloudmask")
     Universal.validate(
-        input_images=input_images,
-        output_images=output_images,
-        debug_logs=debug_logs
+        input_images=input_images, output_images=output_images, debug_logs=debug_logs
     )
 
     input_image_paths = _resolve_paths("search", input_images)
     output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
-    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
+    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(
+        image_parallel_workers
+    )
 
-    if debug_logs: print(f"Input images: {input_image_paths}")
-    if debug_logs: print(f"Output images: {output_image_paths}")
+    if debug_logs:
+        print(f"Input images: {input_image_paths}")
+    if debug_logs:
+        print(f"Output images: {output_image_paths}")
 
     image_args = [
         (
@@ -75,7 +82,9 @@ def create_cloud_mask_with_omnicloudmask(
 
     if image_parallel:
         with _get_executor(image_backend, image_max_workers) as executor:
-            futures = [executor.submit(_process_cloud_mask_image, *args) for args in image_args]
+            futures = [
+                executor.submit(_process_cloud_mask_image, *args) for args in image_args
+            ]
             for future in as_completed(futures):
                 future.result()
     else:
@@ -92,7 +101,7 @@ def _process_cloud_mask_image(
     down_sample_m: float,
     debug_logs: bool,
     omnicloud_kwargs: dict,
-    ):
+):
     """
     Processes a single image to generate a cloud mask using OmniCloudMask.
 
@@ -116,15 +125,29 @@ def _process_cloud_mask_image(
             new_width = int((right - left) / down_sample_m)
             new_height = int((top - bottom) / down_sample_m)
             new_transform = from_origin(left, top, down_sample_m, down_sample_m)
-            red = src.read(red_band_index, out_shape=(new_height, new_width), resampling=Resampling.bilinear)
-            green = src.read(green_band_index, out_shape=(new_height, new_width), resampling=Resampling.bilinear)
-            nir = src.read(nir_band_index, out_shape=(new_height, new_width), resampling=Resampling.bilinear)
+            red = src.read(
+                red_band_index,
+                out_shape=(new_height, new_width),
+                resampling=Resampling.bilinear,
+            )
+            green = src.read(
+                green_band_index,
+                out_shape=(new_height, new_width),
+                resampling=Resampling.bilinear,
+            )
+            nir = src.read(
+                nir_band_index,
+                out_shape=(new_height, new_width),
+                resampling=Resampling.bilinear,
+            )
             meta = src.meta.copy()
-            meta.update({
-                'width': new_width,
-                'height': new_height,
-                'transform': new_transform,
-            })
+            meta.update(
+                {
+                    "width": new_width,
+                    "height": new_height,
+                    "transform": new_transform,
+                }
+            )
         else:
             red = src.read(red_band_index)
             green = src.read(green_band_index)
@@ -135,14 +158,16 @@ def _process_cloud_mask_image(
     pred_mask = predict_from_array(band_array, **omnicloud_kwargs)
     pred_mask = np.squeeze(pred_mask)
 
-    meta.update({
-        'driver': 'GTiff',
-        'count': 1,
-        'dtype': pred_mask.dtype,
-        'nodata': 0,
-    })
+    meta.update(
+        {
+            "driver": "GTiff",
+            "count": 1,
+            "dtype": pred_mask.dtype,
+            "nodata": 0,
+        }
+    )
 
-    with rasterio.open(output_mask_path, 'w', **meta) as dst:
+    with rasterio.open(output_mask_path, "w", **meta) as dst:
         dst.write(pred_mask, 1)
 
 
@@ -157,7 +182,7 @@ def create_ndvi_raster(
     debug_logs: Universal.DebugLogs = False,
     image_parallel_workers: Universal.ImageParallelWorkers = None,
     window_parallel_workers: Universal.WindowParallelWorkers = None,
-    ) -> None:
+) -> None:
     """Computes NDVI masks for one or more images and writes them to disk.
 
     Args:
@@ -190,16 +215,30 @@ def create_ndvi_raster(
     output_paths = _resolve_paths("create", output_images, (input_paths,))
     image_names = _resolve_paths("name", input_paths)
 
-    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
+    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(
+        image_parallel_workers
+    )
 
     image_args = [
-        (in_path, out_path, image_name, nir_band_index, red_band_index, custom_output_dtype, window_size, debug_logs, window_parallel_workers)
+        (
+            in_path,
+            out_path,
+            image_name,
+            nir_band_index,
+            red_band_index,
+            custom_output_dtype,
+            window_size,
+            debug_logs,
+            window_parallel_workers,
+        )
         for in_path, out_path, image_name in zip(input_paths, output_paths, image_names)
     ]
 
     if image_parallel:
         with _get_executor(image_backend, image_max_workers) as executor:
-            futures = [executor.submit(_ndvi_process_image, *args) for args in image_args]
+            futures = [
+                executor.submit(_ndvi_process_image, *args) for args in image_args
+            ]
             for f in as_completed(futures):
                 f.result()
     else:
@@ -223,16 +262,27 @@ def _ndvi_process_image(
         profile = src.profile.copy()
         profile.update(dtype=_resolve_output_dtype(src, custom_output_dtype), count=1)
 
-        with rasterio.open(output_path, 'w', **profile) as dst:
+        with rasterio.open(output_path, "w", **profile) as dst:
             windows = _resolve_windows(src, window_size)
-            window_args = [(image_name, window, nir_band_index, red_band_index, debug_logs) for window in windows]
+            window_args = [
+                (image_name, window, nir_band_index, red_band_index, debug_logs)
+                for window in windows
+            ]
 
-            window_parallel, backend, max_workers = _resolve_parallel_config(window_parallel_workers)
+            window_parallel, backend, max_workers = _resolve_parallel_config(
+                window_parallel_workers
+            )
             if window_parallel:
-                with _get_executor(backend, max_workers,
-                                   initializer=WorkerContext.init,
-                                   initargs=({image_name: ("raster", input_path)},)) as executor:
-                    futures = [executor.submit(_ndvi_process_window, *args) for args in window_args]
+                with _get_executor(
+                    backend,
+                    max_workers,
+                    initializer=WorkerContext.init,
+                    initargs=({image_name: ("raster", input_path)},),
+                ) as executor:
+                    futures = [
+                        executor.submit(_ndvi_process_window, *args)
+                        for args in window_args
+                    ]
                     for f in as_completed(futures):
                         band, window, data = f.result()
                         dst.write(data, band, window)
@@ -297,19 +347,39 @@ def band_math(
         nodata_value = _resolve_nodata_value(ds, custom_nodata_value)
         output_dtype = _resolve_output_dtype(ds, custom_output_dtype)
 
-    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
+    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(
+        image_parallel_workers
+    )
 
     # Extract referenced bands from custom_math (e.g., b1, b2, ...)
-    band_indices = sorted({int(match[1:]) for match in re.findall(r"\bb\d+\b", custom_math)})
+    band_indices = sorted(
+        {int(match[1:]) for match in re.findall(r"\bb\d+\b", custom_math)}
+    )
 
     image_args = [
-        (in_path, out_path, name, custom_math, debug_logs, nodata_value, window_parallel_workers, window_size, band_indices, output_dtype, calculation_dtype)
-        for in_path, out_path, name in zip(input_image_paths, output_image_paths, image_names)
+        (
+            in_path,
+            out_path,
+            name,
+            custom_math,
+            debug_logs,
+            nodata_value,
+            window_parallel_workers,
+            window_size,
+            band_indices,
+            output_dtype,
+            calculation_dtype,
+        )
+        for in_path, out_path, name in zip(
+            input_image_paths, output_image_paths, image_names
+        )
     ]
 
     if image_parallel:
         with _get_executor(image_backend, image_max_workers) as executor:
-            futures = [executor.submit(_band_math_process_image, *arg) for arg in image_args]
+            futures = [
+                executor.submit(_band_math_process_image, *arg) for arg in image_args
+            ]
             for future in as_completed(futures):
                 future.result()
     else:
@@ -329,7 +399,7 @@ def _band_math_process_image(
     band_indices,
     output_dtype,
     calculation_dtype,
-    ):
+):
     """
     Processes a single image by evaluating a custom math expression per pixel block.
 
@@ -351,19 +421,36 @@ def _band_math_process_image(
         profile = src.profile.copy()
         profile.update(dtype=output_dtype, count=1, nodata=nodata_value)
 
-        window_parallel, window_backend, window_max_workers = _resolve_parallel_config(window_parallel_workers)
+        window_parallel, window_backend, window_max_workers = _resolve_parallel_config(
+            window_parallel_workers
+        )
 
         os.makedirs(os.path.dirname(output_image_path), exist_ok=True)
         with rasterio.open(output_image_path, "w", **profile) as dst:
             windows = _resolve_windows(src, window_size)
             args = [
-                (name, window, custom_math, debug_logs, nodata_value, band_indices, calculation_dtype)
+                (
+                    name,
+                    window,
+                    custom_math,
+                    debug_logs,
+                    nodata_value,
+                    band_indices,
+                    calculation_dtype,
+                )
                 for window in windows
             ]
 
             if window_parallel:
-                with _get_executor(window_backend, window_max_workers, initializer=WorkerContext.init, initargs=({name: ("raster", input_image_path)},)) as executor:
-                    futures = [executor.submit(_band_math_process_window, *arg) for arg in args]
+                with _get_executor(
+                    window_backend,
+                    window_max_workers,
+                    initializer=WorkerContext.init,
+                    initargs=({name: ("raster", input_image_path)},),
+                ) as executor:
+                    futures = [
+                        executor.submit(_band_math_process_window, *arg) for arg in args
+                    ]
                     for future in futures:
                         band, window, data = future.result()
                         dst.write(data.astype(output_dtype), band, window=window)
@@ -382,8 +469,8 @@ def _band_math_process_window(
     debug_logs: bool,
     nodata_value,
     band_indices,
-    calculation_dtype
-    ):
+    calculation_dtype,
+):
     """
     Computes the result of a band math expression within a raster window.
 

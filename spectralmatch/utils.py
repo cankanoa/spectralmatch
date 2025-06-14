@@ -15,7 +15,12 @@ from rasterio.transform import Affine
 
 from .handlers import _resolve_paths, _check_raster_requirements
 from .types_and_validation import Universal
-from .utils_multiprocessing import _resolve_windows, _get_executor, WorkerContext, _resolve_parallel_config
+from .utils_multiprocessing import (
+    _resolve_windows,
+    _get_executor,
+    WorkerContext,
+    _resolve_parallel_config,
+)
 from .handlers import _resolve_nodata_value
 
 
@@ -68,7 +73,9 @@ def merge_vectors(
                 name = os.path.splitext(os.path.basename(path))[0]
                 gdf[field_name] = name
             merged_dfs.append(gdf)
-        merged = gpd.GeoDataFrame(pd.concat(merged_dfs, ignore_index=True), crs=merged_dfs[0].crs)
+        merged = gpd.GeoDataFrame(
+            pd.concat(merged_dfs, ignore_index=True), crs=merged_dfs[0].crs
+        )
 
     elif method == "union":
         merged = gpd.GeoDataFrame(pd.concat(geoms, ignore_index=True), crs=geoms[0].crs)
@@ -101,7 +108,7 @@ def align_rasters(
     debug_logs: Universal.DebugLogs = False,
     image_parallel_workers: Universal.ImageParallelWorkers = None,
     window_parallel_workers: Universal.WindowParallelWorkers = None,
-    ) -> None:
+) -> None:
     """
     Aligns multiple rasters to a common resolution and grid using specified resampling.
 
@@ -135,7 +142,8 @@ def align_rasters(
     output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
     image_names = [os.path.splitext(os.path.basename(p))[0] for p in input_image_paths]
 
-    if debug_logs: print(f"{len(input_image_paths)} rasters to align")
+    if debug_logs:
+        print(f"{len(input_image_paths)} rasters to align")
 
     # Determine target resolution
     resolutions = []
@@ -154,7 +162,8 @@ def align_rasters(
         "average": res_arr.mean(axis=0),
     }[resolution]
 
-    if debug_logs: print(f"Target resolution: {target_res}")
+    if debug_logs:
+        print(f"Target resolution: {target_res}")
 
     parallel_args = [
         (
@@ -168,12 +177,16 @@ def align_rasters(
             window_size,
             debug_logs,
         )
-        for in_path, out_path, image_name in zip(input_image_paths, output_image_paths, image_names)
+        for in_path, out_path, image_name in zip(
+            input_image_paths, output_image_paths, image_names
+        )
     ]
 
     if image_parallel_workers:
         with _get_executor(*image_parallel_workers) as executor:
-            futures = [executor.submit(_align_process_image, *args) for args in parallel_args]
+            futures = [
+                executor.submit(_align_process_image, *args) for args in parallel_args
+            ]
             for future in as_completed(futures):
                 future.result()
     else:
@@ -210,7 +223,8 @@ def _align_process_image(
         None
     """
 
-    if debug_logs: print(f"Aligning: {in_path}")
+    if debug_logs:
+        print(f"Aligning: {in_path}")
 
     with rasterio.open(in_path) as src:
         profile = src.profile.copy()
@@ -230,11 +244,9 @@ def _align_process_image(
 
         src_transform = src.transform
 
-        profile.update({
-            "height": dst_height,
-            "width": dst_width,
-            "transform": dst_transform
-        })
+        profile.update(
+            {"height": dst_height, "width": dst_width, "transform": dst_transform}
+        )
 
         with rasterio.open(out_path, "w", **profile) as dst:
             for band_idx in range(src.count):
@@ -246,31 +258,38 @@ def _align_process_image(
                     dst_bounds = rasterio.windows.bounds(dst_win, dst.transform)
 
                     # Convert bounds to source window using inverse transform
-                    src_win = rasterio.windows.from_bounds(*dst_bounds, transform=src.transform)
+                    src_win = rasterio.windows.from_bounds(
+                        *dst_bounds, transform=src.transform
+                    )
                     # src_win = src_win.round_offsets().round_lengths()  # Makes it integer-aligned
 
-                    window_args.append((
-                        src_win,
-                        dst_win,
-                        band_idx,
-                        dst_transform,
-                        resampling_method,
-                        src.nodata,
-                        debug_logs,
-                        image_name,
-                    ))
+                    window_args.append(
+                        (
+                            src_win,
+                            dst_win,
+                            band_idx,
+                            dst_transform,
+                            resampling_method,
+                            src.nodata,
+                            debug_logs,
+                            image_name,
+                        )
+                    )
 
                 parallel = window_parallel is not None
                 backend, max_workers = (window_parallel or (None, None))[0:2]
 
                 if parallel and backend == "process":
                     with _get_executor(
-                            backend,
-                            max_workers,
-                            initializer=WorkerContext.init,
-                            initargs=({image_name: ("raster", in_path)},)
+                        backend,
+                        max_workers,
+                        initializer=WorkerContext.init,
+                        initargs=({image_name: ("raster", in_path)},),
                     ) as executor:
-                        futures = [executor.submit(_align_process_window, *args) for args in window_args]
+                        futures = [
+                            executor.submit(_align_process_window, *args)
+                            for args in window_args
+                        ]
                         for future in as_completed(futures):
                             band, window, buf = future.result()
                             dst.write(buf, band + 1, window=window)
@@ -314,7 +333,9 @@ def _align_process_window(
     dst_buffer = np.empty(dst_shape, dtype=src.dtypes[band_idx])
 
     # Compute the transform specific to the current dst_window tile
-    dst_transform_window = dst_transform * Affine.translation(dst_window.col_off, dst_window.row_off)
+    dst_transform_window = dst_transform * Affine.translation(
+        dst_window.col_off, dst_window.row_off
+    )
 
     reproject(
         source=rasterio.band(src, band_idx + 1),
@@ -376,7 +397,14 @@ def merge_rasters(
 
     input_image_paths = _resolve_paths("search", input_images)
 
-    _check_raster_requirements(input_image_paths, debug_logs, check_geotransform=True, check_crs=True, check_bands=True, check_nodata=True)
+    _check_raster_requirements(
+        input_image_paths,
+        debug_logs,
+        check_geotransform=True,
+        check_crs=True,
+        check_bands=True,
+        check_nodata=True,
+    )
 
     image_names = [os.path.splitext(os.path.basename(p))[0] for p in input_image_paths]
     input_image_path_pairs = dict(zip(image_names, input_image_paths))
@@ -384,7 +412,8 @@ def merge_rasters(
     if custom_nodata_value:
         nodata_value = custom_nodata_value
     else:
-        with rasterio.open(input_image_paths[0]) as src: nodata_value = src.nodata
+        with rasterio.open(input_image_paths[0]) as src:
+            nodata_value = src.nodata
 
     if debug_logs:
         print(f"Merging {len(input_image_paths)} rasters into: {output_image_path}")
@@ -414,17 +443,21 @@ def merge_rasters(
 
     with rasterio.open(input_image_paths[0]) as src:
         meta = src.meta.copy()
-        meta.update({
-            "height": height,
-            "width": width,
-            "transform": transform,
-            "count": src.count,
-            "dtype": output_dtype or src.dtypes[0],
-            "nodata": nodata_value,
-        })
+        meta.update(
+            {
+                "height": height,
+                "width": width,
+                "transform": transform,
+                "count": src.count,
+                "dtype": output_dtype or src.dtypes[0],
+                "nodata": nodata_value,
+            }
+        )
 
     # Determine multiprocessing and worker count
-    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
+    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(
+        image_parallel_workers
+    )
 
     parallel_args = []
     for name, path in input_image_path_pairs.items():
@@ -432,37 +465,44 @@ def merge_rasters(
             for band in range(src.count):
                 windows = _resolve_windows(src, window_size)
                 for window in windows:
-                    parallel_args.append((
-                        window,
-                        band,
-                        meta["dtype"],
-                        debug_logs,
-                        name,
-                        src.transform,
-                        transform,
-                        nodata_value
-                    ))
+                    parallel_args.append(
+                        (
+                            window,
+                            band,
+                            meta["dtype"],
+                            debug_logs,
+                            name,
+                            src.transform,
+                            transform,
+                            nodata_value,
+                        )
+                    )
 
     # Pre-initialize WorkerContext
     init_worker = WorkerContext.init
-    init_args_map = {name: ("raster", path) for name, path in input_image_path_pairs.items()}
+    init_args_map = {
+        name: ("raster", path) for name, path in input_image_path_pairs.items()
+    }
 
     with rasterio.open(output_image_path, "w", **meta):
         pass
     with rasterio.open(output_image_path, "r+", **meta) as dst:
         if image_parallel:
             with _get_executor(
-                    image_backend,
-                    image_max_workers,
-                    initializer=init_worker,
-                    initargs=(init_args_map,)
+                image_backend,
+                image_max_workers,
+                initializer=init_worker,
+                initargs=(init_args_map,),
             ) as executor:
-                futures = [executor.submit(_merge_raster_process_window, *args) for args in parallel_args]
+                futures = [
+                    executor.submit(_merge_raster_process_window, *args)
+                    for args in parallel_args
+                ]
                 for future in as_completed(futures):
                     band, dst_window, buf = future.result()
                     if buf is not None:
                         existing = dst.read(band + 1, window=dst_window)
-                        valid_mask = (buf != nodata_value)
+                        valid_mask = buf != nodata_value
                         merged = np.where(valid_mask, buf, existing)
                         dst.write(merged, band + 1, window=dst_window)
         else:
@@ -471,11 +511,12 @@ def merge_rasters(
                 band, dst_window, buf = _merge_raster_process_window(*args)
                 if buf is not None:
                     existing = dst.read(band + 1, window=dst_window)
-                    valid_mask = (buf != nodata_value)
+                    valid_mask = buf != nodata_value
                     merged = np.where(valid_mask, buf, existing)
                     dst.write(merged, band + 1, window=dst_window)
             WorkerContext.close()
-    if debug_logs: print("Raster merging complete")
+    if debug_logs:
+        print("Raster merging complete")
 
 
 def _merge_raster_process_window(
@@ -526,7 +567,7 @@ def _merge_raster_process_window(
         col_off=int(round(dst_col_off)),
         row_off=int(round(dst_row_off)),
         width=window.width,
-        height=window.height
+        height=window.height,
     )
 
     return band_idx, dst_window, block
@@ -542,7 +583,7 @@ def mask_rasters(
     window_parallel_workers: Universal.WindowParallelWorkers = None,
     include_touched_pixels: bool = False,
     custom_nodata_value: Universal.CustomNodataValue = None,
-    ) -> None:
+) -> None:
     """
     Applies a vector-based mask to one or more rasters, with support for image- and window-level parallelism.
 
@@ -574,15 +615,23 @@ def mask_rasters(
     input_image_paths = _resolve_paths("search", input_images)
     output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
 
-    if debug_logs: print(f"Input images: {input_image_paths}")
-    if debug_logs: print(f"Output images: {output_image_paths}")
+    if debug_logs:
+        print(f"Input images: {input_image_paths}")
+    if debug_logs:
+        print(f"Output images: {output_image_paths}")
 
-    input_image_names = [os.path.splitext(os.path.basename(p))[0] for p in input_image_paths]
+    input_image_names = [
+        os.path.splitext(os.path.basename(p))[0] for p in input_image_paths
+    ]
     input_image_path_pairs = dict(zip(input_image_names, input_image_paths))
     output_image_path_pairs = dict(zip(input_image_names, output_image_paths))
 
-    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
-    window_parallel, window_backend, window_max_workers = _resolve_parallel_config(window_parallel_workers)
+    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(
+        image_parallel_workers
+    )
+    window_parallel, window_backend, window_max_workers = _resolve_parallel_config(
+        window_parallel_workers
+    )
 
     parallel_args = [
         (
@@ -603,7 +652,10 @@ def mask_rasters(
 
     if image_parallel:
         with _get_executor(image_backend, image_max_workers) as executor:
-            futures = [executor.submit(_mask_raster_process_image, *args) for args in parallel_args]
+            futures = [
+                executor.submit(_mask_raster_process_image, *args)
+                for args in parallel_args
+            ]
             for future in as_completed(futures):
                 future.result()
     else:
@@ -646,7 +698,9 @@ def _mask_raster_process_image(
     with rasterio.open(input_image_path) as src:
         profile = src.profile.copy()
         nodata_val = _resolve_nodata_value(src, custom_nodata_value)
-        assert nodata_val is not None, "Nodata value must be set via custom_nodata_value or in the raster metadata."
+        assert (
+            nodata_val is not None
+        ), "Nodata value must be set via custom_nodata_value or in the raster metadata."
 
         profile["nodata"] = nodata_val
         num_bands = src.count
@@ -663,7 +717,8 @@ def _mask_raster_process_image(
                     geoms = [
                         feat["geometry"]
                         for feat in vector
-                        if field_name in feat["properties"] and image_name in str(feat["properties"][field_name])
+                        if field_name in feat["properties"]
+                        and image_name in str(feat["properties"][field_name])
                     ]
                 else:
                     geoms = [feat["geometry"] for feat in vector]
@@ -680,7 +735,7 @@ def _mask_raster_process_image(
                         nodata_val,
                         geoms,
                         invert,
-                        include_touched_pixels
+                        include_touched_pixels,
                     )
                     for win in windows
                 ]
@@ -690,9 +745,12 @@ def _mask_raster_process_image(
                         backend,
                         max_workers,
                         initializer=WorkerContext.init,
-                        initargs=({image_name: ("raster", input_image_path)},)
+                        initargs=({image_name: ("raster", input_image_path)},),
                     ) as executor:
-                        futures = [executor.submit(_mask_raster_process_window, *arg) for arg in args]
+                        futures = [
+                            executor.submit(_mask_raster_process_window, *arg)
+                            for arg in args
+                        ]
                         for future in as_completed(futures):
                             window, data = future.result()
                             dst.write(data, band_idx + 1, window=window)
@@ -730,7 +788,9 @@ def _mask_raster_process_window(
         tuple[Window, np.ndarray]: The window and its corresponding masked data array.
     """
     src = WorkerContext.get(image_name)
-    mask_key = f"{int(win.col_off)}-{int(win.row_off)}-{int(win.width)}-{int(win.height)}"
+    mask_key = (
+        f"{int(win.col_off)}-{int(win.row_off)}-{int(win.width)}-{int(win.height)}"
+    )
 
     mask_cache = WorkerContext.cache.setdefault("_mask_cache", {})
     mask_hits = WorkerContext.cache.setdefault("_mask_hits", {})
@@ -743,7 +803,7 @@ def _mask_raster_process_window(
                 transform=transform,
                 invert=not invert,
                 out_shape=(int(win.height), int(win.width)),
-                all_touched=include_touched_pixels
+                all_touched=include_touched_pixels,
             )
             mask_cache[mask_key] = mask
             mask_hits[mask_key] = 0

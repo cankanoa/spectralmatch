@@ -16,7 +16,12 @@ from rasterio.features import geometry_mask
 from rasterio.coords import BoundingBox
 
 from ..handlers import _resolve_paths, _get_nodata_value, _check_raster_requirements
-from ..utils_multiprocessing import _resolve_parallel_config, _resolve_windows, _get_executor, WorkerContext
+from ..utils_multiprocessing import (
+    _resolve_parallel_config,
+    _resolve_windows,
+    _get_executor,
+    WorkerContext,
+)
 from ..types_and_validation import Universal, Match
 
 
@@ -38,7 +43,7 @@ def global_regression(
     custom_std_factor: float = 1.0,
     save_adjustments: str | None = None,
     load_adjustments: str | None = None,
-    ) -> list:
+) -> list:
     """
     Performs global radiometric normalization across overlapping images using least squares regression.
 
@@ -102,21 +107,38 @@ def global_regression(
     input_image_paths = _resolve_paths("search", input_images)
     output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
 
-    if debug_logs: print(f"Input images: {input_image_paths}")
-    if debug_logs: print(f"Output images: {output_image_paths}")
+    if debug_logs:
+        print(f"Input images: {input_image_paths}")
+    if debug_logs:
+        print(f"Output images: {output_image_paths}")
 
-    input_image_names = [os.path.splitext(os.path.basename(p))[0] for p in input_image_paths]
+    input_image_names = [
+        os.path.splitext(os.path.basename(p))[0] for p in input_image_paths
+    ]
     input_image_path_pairs = dict(zip(input_image_names, input_image_paths))
     output_image_path_pairs = dict(zip(input_image_names, output_image_paths))
 
     # Check raster requirements
-    _check_raster_requirements(input_image_paths, debug_logs, check_geotransform=True, check_crs=True, check_bands=True, check_nodata=True)
+    _check_raster_requirements(
+        input_image_paths,
+        debug_logs,
+        check_geotransform=True,
+        check_crs=True,
+        check_bands=True,
+        check_nodata=True,
+    )
 
-    nodata_val = _get_nodata_value(list(input_image_path_pairs.values()), custom_nodata_value)
+    nodata_val = _get_nodata_value(
+        list(input_image_path_pairs.values()), custom_nodata_value
+    )
 
     # Determine multiprocessing and worker count
-    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
-    window_parallel, window_backend, window_max_workers = _resolve_parallel_config(window_parallel_workers)
+    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(
+        image_parallel_workers
+    )
+    window_parallel, window_backend, window_max_workers = _resolve_parallel_config(
+        window_parallel_workers
+    )
 
     # Find loaded and input files if load adjustments
     loaded_model = {}
@@ -134,10 +156,19 @@ def global_regression(
     only_loaded = loaded_names - input_names
     only_input = input_names - loaded_names
     if debug_logs:
-        print(f"Total images: input images: {len(input_names)}, loaded images {len(loaded_names)}: ")
-        print(f"    Matched adjustments (to override) ({len(matched)}):", sorted(matched))
-        print(f"    Only in loaded adjustments (to add) ({len(only_loaded)}):", sorted(only_loaded))
-        print(f"    Only in input (to calculate) ({len(only_input)}):", sorted(only_input))
+        print(
+            f"Total images: input images: {len(input_names)}, loaded images {len(loaded_names)}: "
+        )
+        print(
+            f"    Matched adjustments (to override) ({len(matched)}):", sorted(matched)
+        )
+        print(
+            f"    Only in loaded adjustments (to add) ({len(only_loaded)}):",
+            sorted(only_loaded),
+        )
+        print(
+            f"    Only in input (to calculate) ({len(only_input)}):", sorted(only_input)
+        )
 
     # Find images to include in model
     included_names = list(matched | only_loaded | only_input)
@@ -151,12 +182,20 @@ def global_regression(
         excluded_names = [n for n in input_image_names if n not in included_names]
     if debug_logs:
         print("Images to influence the model:")
-        print(f"    Included in model ({len(included_names)}): {sorted(included_names)}")
-        if specify_model_images: print(f"    Excluded from model ({len(excluded_names)}): {sorted(excluded_names)}")
-        else: print(f"    Excluded from model (0): []")
+        print(
+            f"    Included in model ({len(included_names)}): {sorted(included_names)}"
+        )
+        if specify_model_images:
+            print(
+                f"    Excluded from model ({len(excluded_names)}): {sorted(excluded_names)}"
+            )
+        else:
+            print(f"    Excluded from model (0): []")
 
-    if debug_logs: print("Calculating statistics")
-    with rasterio.open(list(input_image_path_pairs.values())[0]) as src: num_bands = src.count
+    if debug_logs:
+        print("Calculating statistics")
+    with rasterio.open(list(input_image_path_pairs.values())[0]) as src:
+        num_bands = src.count
 
     # Get images bounds
     all_bounds = {}
@@ -182,8 +221,9 @@ def global_regression(
                     int(k.split("_")[1]): {
                         "mean": bands[k]["mean"],
                         "std": bands[k]["std"],
-                        "size": bands[k]["size"]
-                    } for k in bands
+                        "size": bands[k]["size"],
+                    }
+                    for k in bands
                 }
 
     # Calculate overlap stats
@@ -206,12 +246,16 @@ def global_regression(
             debug_logs,
         )
         for name_i, name_j in overlapping_pairs
-        if name_i not in loaded_model or name_j not in loaded_model.get(name_i, {}).get("overlap_stats", {})
+        if name_i not in loaded_model
+        or name_j not in loaded_model.get(name_i, {}).get("overlap_stats", {})
     ]
 
     if image_parallel:
         with _get_executor(image_backend, image_max_workers) as executor:
-            futures = [executor.submit(_overlap_stats_process_image, *args) for args in parallel_args]
+            futures = [
+                executor.submit(_overlap_stats_process_image, *args)
+                for args in parallel_args
+            ]
             for future in as_completed(futures):
                 stats = future.result()
                 for outer, inner in stats.items():
@@ -228,7 +272,7 @@ def global_regression(
             int(k.split("_")[1]): {
                 "mean": loaded_model[name]["whole_stats"][k]["mean"],
                 "std": loaded_model[name]["whole_stats"][k]["std"],
-                "size": loaded_model[name]["whole_stats"][k]["size"]
+                "size": loaded_model[name]["whole_stats"][k]["size"],
             }
             for k in loaded_model[name]["whole_stats"]
         }
@@ -257,7 +301,10 @@ def global_regression(
     # Compute whole stats
     if image_parallel:
         with _get_executor(image_backend, image_max_workers) as executor:
-            futures = [executor.submit(_whole_stats_process_image, *args) for args in parallel_args]
+            futures = [
+                executor.submit(_whole_stats_process_image, *args)
+                for args in parallel_args
+            ]
             for future in as_completed(futures):
                 result = future.result()
                 all_whole_stats.update(result)
@@ -272,7 +319,9 @@ def global_regression(
 
     # Print model sources
     if debug_logs:
-        print(f"\nCreating model for {len(all_image_names)} total images from {len(included_names)} included:")
+        print(
+            f"\nCreating model for {len(all_image_names)} total images from {len(included_names)} included:"
+        )
         print(f"    {'ID':<4}\t{'Source':<6}\t{'Inclusion':<8}\tName")
         for i, name in enumerate(all_image_names):
             source = "load" if name in (matched | only_loaded) else "calc"
@@ -303,11 +352,12 @@ def global_regression(
             all_whole_stats=all_whole_stats,
             all_overlap_stats=all_overlap_stats,
             num_bands=num_bands,
-            calculation_dtype=calculation_dtype
+            calculation_dtype=calculation_dtype,
         )
 
     # Apply corrections
-    if debug_logs: print(f"Apply adjustments and saving results for:")
+    if debug_logs:
+        print(f"Apply adjustments and saving results for:")
     parallel_args = [
         (
             name,
@@ -331,7 +381,10 @@ def global_regression(
 
     if image_parallel:
         with _get_executor(image_backend, image_max_workers) as executor:
-            futures = [executor.submit(_apply_adjustments_process_image, *args) for args in parallel_args]
+            futures = [
+                executor.submit(_apply_adjustments_process_image, *args)
+                for args in parallel_args
+            ]
             for future in as_completed(futures):
                 future.result()
     else:
@@ -376,11 +429,12 @@ def _solve_global_model(
     all_params = np.zeros((num_bands, 2 * num_total, 1), dtype=float)
     image_names_with_id = [(i, name) for i, name in enumerate(all_image_names)]
     for b in range(num_bands):
-        if debug_logs: print(f"\nProcessing band {b}:")
+        if debug_logs:
+            print(f"\nProcessing band {b}:")
 
         A, y, tot_overlap = [], [], 0
         for i, name_i in image_names_with_id:
-            for j, name_j in image_names_with_id[i + 1:]:
+            for j, name_j in image_names_with_id[i + 1 :]:
                 stat = all_overlap_stats.get(name_i, {}).get(name_j)
                 if stat is None:
                     continue
@@ -398,14 +452,16 @@ def _solve_global_model(
 
                 row_m = [0] * (2 * num_total)
                 row_s = [0] * (2 * num_total)
-                row_m[2 * i: 2 * i + 2] = [m1, 1]
-                row_m[2 * j: 2 * j + 2] = [-m2, -1]
+                row_m[2 * i : 2 * i + 2] = [m1, 1]
+                row_m[2 * j : 2 * j + 2] = [-m2, -1]
                 row_s[2 * i], row_s[2 * j] = v1, -v2
 
-                A.extend([
-                    [v * s * custom_mean_factor for v in row_m],
-                    [v * s * custom_std_factor for v in row_s],
-                ])
+                A.extend(
+                    [
+                        [v * s * custom_mean_factor for v in row_m],
+                        [v * s * custom_std_factor for v in row_s],
+                    ]
+                )
                 y.extend([0, 0])
                 tot_overlap += s
 
@@ -417,7 +473,7 @@ def _solve_global_model(
             j_idx = all_image_names.index(name)
             row_m = [0] * (2 * num_total)
             row_s = [0] * (2 * num_total)
-            row_m[2 * j_idx: 2 * j_idx + 2] = [mj * pjj, 1 * pjj]
+            row_m[2 * j_idx : 2 * j_idx + 2] = [mj * pjj, 1 * pjj]
             row_s[2 * j_idx] = vj * pjj
             A.extend([row_m, row_s])
             y.extend([mj * pjj, vj * pjj])
@@ -436,7 +492,6 @@ def _solve_global_model(
         res = least_squares(lambda p: A_arr @ p - y_arr, [1, 0] * num_total)
         all_params[b, :, 0] = res.x
 
-
         if debug_logs:
             _print_constraint_system(
                 constraint_matrix=A_arr,
@@ -444,7 +499,6 @@ def _solve_global_model(
                 observed_values_vector=y_arr,
                 overlap_pairs=overlapping_pairs,
                 image_names_with_id=image_names_with_id,
-
             )
     return all_params
 
@@ -465,7 +519,7 @@ def _apply_adjustments_process_image(
     window_max_workers: int,
     save_as_cog: Universal.SaveAsCog,
     debug_logs: bool = False,
-    ):
+):
     """
     Applies scale and offset adjustments to each band of an input image and writes the result to the output path.
 
@@ -488,33 +542,41 @@ def _apply_adjustments_process_image(
     Returns:
         None
     """
-    if debug_logs: print(f"    Processing {image_name}")
+    if debug_logs:
+        print(f"    Processing {image_name}")
 
     with rasterio.open(input_image_path) as src:
-        block_y, block_x = (w := next(iter(_resolve_windows(src, window_size)))).height, w.width
+        block_y, block_x = (
+            w := next(iter(_resolve_windows(src, window_size)))
+        ).height, w.width
 
         meta = src.meta.copy()
         if save_as_cog:
-            meta.update({
-            "count": num_bands,
-            "dtype": output_dtype or src.dtypes[0],
-            "nodata": nodata_val,
-            "driver": "GTiff",
-            "BIGTIFF": "IF_SAFER",
-            "BLOCKXSIZE": block_x,
-            "BLOCKYSIZE": block_y,
-            "COMPRESS": "DEFLATE",
-            "TILED": True,
-            })
+            meta.update(
+                {
+                    "count": num_bands,
+                    "dtype": output_dtype or src.dtypes[0],
+                    "nodata": nodata_val,
+                    "driver": "GTiff",
+                    "BIGTIFF": "IF_SAFER",
+                    "BLOCKXSIZE": block_x,
+                    "BLOCKYSIZE": block_y,
+                    "COMPRESS": "DEFLATE",
+                    "TILED": True,
+                }
+            )
         else:
-            meta.update({
-            "count": num_bands,
-            "dtype": output_dtype or src.dtypes[0],
-            "nodata": nodata_val,
-            "driver": "GTiff",
-            })
+            meta.update(
+                {
+                    "count": num_bands,
+                    "dtype": output_dtype or src.dtypes[0],
+                    "nodata": nodata_val,
+                    "driver": "GTiff",
+                }
+            )
 
-        if os.path.exists(output_image_path): os.remove(output_image_path)
+        if os.path.exists(output_image_path):
+            os.remove(output_image_path)
         with rasterio.open(output_image_path, "w", **meta) as dst:
 
             for band in range(num_bands):
@@ -528,22 +590,27 @@ def _apply_adjustments_process_image(
                         nodata_val,
                         calculation_dtype,
                         debug_logs,
-                        image_name
+                        image_name,
                     )
                     for window in windows
                 ]
 
                 if window_parallel:
                     with _get_executor(
-                            window_backend,
-                            window_max_workers,
-                            initializer=WorkerContext.init,
-                            initargs=({image_name: ("raster", input_image_path)},)
+                        window_backend,
+                        window_max_workers,
+                        initializer=WorkerContext.init,
+                        initargs=({image_name: ("raster", input_image_path)},),
                     ) as executor:
-                        futures = [executor.submit(_apply_adjustments_process_window, *arg) for arg in args]
+                        futures = [
+                            executor.submit(_apply_adjustments_process_window, *arg)
+                            for arg in args
+                        ]
                         for future in as_completed(futures):
                             band, window, buf = future.result()
-                            dst.write(buf.astype(meta["dtype"]), band + 1, window=window)
+                            dst.write(
+                                buf.astype(meta["dtype"]), band + 1, window=window
+                            )
                 else:
                     WorkerContext.init({image_name: ("raster", input_image_path)})
                     for arg in args:
@@ -559,8 +626,8 @@ def _save_adjustments(
     all_whole_stats: dict,
     all_overlap_stats: dict,
     num_bands: int,
-    calculation_dtype: str
-    ) -> None:
+    calculation_dtype: str,
+) -> None:
     """
     Saves adjustment parameters, whole-image stats, and overlap stats in a nested JSON format.
 
@@ -574,7 +641,8 @@ def _save_adjustments(
         calculation_dtype (str): Precision for saving values (e.g., "float32").
     """
 
-    if not os.path.exists(os.path.dirname(save_path)): os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    if not os.path.exists(os.path.dirname(save_path)):
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
     cast = lambda x: float(np.dtype(calculation_dtype).type(x))
 
@@ -584,17 +652,19 @@ def _save_adjustments(
             "adjustments": {
                 f"band_{b}": {
                     "scale": cast(all_params[b, 2 * i, 0]),
-                    "offset": cast(all_params[b, 2 * i + 1, 0])
-                } for b in range(num_bands)
+                    "offset": cast(all_params[b, 2 * i + 1, 0]),
+                }
+                for b in range(num_bands)
             },
             "whole_stats": {
                 f"band_{b}": {
                     "mean": cast(all_whole_stats[name][b]["mean"]),
                     "std": cast(all_whole_stats[name][b]["std"]),
-                    "size": int(all_whole_stats[name][b]["size"])
-                } for b in range(num_bands)
+                    "size": int(all_whole_stats[name][b]["size"]),
+                }
+                for b in range(num_bands)
             },
-            "overlap_stats": {}
+            "overlap_stats": {},
         }
 
     for name_i, j_stats in all_overlap_stats.items():
@@ -605,7 +675,7 @@ def _save_adjustments(
                 full_model[name_i]["overlap_stats"][name_j][f"band_{b}"] = {
                     "mean": cast(stats["mean"]),
                     "std": cast(stats["std"]),
-                    "size": int(stats["size"])
+                    "size": int(stats["size"]),
                 }
 
     with open(save_path, "w") as f:
@@ -669,9 +739,13 @@ def _validate_adjustment_model_structure(model: dict) -> None:
 
         for band_key, band_vals in adjustments.items():
             if not band_key.startswith("band_"):
-                raise ValueError(f"Invalid band key '{band_key}' in adjustments for '{image_name}'.")
+                raise ValueError(
+                    f"Invalid band key '{band_key}' in adjustments for '{image_name}'."
+                )
             if not {"scale", "offset"} <= band_vals.keys():
-                raise ValueError(f"Missing 'scale' or 'offset' in adjustments[{band_key}] for '{image_name}'.")
+                raise ValueError(
+                    f"Missing 'scale' or 'offset' in adjustments[{band_key}] for '{image_name}'."
+                )
 
         whole_stats = image_data.get("whole_stats")
         if not isinstance(whole_stats, dict):
@@ -679,22 +753,34 @@ def _validate_adjustment_model_structure(model: dict) -> None:
 
         for band_key, stat_vals in whole_stats.items():
             if not band_key.startswith("band_"):
-                raise ValueError(f"Invalid band key '{band_key}' in whole_stats for '{image_name}'.")
+                raise ValueError(
+                    f"Invalid band key '{band_key}' in whole_stats for '{image_name}'."
+                )
             if not {"mean", "std", "size"} <= stat_vals.keys():
-                raise ValueError(f"Missing 'mean', 'std', or 'size' in whole_stats[{band_key}] for '{image_name}'.")
+                raise ValueError(
+                    f"Missing 'mean', 'std', or 'size' in whole_stats[{band_key}] for '{image_name}'."
+                )
 
         overlap_stats = image_data.get("overlap_stats", {})
         if not isinstance(overlap_stats, dict):
-            raise ValueError(f"'overlap_stats' for '{image_name}' must be a dictionary if present.")
+            raise ValueError(
+                f"'overlap_stats' for '{image_name}' must be a dictionary if present."
+            )
 
         for other_image, bands in overlap_stats.items():
             if not isinstance(bands, dict):
-                raise ValueError(f"'overlap_stats[{other_image}]' for '{image_name}' must be a dictionary.")
+                raise ValueError(
+                    f"'overlap_stats[{other_image}]' for '{image_name}' must be a dictionary."
+                )
             for band_key, stat_vals in bands.items():
                 if not band_key.startswith("band_"):
-                    raise ValueError(f"Invalid band key '{band_key}' in overlap_stats[{other_image}] for '{image_name}'.")
+                    raise ValueError(
+                        f"Invalid band key '{band_key}' in overlap_stats[{other_image}] for '{image_name}'."
+                    )
                 if not {"mean", "std", "size"} <= stat_vals.keys():
-                    raise ValueError(f"Missing 'mean', 'std', or 'size' in overlap_stats[{other_image}][{band_key}] for '{image_name}'.")
+                    raise ValueError(
+                        f"Missing 'mean', 'std', or 'size' in overlap_stats[{other_image}][{band_key}] for '{image_name}'."
+                    )
     print("Loaded adjustments structure passed validation")
 
 
@@ -801,8 +887,8 @@ def _print_constraint_system(
 
 
 def _find_overlaps(
-    image_bounds_dict: dict[str, rasterio.coords.BoundingBox]
-    ) -> tuple[tuple[str, str], ...]:
+    image_bounds_dict: dict[str, rasterio.coords.BoundingBox],
+) -> tuple[tuple[str, str], ...]:
     """
     Finds all pairs of image names with overlapping spatial bounds.
 
@@ -821,8 +907,10 @@ def _find_overlaps(
             b1, b2 = image_bounds_dict[k1], image_bounds_dict[k2]
 
             if (
-                b1.left < b2.right and b1.right > b2.left and
-                b1.bottom < b2.top and b1.top > b2.bottom
+                b1.left < b2.right
+                and b1.right > b2.left
+                and b1.bottom < b2.top
+                and b1.top > b2.bottom
             ):
                 overlaps.append((k1, k2))
 
@@ -842,10 +930,14 @@ def _overlap_stats_process_image(
     bound_j: BoundingBox,
     nodata_i: int | float,
     nodata_j: int | float,
-    vector_mask: Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None,
+    vector_mask: (
+        Tuple[Literal["include", "exclude"], str]
+        | Tuple[Literal["include", "exclude"], str, str]
+        | None
+    ),
     window_size: int | Tuple[int, int] | Literal["internal"] | None,
     debug_logs: bool,
-    ):
+):
     """
     Computes per-band overlap statistics (mean, std, pixel count) between two images over their intersecting area.
 
@@ -872,7 +964,10 @@ def _overlap_stats_process_image(
 
     stats = {name_i: {name_j: {}}, name_j: {name_i: {}}}
 
-    with rasterio.open(input_image_path_i) as src_i, rasterio.open(input_image_path_j) as src_j:
+    with (
+        rasterio.open(input_image_path_i) as src_i,
+        rasterio.open(input_image_path_j) as src_j,
+    ):
         # Parse geometry masks separately per image
         geoms_i = geoms_j = None
         invert = False
@@ -884,8 +979,18 @@ def _overlap_stats_process_image(
             with fiona.open(path, "r") as vector:
                 features = list(vector)
                 if field_name:
-                    geoms_i = [f["geometry"] for f in features if field_name in f["properties"] and name_i in str(f["properties"][field_name])]
-                    geoms_j = [f["geometry"] for f in features if field_name in f["properties"] and name_j in str(f["properties"][field_name])]
+                    geoms_i = [
+                        f["geometry"]
+                        for f in features
+                        if field_name in f["properties"]
+                        and name_i in str(f["properties"][field_name])
+                    ]
+                    geoms_j = [
+                        f["geometry"]
+                        for f in features
+                        if field_name in f["properties"]
+                        and name_j in str(f["properties"][field_name])
+                    ]
                 else:
                     geoms_i = geoms_j = [f["geometry"] for f in features]
 
@@ -896,7 +1001,9 @@ def _overlap_stats_process_image(
         y_max = min(bound_i.top, bound_j.top)
 
         if debug_logs:
-            print(f"Overlap bounds: x: {x_min:.2f} to {x_max:.2f}, y: {y_min:.2f} to {y_max:.2f}")
+            print(
+                f"Overlap bounds: x: {x_min:.2f} to {x_max:.2f}, y: {y_min:.2f} to {y_max:.2f}"
+            )
 
         if x_min >= x_max or y_min >= y_max:
             return stats
@@ -905,7 +1012,15 @@ def _overlap_stats_process_image(
         row_max_i, col_max_i = rowcol(src_i.transform, x_max, y_min)
 
         windows_image_i = _resolve_windows(src_i, window_size)
-        fit_windows_image_i = _fit_windows_to_pixel_bounds(windows_image_i, row_min_i, row_max_i, col_min_i, col_max_i, row_min_i, col_min_i)
+        fit_windows_image_i = _fit_windows_to_pixel_bounds(
+            windows_image_i,
+            row_min_i,
+            row_max_i,
+            col_min_i,
+            col_max_i,
+            row_min_i,
+            col_min_i,
+        )
 
         for band in range(num_bands):
             combined_pixels_i, combined_pixels_j = [], []
@@ -932,22 +1047,29 @@ def _overlap_stats_process_image(
                     backend,
                     max_workers,
                     initializer=WorkerContext.init,
-                    initargs=({
-                        name_i: ("raster", input_image_path_i),
-                        name_j: ("raster", input_image_path_j)
-                    },)
+                    initargs=(
+                        {
+                            name_i: ("raster", input_image_path_i),
+                            name_j: ("raster", input_image_path_j),
+                        },
+                    ),
                 ) as executor:
-                    futures = [executor.submit(_overlap_stats_process_window, *arg) for arg in args]
+                    futures = [
+                        executor.submit(_overlap_stats_process_window, *arg)
+                        for arg in args
+                    ]
                     for future in as_completed(futures):
                         result = future.result()
                         if result is not None:
                             combined_pixels_i.append(result[0])
                             combined_pixels_j.append(result[1])
             else:
-                WorkerContext.init({
-                    name_i: ("raster", input_image_path_i),
-                    name_j: ("raster", input_image_path_j)
-                })
+                WorkerContext.init(
+                    {
+                        name_i: ("raster", input_image_path_i),
+                        name_j: ("raster", input_image_path_j),
+                    }
+                )
                 for arg in args:
                     result = _overlap_stats_process_window(*arg)
                     if result is not None:
@@ -955,8 +1077,12 @@ def _overlap_stats_process_image(
                         combined_pixels_j.append(result[1])
                 WorkerContext.close()
 
-            v_i = np.concatenate(combined_pixels_i) if combined_pixels_i else np.array([])
-            v_j = np.concatenate(combined_pixels_j) if combined_pixels_j else np.array([])
+            v_i = (
+                np.concatenate(combined_pixels_i) if combined_pixels_i else np.array([])
+            )
+            v_j = (
+                np.concatenate(combined_pixels_j) if combined_pixels_j else np.array([])
+            )
 
             stats[name_i][name_j][band] = {
                 "mean": float(np.mean(v_i)) if v_i.size else 0,
@@ -984,7 +1110,7 @@ def _overlap_stats_process_window(
     geoms_j: list | None,
     invert: bool,
     interpolation_method: int = 1,
-    ) -> tuple[np.ndarray, np.ndarray] | None:
+) -> tuple[np.ndarray, np.ndarray] | None:
     """
     Processes a single overlapping window between two images, applying masks and interpolation if needed,
     and returns valid pixel pairs for statistical comparison.
@@ -1010,7 +1136,9 @@ def _overlap_stats_process_window(
     src_i = WorkerContext.get(name_i)
     src_j = WorkerContext.get(name_j)
 
-    win_i = Window(col_min_i + win.col_off, row_min_i + win.row_off, win.width, win.height)
+    win_i = Window(
+        col_min_i + win.col_off, row_min_i + win.row_off, win.width, win.height
+    )
     bounds = src_i.window_bounds(win_i)
     win_j = rasterio.windows.from_bounds(*bounds, transform=src_j.transform)
 
@@ -1022,12 +1150,22 @@ def _overlap_stats_process_window(
 
     if geoms_i:
         transform_i_win = src_i.window_transform(win_i)
-        mask_i = geometry_mask(geoms_i, transform=transform_i_win, invert=not invert, out_shape=block_i.shape)
+        mask_i = geometry_mask(
+            geoms_i,
+            transform=transform_i_win,
+            invert=not invert,
+            out_shape=block_i.shape,
+        )
         block_i[~mask_i] = nodata_i
 
     if geoms_j:
         transform_j_win = src_j.window_transform(win_j)
-        mask_j = geometry_mask(geoms_j, transform=transform_j_win, invert=not invert, out_shape=block_j.shape)
+        mask_j = geometry_mask(
+            geoms_j,
+            transform=transform_j_win,
+            invert=not invert,
+            out_shape=block_j.shape,
+        )
         block_j[~mask_j] = nodata_j
 
     if block_j.shape != block_i.shape:
@@ -1036,10 +1174,12 @@ def _overlap_stats_process_window(
             block_i.shape,
             order=interpolation_method,
             preserve_range=True,
-            anti_aliasing=False
+            anti_aliasing=False,
         ).astype(block_j.dtype)
     if block_j.shape != block_i.shape:
-        raise ValueError(f"Block size mismatch after interpolation: block_i={block_i.shape}, block_j={block_j.shape}")
+        raise ValueError(
+            f"Block size mismatch after interpolation: block_i={block_i.shape}, block_j={block_j.shape}"
+        )
 
     valid = (block_i != nodata_i) & (block_j != nodata_j)
     if np.any(valid):
@@ -1087,7 +1227,12 @@ def _fit_windows_to_pixel_bounds(
         win_row_off_adj = clipped_row_start - row_offset
         win_col_off_adj = clipped_col_start - col_offset
 
-        if new_width > 0 and new_height > 0 and win_row_off_adj >= 0 and win_col_off_adj >= 0:
+        if (
+            new_width > 0
+            and new_height > 0
+            and win_row_off_adj >= 0
+            and win_col_off_adj >= 0
+        ):
             adjusted_windows.append(
                 Window(
                     win_col_off_adj,
@@ -1108,10 +1253,14 @@ def _whole_stats_process_image(
     nodata: int | float,
     num_bands: int,
     image_name: str,
-    vector_mask: Tuple[Literal["include", "exclude"], str] | Tuple[Literal["include", "exclude"], str, str] | None = None,
+    vector_mask: (
+        Tuple[Literal["include", "exclude"], str]
+        | Tuple[Literal["include", "exclude"], str, str]
+        | None
+    ) = None,
     window_size: int | Tuple[int, int] | Literal["internal"] | None = None,
     debug_logs: bool = False,
-    ):
+):
     """
     Calculates whole-image statistics (mean, std, and valid pixel count) per band, with optional masking and window-level parallelism.
 
@@ -1146,19 +1295,20 @@ def _whole_stats_process_image(
                     geoms = [
                         feat["geometry"]
                         for feat in vector
-                        if field_name in feat["properties"] and image_name in str(feat["properties"][field_name])
+                        if field_name in feat["properties"]
+                        and image_name in str(feat["properties"][field_name])
                     ]
                 else:
                     geoms = [feat["geometry"] for feat in vector]
 
-        if geoms and debug_logs: print("        Applied mask")
+        if geoms and debug_logs:
+            print("        Applied mask")
 
         for band_idx in range(num_bands):
             windows = _resolve_windows(data, window_size)
 
             args = [
-                (win, band_idx, image_name, nodata, geoms, invert)
-                for win in windows
+                (win, band_idx, image_name, nodata, geoms, invert) for win in windows
             ]
 
             if parallel:
@@ -1166,10 +1316,17 @@ def _whole_stats_process_image(
                     backend,
                     max_workers,
                     initializer=WorkerContext.init,
-                    initargs=({image_name: ("raster", input_image_path)},)
+                    initargs=({image_name: ("raster", input_image_path)},),
                 ) as executor:
-                    futures = [executor.submit(_whole_stats_process_window, *arg) for arg in args]
-                    all_values = [f.result() for f in as_completed(futures) if f.result() is not None]
+                    futures = [
+                        executor.submit(_whole_stats_process_window, *arg)
+                        for arg in args
+                    ]
+                    all_values = [
+                        f.result()
+                        for f in as_completed(futures)
+                        if f.result() is not None
+                    ]
             else:
                 WorkerContext.init({image_name: ("raster", input_image_path)})
                 all_values = []
@@ -1205,7 +1362,7 @@ def _whole_stats_process_window(
     nodata: int | float,
     geoms: list | None,
     invert: bool,
-    ) -> np.ndarray | None:
+) -> np.ndarray | None:
     """
     Extracts valid pixel values from a raster window, optionally applying a geometry mask.
 

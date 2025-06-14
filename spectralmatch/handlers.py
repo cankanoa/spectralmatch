@@ -29,8 +29,7 @@ def _resolve_output_dtype(
 
 
 def _resolve_nodata_value(
-    dataset: rasterio.io.DatasetReader,
-    custom_nodata_value: Universal.CustomNodataValue
+    dataset: rasterio.io.DatasetReader, custom_nodata_value: Universal.CustomNodataValue
 ) -> float | int | None:
     """
     Determine the appropriate nodata value for a raster dataset.
@@ -96,7 +95,7 @@ def search_paths(
     recursive: bool = False,
     match_to_paths: Tuple[List[str], str] | None = None,
     debug_logs: bool = False,
-    ) -> List[str]:
+) -> List[str]:
     """
     Search for files in a folder using a glob pattern.
 
@@ -112,7 +111,9 @@ def search_paths(
     Returns:
         List[str]: Sorted list of matched file paths.
     """
-    input_paths =  sorted(glob.glob(os.path.join(folder_path, pattern), recursive=recursive))
+    input_paths = sorted(
+        glob.glob(os.path.join(folder_path, pattern), recursive=recursive)
+    )
 
     if match_to_paths:
         input_paths = match_paths(input_paths, *match_to_paths)
@@ -127,7 +128,7 @@ def create_paths(
     debug_logs: bool = False,
     replace_symbol: str = "$",
     create_folders: bool = True,
-    ) -> List[str]:
+) -> List[str]:
     """
     Create output paths using a filename template and a list of reference paths or names.
 
@@ -144,7 +145,11 @@ def create_paths(
     """
     output_paths = []
     for ref in paths_or_bases:
-        base = os.path.splitext(os.path.basename(ref))[0] if ('/' in ref or '\\' in ref) else os.path.splitext(ref)[0]
+        base = (
+            os.path.splitext(os.path.basename(ref))[0]
+            if ("/" in ref or "\\" in ref)
+            else os.path.splitext(ref)[0]
+        )
         filename = template.replace(replace_symbol, base)
         path = os.path.join(output_folder, filename)
         output_paths.append(path)
@@ -160,7 +165,7 @@ def match_paths(
     reference_paths: List[str],
     match_regex: str,
     debug_logs: bool = False,
-    ) -> List[Optional[str]]:
+) -> List[Optional[str]]:
     """
     Match `reference_paths` to `input_match_paths` using a regex applied to the basenames of `input_match_paths`. The extracted key must be a substring of the reference filename.
 
@@ -237,14 +242,19 @@ def _check_raster_requirements(
         ValueError: If any check fails.
     """
 
-    if debug_logs: print(f"Found {len(input_image_paths)} images")
+    if debug_logs:
+        print(f"Found {len(input_image_paths)} images")
 
     datasets = [rasterio.open(p) for p in input_image_paths]
 
     ref_crs = datasets[0].crs
     ref_count = datasets[0].count
     ref_res = datasets[0].res
-    ref_nodata = [datasets[0].nodata] * ref_count if datasets[0].nodata is not None else [None] * ref_count
+    ref_nodata = (
+        [datasets[0].nodata] * ref_count
+        if datasets[0].nodata is not None
+        else [None] * ref_count
+    )
 
     for i, ds in enumerate(datasets):
         if check_geotransform and ds.transform is None:
@@ -252,21 +262,32 @@ def _check_raster_requirements(
         if check_crs and ds.crs != ref_crs:
             raise ValueError(f"Fail: Image {i} has different CRS.")
         if check_bands and ds.count != ref_count:
-            raise ValueError(f"Fail: Image {i} has {ds.count} bands; expected {ref_count}.")
+            raise ValueError(
+                f"Fail: Image {i} has {ds.count} bands; expected {ref_count}."
+            )
         if check_resolution and ds.res != ref_res:
-            raise ValueError(f"Fail: Image {i} has resolution {ds.res}; expected {ref_res}.")
+            raise ValueError(
+                f"Fail: Image {i} has resolution {ds.res}; expected {ref_res}."
+            )
         if check_nodata:
             for b in range(ds.count):
                 if ds.nodata != ref_nodata[b]:
-                    raise ValueError(f"Fail: Image {i}, band {b+1} has different nodata value.")
+                    raise ValueError(
+                        f"Fail: Image {i}, band {b+1} has different nodata value."
+                    )
 
     if debug_logs:
         passed_checks = []
-        if check_geotransform: passed_checks.append("geotransform")
-        if check_crs: passed_checks.append("crs")
-        if check_bands: passed_checks.append("bands")
-        if check_nodata: passed_checks.append("nodata")
-        if check_resolution: passed_checks.append("resolution")
+        if check_geotransform:
+            passed_checks.append("geotransform")
+        if check_crs:
+            passed_checks.append("crs")
+        if check_bands:
+            passed_checks.append("bands")
+        if check_nodata:
+            passed_checks.append("nodata")
+        if check_resolution:
+            passed_checks.append("resolution")
         print(f"Input data checks passed: {', '.join(passed_checks)}")
 
     return True
@@ -275,7 +296,7 @@ def _check_raster_requirements(
 def _get_nodata_value(
     input_image_paths: List[Union[str]],
     custom_nodata_value: Optional[float] = None,
-    ) -> float | None:
+) -> float | None:
     """
     Determines the NoData value to use from a list of raster images or a custom override.
 
@@ -291,7 +312,8 @@ def _get_nodata_value(
     """
 
     try:
-        with rasterio.open(input_image_paths[0]) as ds: image_nodata_value = ds.nodata
+        with rasterio.open(input_image_paths[0]) as ds:
+            image_nodata_value = ds.nodata
     except:
         image_nodata_value = None
 
@@ -300,8 +322,12 @@ def _get_nodata_value(
 
     if custom_nodata_value is not None:
         if image_nodata_value is not None and image_nodata_value != custom_nodata_value:
-            warnings.warn("Image no data value has been overwritten by custom_nodata_value")
+            warnings.warn(
+                "Image no data value has been overwritten by custom_nodata_value"
+            )
         return custom_nodata_value
 
-    warnings.warn("Custom nodata value not set and could not get one from the first band so no nodata value will be used.")
+    warnings.warn(
+        "Custom nodata value not set and could not get one from the first band so no nodata value will be used."
+    )
     return None

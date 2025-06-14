@@ -113,10 +113,7 @@ def test_merge_rasters_minimal(basic_raster_set):
     input_rasters, output_dir = basic_raster_set
     output_path = os.path.join(output_dir, "merged_minimal.tif")
 
-    merge_rasters(
-        input_images=input_rasters,
-        output_image_path=output_path
-    )
+    merge_rasters(input_images=input_rasters, output_image_path=output_path)
 
     assert os.path.exists(output_path)
 
@@ -133,7 +130,7 @@ def test_merge_rasters_all_params(basic_raster_set):
         window_size=(16, 16),
         debug_logs=True,
         output_dtype="uint16",
-        custom_nodata_value=9999
+        custom_nodata_value=9999,
     )
 
     assert os.path.exists(output_path)
@@ -150,7 +147,7 @@ def test_mask_rasters_minimal(raster_and_vector_mask):
     mask_rasters(
         input_images=input_rasters,
         output_images=output_rasters,
-        vector_mask=vector_mask
+        vector_mask=vector_mask,
     )
 
     assert os.path.exists(output_rasters[0])
@@ -173,7 +170,7 @@ def test_mask_rasters_all_options(raster_and_vector_mask):
         image_parallel_workers=("thread", 2),
         window_parallel_workers=("process", 2),
         include_touched_pixels=True,
-        custom_nodata_value=custom_nodata
+        custom_nodata_value=custom_nodata,
     )
 
     assert os.path.exists(output_rasters[0])
@@ -189,9 +186,7 @@ def test_merge_vectors_union_minimal(basic_vector_set):
     output_path = os.path.join(output_dir, "merged_union.gpkg")
 
     merge_vectors(
-        input_vectors=input_vectors,
-        merged_vector_path=output_path,
-        method="union"
+        input_vectors=input_vectors, merged_vector_path=output_path, method="union"
     )
 
     assert os.path.exists(output_path)
@@ -208,7 +203,7 @@ def test_merge_vectors_keep_with_names(basic_vector_set):
         merged_vector_path=output_path,
         method="keep",
         debug_logs=True,
-        create_name_attribute=("src", "_")
+        create_name_attribute=("src", "_"),
     )
 
     assert os.path.exists(output_path)
@@ -221,10 +216,7 @@ def test_merge_vectors_keep_with_names(basic_vector_set):
 def test_align_rasters_minimal(misaligned_raster_set):
     input_paths, output_paths = misaligned_raster_set
 
-    align_rasters(
-        input_images=input_paths,
-        output_images=output_paths
-    )
+    align_rasters(input_images=input_paths, output_images=output_paths)
 
     for out_path in output_paths:
         assert os.path.exists(out_path)
@@ -244,7 +236,7 @@ def test_align_rasters_all_options(misaligned_raster_set):
         debug_logs=True,
         window_size=(8, 8),
         image_parallel_workers=("thread", 2),
-        window_parallel_workers=("process", 2)
+        window_parallel_workers=("process", 2),
     )
 
     for out_path in output_paths:

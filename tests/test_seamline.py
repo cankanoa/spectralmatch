@@ -23,7 +23,7 @@ def test_voronoi_center_seamline_all_params(tmp_path, image_prefix, fill_value):
             height=256,
             count=1,
             transform=(1, 0, 10 if name == "A" else 20, 0, -1, -10),
-            fill_value=fill_value if name == image_prefix else fill_value + 50
+            fill_value=fill_value if name == image_prefix else fill_value + 50,
         )
         input_paths.append(str(path))
 
@@ -58,9 +58,6 @@ def test_voronoi_center_seamline_minimal(tmp_path):
 
     out_path = str(output_dir / "seamlines.gpkg")
 
-    voronoi_center_seamline(
-        input_images=paths,
-        output_mask=out_path
-    )
+    voronoi_center_seamline(input_images=paths, output_mask=out_path)
 
     assert os.path.exists(out_path)

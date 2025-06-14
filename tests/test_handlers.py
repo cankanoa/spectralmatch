@@ -3,6 +3,7 @@ import pytest
 
 from spectralmatch import search_paths, create_paths, match_paths
 
+
 @pytest.fixture
 def dummy_files(tmp_path):
     paths = [
@@ -28,9 +29,7 @@ def test_search_paths_match_to_paths(dummy_files):
     reference_paths = ["A", "B"]
     match_regex = r"(.*)_GlobalMatch\.tif$"
     result = search_paths(
-        str(folder),
-        "*_GlobalMatch.tif",
-        match_to_paths=(reference_paths, match_regex)
+        str(folder), "*_GlobalMatch.tif", match_to_paths=(reference_paths, match_regex)
     )
     assert len(result) == 2
     assert all(any(r in p for r in reference_paths) for p in result)
@@ -40,7 +39,7 @@ def test_search_paths_match_to_paths(dummy_files):
 def test_create_paths_from_paths(tmp_path):
     input_paths = [
         str(tmp_path / "A_GlobalMatch.tif"),
-        str(tmp_path / "B_GlobalMatch.tif")
+        str(tmp_path / "B_GlobalMatch.tif"),
     ]
     for p in input_paths:
         open(p, "w").close()
@@ -81,12 +80,12 @@ def test_match_paths_success():
     input_paths = [
         "/data/A_LocalMatch.gpkg",
         "/data/B_LocalMatch.gpkg",
-        "/data/C_LocalMatch.gpkg"
+        "/data/C_LocalMatch.gpkg",
     ]
     reference_paths = [
         "/ref/A_GlobalMatch.tif",
         "/ref/B_GlobalMatch.tif",
-        "/ref/C_GlobalMatch.tif"
+        "/ref/C_GlobalMatch.tif",
     ]
     match_regex = r"(.*)_LocalMatch\.gpkg$"
 
@@ -98,10 +97,7 @@ def test_match_paths_success():
 
 def test_match_paths_partial_match():
     input_paths = ["/data/B_LocalMatch.gpkg"]
-    reference_paths = [
-        "/ref/A_GlobalMatch.tif",
-        "/ref/B_GlobalMatch.tif"
-    ]
+    reference_paths = ["/ref/A_GlobalMatch.tif", "/ref/B_GlobalMatch.tif"]
     match_regex = r"(.*)_LocalMatch\.gpkg$"
 
     result = match_paths(input_paths, reference_paths, match_regex)
@@ -118,10 +114,7 @@ def test_match_paths_no_match():
 
 
 def test_match_paths_multiple_candidates():
-    input_paths = [
-        "/data/A_LocalMatch.gpkg",
-        "/data/A_Alt_LocalMatch.gpkg"
-    ]
+    input_paths = ["/data/A_LocalMatch.gpkg", "/data/A_Alt_LocalMatch.gpkg"]
     reference_paths = ["/ref/A_GlobalMatch.tif"]
     match_regex = r"(.*)_LocalMatch\.gpkg$"
 

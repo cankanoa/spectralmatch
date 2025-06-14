@@ -72,7 +72,7 @@ def compare_image_spectral_profiles_pairs(
     title: str,
     xlabel: str,
     ylabel: str,
-    ):
+):
     """
     Plots paired spectral profiles for before-and-after image comparisons.
 
@@ -111,12 +111,19 @@ def compare_image_spectral_profiles_pairs(
                     img_reshaped = img.reshape(num_bands, -1)
                     nodata = src.nodata
                     if nodata is not None:
-                        img_reshaped = np.where(img_reshaped == nodata, np.nan, img_reshaped)
+                        img_reshaped = np.where(
+                            img_reshaped == nodata, np.nan, img_reshaped
+                        )
                     mean_spectral = np.nanmean(img_reshaped, axis=1)
                     bands = np.arange(1, num_bands + 1)
-                    linestyle = 'dashed' if i == 0 else 'solid'
-                    plt.plot(bands, mean_spectral, linestyle=linestyle, color=color,
-                             label=f"{label} - {'Before' if i == 0 else 'After'}")
+                    linestyle = "dashed" if i == 0 else "solid"
+                    plt.plot(
+                        bands,
+                        mean_spectral,
+                        linestyle=linestyle,
+                        color=color,
+                        label=f"{label} - {'Before' if i == 0 else 'After'}",
+                    )
 
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
@@ -176,17 +183,19 @@ def compare_spatial_spectral_difference_band_average(
             mean_diff[valid_mask] = np.nanmean(diff[:, valid_mask], axis=0)
 
         fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
-        im = ax.imshow(mean_diff, cmap='coolwarm', interpolation='nearest')
+        im = ax.imshow(mean_diff, cmap="coolwarm", interpolation="nearest")
 
         cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
         cbar.set_label(diff_label)
 
         ax.set_title(title, fontsize=14, pad=12)
         if subtitle:
-            ax.text(0.5, -0.1, subtitle, fontsize=10, ha='center', transform=ax.transAxes)
+            ax.text(
+                0.5, -0.1, subtitle, fontsize=10, ha="center", transform=ax.transAxes
+            )
 
         ax.axis("off")
-        plt.savefig(output_image_path, dpi=300, bbox_inches='tight')
+        plt.savefig(output_image_path, dpi=300, bbox_inches="tight")
         plt.close()
 
         print(f"Saved: {output_image_path}")

@@ -1,7 +1,11 @@
 import pytest
 import os
 
-from spectralmatch import compare_image_spectral_profiles, compare_image_spectral_profiles_pairs, compare_spatial_spectral_difference_band_average
+from spectralmatch import (
+    compare_image_spectral_profiles,
+    compare_image_spectral_profiles_pairs,
+    compare_spatial_spectral_difference_band_average,
+)
 from .test_utils import create_dummy_raster
 
 

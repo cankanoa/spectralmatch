@@ -12,9 +12,8 @@ from multiprocessing import Lock
 
 file_lock = Lock()
 
-def _choose_context(
-    prefer_fork: bool = True
-) -> mp.context.BaseContext:
+
+def _choose_context(prefer_fork: bool = True) -> mp.context.BaseContext:
     """
     Chooses the most appropriate multiprocessing context based on platform and preference.
 
@@ -39,7 +38,7 @@ def _choose_context(
 
 
 def _resolve_parallel_config(
-    config: Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None
+    config: Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None,
 ) -> Tuple[bool, Optional[str], Optional[int]]:
     """
     Parses a parallel worker config into execution flags and worker count.
@@ -104,8 +103,12 @@ def _get_executor(
 def _run_parallel_images(
     image_paths: List[str],
     run_parallel_windows: Callable[[str, Tuple], None],
-    image_parallel_workers: Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None,
-    window_parallel_workers: Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None,
+    image_parallel_workers: (
+        Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None
+    ) = None,
+    window_parallel_workers: (
+        Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None
+    ) = None,
 ):
     """
     Runs a window-level processing function across multiple images, with optional image-level parallelism.
@@ -119,7 +122,9 @@ def _run_parallel_images(
     Returns:
         None
     """
-    parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
+    parallel, image_backend, image_max_workers = _resolve_parallel_config(
+        image_parallel_workers
+    )
 
     if parallel:
         with _get_executor(image_backend, image_max_workers) as image_pool:
@@ -137,7 +142,9 @@ def _run_parallel_images(
 def _run_parallel_windows(
     windows: List[Any],
     process_fn: Callable[[Any], Any],
-    window_parallel_workers: Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None = None,
+    window_parallel_workers: (
+        Tuple[Literal["process", "thread"], Literal["cpu"] | int] | None
+    ) = None,
 ):
     """
     Runs a processing function on a list of windows, with optional parallel execution.
@@ -261,7 +268,10 @@ def _resolve_windows(
         return _create_windows(width, height, window_size[0], window_size[1])
 
     elif window_size == "block":
-        if block_params is None: raise ValueError("block_params must be provided when window_size is 'block'")
+        if block_params is None:
+            raise ValueError(
+                "block_params must be provided when window_size is 'block'"
+            )
         num_row, num_col, bounds_canvas_coords = block_params
         x_min, y_min, x_max, y_max = bounds_canvas_coords
         block_width = (x_max - x_min) / num_col
@@ -276,8 +286,12 @@ def _resolve_windows(
                 block_y1 = y_max - row_idx * block_height
                 block_y0 = block_y1 - block_height
 
-                if (block_x1 <= dataset_bounds.left or block_x0 >= dataset_bounds.right or
-                    block_y1 <= dataset_bounds.bottom or block_y0 >= dataset_bounds.top):
+                if (
+                    block_x1 <= dataset_bounds.left
+                    or block_x0 >= dataset_bounds.right
+                    or block_y1 <= dataset_bounds.bottom
+                    or block_y0 >= dataset_bounds.top
+                ):
                     continue
 
                 intersected_window = from_bounds(
@@ -298,7 +312,7 @@ def _create_windows(
     height: int,
     tile_width: int,
     tile_height: int,
-    ):
+):
     """
     Generates tiled windows across a raster based on specified dimensions.
 
