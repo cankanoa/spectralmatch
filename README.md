@@ -1,4 +1,4 @@
-# spectralmatch: Performant toolkit for Relative Radiometric Normalization with Pseudo-Invariant Features, seamlines, and other utilities for mosaics and time series
+# spectralmatch: Performant Relative Radiometric Normalization toolkit with Pseudo-Invariant Features, seamlines, and other utilities for mosaics and time series
 
 [![Your-License-Badge](https://img.shields.io/badge/License-MIT-green)](#)
 [![codecov](https://codecov.io/gh/spectralmatch/spectralmatch/graph/badge.svg?token=03JTHNK76C)](https://codecov.io/gh/spectralmatch/spectralmatch)
