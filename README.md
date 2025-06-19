@@ -13,7 +13,7 @@
 
 ![Global and Local Matching](./images/spectralmatch.png)
 
-*spectralmatch* provides a Python library and QGIS plugin with multiple algorythms to perform Relative Radiometric Normalization (RRN). It also includes utilities for generating seamlines, cloud masks, Pseudo-Invariant Features, statistics, preprocessing, and more.
+*spectralmatch* provides a Python library, command line interface, and QGIS plugin with multiple algorythms to perform Relative Radiometric Normalization (RRN). It also includes utilities for generating seamlines, cloud masks, Pseudo-Invariant Features, statistics, preprocessing, and more.
 
 ## Features
 
