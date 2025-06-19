@@ -31,6 +31,7 @@ plugins:
     - gen-files:
           scripts:
               - docs/create_llm_prompt.py
+              - docs/create_cli.py
 
 markdown_extensions:
     - attr_list
@@ -62,6 +63,7 @@ nav:
         - Create Seamlines: api/seamline.md
         - Utilities: api/utils.md
         - Statistical Figures: api/statistics.md
+    - Command Line Interface: cli.md
 
 extra_css:
     - docs/overrides/custom.css

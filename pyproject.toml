@@ -64,3 +64,6 @@ docs = [
 [project.urls]
 "Bug Tracker" = "https://github.com/cankanoa/spectralmatch"
 "Source" = "https://github.com/cankanoa/spectralmatch"
+
+[project.scripts]
+spectralmatch = "spectralmatch.cli:main"
