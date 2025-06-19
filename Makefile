@@ -76,6 +76,7 @@ clean:
 	       $(MAKEFILE_DIR)*.egg-info \
 	       $(MAKEFILE_DIR)__pycache__ \
 	       $(MAKEFILE_DIR).pytest_cache \
-	       $(MAKEFILE_DIR)site
+	       $(MAKEFILE_DIR)site \
+	       $(MAKEFILE_DIR)spectralmatch_qgis/help/build
 	find $(MAKEFILE_DIR)docs/examples/data_landsat -mindepth 1 ! -path "*/Input*" -exec rm -rf {} +
 	find $(MAKEFILE_DIR)docs/examples/data_worldview -mindepth 1 ! -path "*/Input*" -exec rm -rf {} +

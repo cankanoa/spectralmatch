@@ -54,6 +54,7 @@ class spectralmatchProvider(QgsProcessingProvider):
         Loads all algorithms belonging to this provider.
         """
         self.addAlgorithm(spectralmatchAlgorithm())
+        self.addAlgorithm(GlobalRegressionAlgorithm())
         # add additional algorithms here
         # self.addAlgorithm(MyOtherAlgorithm())
 
