@@ -43,9 +43,7 @@ def local_block_adjustment(
     alpha: float = 1.0,
     correction_method: Literal["gamma", "linear"] = "gamma",
     save_block_maps: Tuple[str, str] | None = None,
-    load_block_maps: (
-        Tuple[str, List[str]] | Tuple[str, None] | Tuple[None, List[str]] | None
-    ) = None,
+    load_block_maps: (Tuple[str, List[str]] | Tuple[str, None] | Tuple[None, List[str]] | None) = None,
     override_bounds_canvas_coords: Tuple[float, float, float, float] | None = None,
     block_valid_pixel_threshold: float = 0.001,
 ) -> list:
@@ -53,14 +51,8 @@ def local_block_adjustment(
     Performs local radiometric adjustment on a set of raster images using block-based statistics.
 
     Args:
-        input_images (Tuple[str, str] | List[str]):
-            Specifies the input images either as:
-            - A tuple with a folder path and glob pattern to search for files (e.g., ("/input/folder", "*.tif")).
-            - A list of full file paths to individual input images.
-        output_images (Tuple[str, str] | List[str]):
-            Specifies how output filenames are generated or provided:
-            - A tuple with an output folder and a filename template using "$" as a placeholder for each input image's basename (e.g., ("/output/folder", "$_LocalMatch.tif")).
-            - A list of full output paths, which must match the number of input images.
+        input_images (str | List[str], required): Defines input files from a glob path, folder, or list of paths. Specify like: "/input/files/*.tif", "/input/folder" (assumes *.tif), ["/input/one.tif", "/input/two.tif"].
+        output_images (str | List[str], required): Defines output files from a template path, folder, or list of paths (with the same length as the input). Specify like: "/input/files/$.tif", "/input/folder" (assumes $_Local.tif), ["/input/one.tif", "/input/two.tif"].
         calculation_dtype (str, optional): Precision for internal calculations. Defaults to "float32".
         output_dtype (str | None, optional): Data type for output rasters. Defaults to input image dtype.
         vector_mask (Tuple[Literal["include", "exclude"], str, Optional[str]] | None): A mask limiting pixels to include when calculating stats for each block in the format of a tuple with two or three items: literal "include" or "exclude" the mask area, str path to the vector file, optional str of field name in vector file that *includes* (can be substring) input image name to filter geometry by. It is only applied when calculating local blocks, as the reference map is calculated as the mean of all local blocks. Loaded block maps won't have this applied unless it was used when calculating them. The matching solution is still applied to these areas in the output. Defaults to None for no mask.
@@ -129,8 +121,8 @@ def local_block_adjustment(
         window_parallel_workers
     )
 
-    input_image_paths = _resolve_paths("search", input_images)
-    output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
+    input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern":"*.tif"})
+    output_image_paths = _resolve_paths("create", output_images, kwargs={"paths_or_bases": input_image_paths, "default_file_pattern": "$_Local.tif"})
 
     if debug_logs:
         print(f"Input images: {input_image_paths}")

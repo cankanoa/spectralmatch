@@ -35,7 +35,7 @@ def merge_vectors(
     Merge multiple vector files using the specified geometric method.
 
     Args:
-        input_vectors (SearchFolderOrListFiles): Input vectors, either as a list of paths or a (folder, pattern) tuple.
+        input_vectors (str | List[str]): Defines input files from a glob path, folder, or list of paths. Specify like: "/input/files/*.gpkg", "/input/folder" (assumes *.gpkg), ["/input/one.tif", "/input/two.tif"].
         merged_vector_path (str): Path to save merged output.
         method (Literal["intersection", "union", "keep"]): Merge strategy.
         debug_logs (bool): If True, print debug information.
@@ -47,7 +47,7 @@ def merge_vectors(
     print("Start vector merge")
 
     os.makedirs(os.path.dirname(merged_vector_path), exist_ok=True)
-    input_vector_paths = _resolve_paths("search", input_vectors)
+    input_vector_paths = _resolve_paths("search", input_vectors, kwargs={"default_file_pattern":"*.gpkg"})
 
     geoms = []
     input_names = []
@@ -113,8 +113,8 @@ def align_rasters(
     Aligns multiple rasters to a common resolution and grid using specified resampling.
 
     Args:
-        input_images (Universal.SearchFolderOrListFiles): Tuple (folder, pattern) or list of input raster paths.
-        output_images (Universal.CreateInFolderOrListFiles): Tuple (output_folder, template) or list of output paths.
+        input_images (str | List[str], required): Defines input files from a glob path, folder, or list of paths. Specify like: "/input/files/*.tif", "/input/folder" (assumes *.tif), ["/input/one.tif", "/input/two.tif"].
+        output_images (str | List[str], required): Defines output files from a template path, folder, or list of paths (with the same length as the input). Specify like: "/input/files/$.tif", "/input/folder" (assumes $_Align.tif), ["/input/one.tif", "/input/two.tif"].
         resampling_method (Literal["nearest", "bilinear", "cubic"], optional): Resampling method to use; default is "bilinear".
         tap (bool, optional): If True, aligns outputs to target-aligned pixels (GDAL's -tap); default is False.
         resolution (Literal["highest", "average", "lowest"], optional): Strategy for choosing target resolution; default is "highest".
@@ -138,9 +138,9 @@ def align_rasters(
         window_parallel_workers=window_parallel_workers,
     )
 
-    input_image_paths = _resolve_paths("search", input_images)
-    output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
-    image_names = [os.path.splitext(os.path.basename(p))[0] for p in input_image_paths]
+    input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern": "*.tif"})
+    output_image_paths = _resolve_paths("create", output_images, kwargs={"paths_or_bases": input_image_paths, "default_file_pattern": "$_Align.tif"})
+    image_names = _resolve_paths("name", input_image_paths)
 
     if debug_logs:
         print(f"{len(input_image_paths)} rasters to align")
@@ -369,7 +369,7 @@ def merge_rasters(
     Merges multiple rasters into a single mosaic aligned to the union extent and minimum resolution.
 
     Args:
-        input_images (Universal.SearchFolderOrListFiles): Tuple (folder, pattern) or list of raster paths to merge.
+        input_images (str | List[str], required): Defines input files from a glob path, folder, or list of paths. Specify like: "/input/files/*.tif", "/input/folder" (assumes *.tif), ["/input/one.tif", "/input/two.tif"].
         output_image_path (str): Path to save the merged output raster.
         image_parallel_workers (Universal.ImageParallelWorkers, optional): Strategy for parallelizing image-level merging.
         window_parallel_workers (Universal.WindowParallelWorkers, optional): Strategy for within-image window merging.
@@ -395,7 +395,7 @@ def merge_rasters(
         window_parallel_workers=window_parallel_workers,
     )
 
-    input_image_paths = _resolve_paths("search", input_images)
+    input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern": "*.tif"})
 
     _check_raster_requirements(
         input_image_paths,
@@ -588,8 +588,8 @@ def mask_rasters(
     Applies a vector-based mask to one or more rasters, with support for image- and window-level parallelism.
 
     Args:
-        input_images (Universal.SearchFolderOrListFiles): Tuple (folder, pattern) or list of input raster paths.
-        output_images (Universal.CreateInFolderOrListFiles): Tuple (output_folder, template) or list of output raster paths.
+        input_images (str | List[str], required): Defines input files from a glob path, folder, or list of paths. Specify like: "/input/files/*.tif", "/input/folder" (assumes *.tif), ["/input/one.tif", "/input/two.tif"].
+        output_images (str | List[str], required): Defines output files from a template path, folder, or list of paths (with the same length as the input). Specify like: "/input/files/$.tif", "/input/folder" (assumes $_Clip.tif), ["/input/one.tif", "/input/two.tif"].
         vector_mask (Universal.VectorMask, optional): Tuple ("include"/"exclude", vector path, optional field name) or None.
         window_size (Universal.WindowSize, optional): Strategy for tiling rasters during processing.
         debug_logs (Universal.DebugLogs, optional): If True, prints debug information.
@@ -612,8 +612,8 @@ def mask_rasters(
         custom_nodata_value=custom_nodata_value,
     )
 
-    input_image_paths = _resolve_paths("search", input_images)
-    output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
+    input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern": "*.tif"})
+    output_image_paths = _resolve_paths("create", output_images, kwargs={"paths_or_bases": input_image_paths, "default_file_pattern": "$_Clip.tif"})
 
     if debug_logs:
         print(f"Input images: {input_image_paths}")

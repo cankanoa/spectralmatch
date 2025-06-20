@@ -48,14 +48,8 @@ def global_regression(
     Performs global radiometric normalization across overlapping images using least squares regression.
 
     Args:
-        input_images (Tuple[str, str] | List[str]):
-            Specifies the input images either as:
-            - A tuple with a folder path and glob pattern to search for files (e.g., ("/input/folder", "*.tif")).
-            - A list of full file paths to individual input images.
-        output_images (Tuple[str, str] | List[str]):
-            Specifies how output filenames are generated or provided:
-            - A tuple with an output folder and a filename template using "$" as a placeholder for each input image's basename (e.g., ("/output/folder", "$_GlobalMatch.tif")).
-            - A list of full output paths, which must match the number of input images.
+        input_images (str | List[str], required): Defines input files from a glob path, folder, or list of paths. Specify like: "/input/files/*.tif", "/input/folder" (assumes *.tif), ["/input/one.tif", "/input/two.tif"].
+        output_images (str | List[str], required): Defines output files from a template path, folder, or list of paths (with the same length as the input). Specify like: "/input/files/$.tif", "/input/folder" (assumes $_Global.tif), ["/input/one.tif", "/input/two.tif"].
         calculation_dtype (str, optional): Data type used for internal calculations. Defaults to "float32".
         output_dtype (str | None, optional): Data type for output rasters. Defaults to input image dtype.
         vector_mask (Tuple[Literal["include", "exclude"], str, Optional[str]] | None): Mask to limit stats calculation to specific areas in the format of a tuple with two or three items: literal "include" or "exclude" the mask area, str path to the vector file, optional str of field name in vector file that *includes* (can be substring) input image name to filter geometry by. Loaded stats won't have this applied to them. The matching solution is still applied to these areas in the output. Defaults to None for no mask.
@@ -104,8 +98,8 @@ def global_regression(
     )
 
     # Input and output paths
-    input_image_paths = _resolve_paths("search", input_images)
-    output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
+    input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern":"*.tif"})
+    output_image_paths = _resolve_paths("create", output_images, kwargs={"paths_or_bases":input_image_paths, "default_file_pattern":"$_Global.tif"})
 
     if debug_logs:
         print(f"Input images: {input_image_paths}")

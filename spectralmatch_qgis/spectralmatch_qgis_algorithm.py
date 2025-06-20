@@ -30,96 +30,213 @@ __copyright__ = '(C) 2025 by Kanoa Lindiwe LLC'
 
 __revision__ = '$Format:%H$'
 
+import ast
+import os
+from pathlib import Path
+import json
+import subprocess
 from qgis.PyQt.QtCore import QCoreApplication
-from qgis.core import (QgsProcessing,
-                       QgsFeatureSink,
-                       QgsProcessingAlgorithm,
-                       QgsProcessingParameterFeatureSource,
-                       QgsProcessingParameterFeatureSink)
+from qgis.core import (
+    QgsProcessing,
+    QgsFeatureSink,
+    QgsProcessingAlgorithm,
+    QgsProcessingParameterFeatureSource,
+    QgsProcessingParameterFeatureSink,
+    QgsProcessingParameterString,
+    QgsProcessingParameterFile,
+   )
 
 
-class spectralmatchAlgorithm(QgsProcessingAlgorithm):
+# class spectralmatchAlgorithm(QgsProcessingAlgorithm):
+#     """
+#     This is an example algorithm that takes a vector layer and
+#     creates a new identical one.
+#
+#     It is meant to be used as an example of how to create your own
+#     algorithms and explain methods and variables used to do it. An
+#     algorithm like this will be available in all elements, and there
+#     is not need for additional work.
+#
+#     All Processing algorithms should extend the QgsProcessingAlgorithm
+#     class.
+#     """
+#
+#     # Constants used to refer to parameters and outputs. They will be
+#     # used when calling the algorithm from another algorithm, or when
+#     # calling from the QGIS console.
+#
+#     OUTPUT = 'OUTPUT'
+#     INPUT = 'INPUT'
+#
+#     def initAlgorithm(self, config):
+#         """
+#         Here we define the inputs and output of the algorithm, along
+#         with some other properties.
+#         """
+#
+#         self.addParameter(
+#             QgsProcessingParameterFeatureSource(
+#                 self.INPUT,
+#                 self.tr('Input layer'),
+#                 [QgsProcessing.TypeVectorAnyGeometry]
+#             )
+#         )
+#
+#         self.addParameter(
+#             QgsProcessingParameterFeatureSink(
+#                 self.OUTPUT,
+#                 self.tr('Output layer')
+#             )
+#         )
+#
+#     def processAlgorithm(self, parameters, context, feedback):
+#         """
+#         Here is where the processing itself takes place.
+#         """
+#
+#         # Retrieve the feature source and sink. The 'dest_id' variable is used
+#         # to uniquely identify the feature sink, and must be included in the
+#         # dictionary returned by the processAlgorithm function.
+#         source = self.parameterAsSource(parameters, self.INPUT, context)
+#         (sink, dest_id) = self.parameterAsSink(parameters, self.OUTPUT,
+#                 context, source.fields(), source.wkbType(), source.sourceCrs())
+#
+#         # Compute the number of steps to display within the progress bar and
+#         # get features from source
+#         total = 100.0 / source.featureCount() if source.featureCount() else 0
+#         features = source.getFeatures()
+#
+#         for current, feature in enumerate(features):
+#             # Stop the algorithm if cancel button has been clicked
+#             if feedback.isCanceled():
+#                 break
+#
+#             # Add a feature in the sink
+#             sink.addFeature(feature, QgsFeatureSink.FastInsert)
+#
+#             # Update the progress bar
+#             feedback.setProgress(int(current * total))
+#
+#         # Return the results of the algorithm. In this case our only result is
+#         # the feature sink which contains the processed features, but some
+#         # algorithms may return multiple feature sinks, calculated numeric
+#         # statistics, etc. These should all be included in the returned
+#         # dictionary, with keys matching the feature corresponding parameter
+#         # or output names.
+#         return {self.OUTPUT: dest_id}
+#
+#     def name(self):
+#         """
+#         Returns the algorithm name, used for identifying the algorithm. This
+#         string should be fixed for the algorithm, and must not be localised.
+#         The name should be unique within each provider. Names should contain
+#         lowercase alphanumeric characters only and no spaces or other
+#         formatting characters.
+#         """
+#         return 'Template'
+#
+#     def displayName(self):
+#         """
+#         Returns the translated algorithm name, which should be used for any
+#         user-visible display of the algorithm name.
+#         """
+#         return self.tr(self.name())
+#
+#     def group(self):
+#         """
+#         Returns the name of the group this algorithm belongs to. This string
+#         should be localised.
+#         """
+#         return self.tr(self.groupId())
+#
+#     def groupId(self):
+#         """
+#         Returns the unique ID of the group this algorithm belongs to. This
+#         string should be fixed for the algorithm, and must not be localised.
+#         The group id should be unique within each provider. Group id should
+#         contain lowercase alphanumeric characters only and no spaces or other
+#         formatting characters.
+#         """
+#         return 'Match'
+#
+#     def tr(self, string):
+#         return QCoreApplication.translate('Processing', string)
+#
+#     def createInstance(self):
+#         return spectralmatchAlgorithm()
+
+
+def loadAlgorithms(self):
+    for func in load_function_headers():
+        algo_cls = make_algorithm_class(func["function"])
+        self.addAlgorithm(algo_cls())
+
+
+def make_algorithm_class(full_function_path: str):
     """
-    This is an example algorithm that takes a vector layer and
-    creates a new identical one.
+    Creates a QGIS ProcessingAlgorithm class for a given function path.
 
-    It is meant to be used as an example of how to create your own
-    algorithms and explain methods and variables used to do it. An
-    algorithm like this will be available in all elements, and there
-    is not need for additional work.
-
-    All Processing algorithms should extend the QgsProcessingAlgorithm
-    class.
+    Args:
+        full_function_path (str): e.g. 'spectralmatch.match.global_regression.global_regression'
     """
 
-    # Constants used to refer to parameters and outputs. They will be
-    # used when calling the algorithm from another algorithm, or when
-    # calling from the QGIS console.
+    parts = full_function_path.split(".")
+    function = parts[-1]
+    submodule = parts[-2]
+    group_id = parts[-3] if len(parts) >= 4 else parts[-2]  # folder if present, else module
+    class_name = function.replace("_", "").title() + "Algorithm"
+    display_name = function.replace("_", " ").title()
 
-    OUTPUT = 'OUTPUT'
-    INPUT = 'INPUT'
+    class_attrs = {}
+    func_info = load_function_headers(full_function_path)
 
     def initAlgorithm(self, config):
-        """
-        Here we define the inputs and output of the algorithm, along
-        with some other properties.
-        """
 
-        # We add the input vector features source. It can have any kind of
-        # geometry.
-        self.addParameter(
-            QgsProcessingParameterFeatureSource(
-                self.INPUT,
-                self.tr('Input layer'),
-                [QgsProcessing.TypeVectorAnyGeometry]
-            )
-        )
+        for param in func_info.get("parameters", []):
+            name = param["name"]
+            display_name = param["display_name"]
+            param_type = param.get("param_type", "string")
+            default = param.get("default")
 
-        # We add a feature sink in which to store our processed features (this
-        # usually takes the form of a newly created vector layer when the
-        # algorithm is run in QGIS).
-        self.addParameter(
-            QgsProcessingParameterFeatureSink(
-                self.OUTPUT,
-                self.tr('Output layer')
-            )
-        )
+            if param_type == "exclude":
+                continue
+            elif param_type == "folder":
+                _add_folder_select_param(self, name, display_name)
+            elif param_type == "string":
+                _add_string_param(self, name, display_name, default)
 
     def processAlgorithm(self, parameters, context, feedback):
-        """
-        Here is where the processing itself takes place.
-        """
+        cmd = ["spectralmatch", function]
 
-        # Retrieve the feature source and sink. The 'dest_id' variable is used
-        # to uniquely identify the feature sink, and must be included in the
-        # dictionary returned by the processAlgorithm function.
-        source = self.parameterAsSource(parameters, self.INPUT, context)
-        (sink, dest_id) = self.parameterAsSink(parameters, self.OUTPUT,
-                context, source.fields(), source.wkbType(), source.sourceCrs())
+        feedback.pushInfo("Processed parameters:")
 
-        # Compute the number of steps to display within the progress bar and
-        # get features from source
-        total = 100.0 / source.featureCount() if source.featureCount() else 0
-        features = source.getFeatures()
+        for param in func_info.get("parameters", []):
+            name = param["name"]
+            if name in parameters:
+                value = self.parameterAsString(parameters, name, context)
+                cli_value = normalize_cli_value(value)
+                cmd.extend([f"--{name}", cli_value])
+                feedback.pushInfo(f"{name} = {cli_value}")
 
-        for current, feature in enumerate(features):
-            # Stop the algorithm if cancel button has been clicked
-            if feedback.isCanceled():
-                break
+        feedback.pushInfo("\nRunning: " + " ".join(cmd) + "\n")
 
-            # Add a feature in the sink
-            sink.addFeature(feature, QgsFeatureSink.FastInsert)
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        for line in process.stdout:
+            feedback.pushInfo(line.rstrip())
+        process.stdout.close()
+        return_code = process.wait()
 
-            # Update the progress bar
-            feedback.setProgress(int(current * total))
+        if return_code != 0:
+            raise Exception(f"Process failed with return code {return_code}")
 
-        # Return the results of the algorithm. In this case our only result is
-        # the feature sink which contains the processed features, but some
-        # algorithms may return multiple feature sinks, calculated numeric
-        # statistics, etc. These should all be included in the returned
-        # dictionary, with keys matching the feature corresponding parameter
-        # or output names.
-        return {self.OUTPUT: dest_id}
+        return {}
+
+    def shortHelpString(self):
+        doc = load_function_headers(full_function_path).get("docstring", "")
+        return f"<pre>{doc}</pre>"
+
+    def helpUrl(self):
+        return "https://spectralmatch.github.io/spectralmatch/"
 
     def name(self):
         """
@@ -129,7 +246,7 @@ class spectralmatchAlgorithm(QgsProcessingAlgorithm):
         lowercase alphanumeric characters only and no spaces or other
         formatting characters.
         """
-        return 'Template'
+        return function.replace("_", " ").capitalize()
 
     def displayName(self):
         """
@@ -153,122 +270,63 @@ class spectralmatchAlgorithm(QgsProcessingAlgorithm):
         contain lowercase alphanumeric characters only and no spaces or other
         formatting characters.
         """
-        return 'Match'
+        return group_id.capitalize()
 
     def tr(self, string):
         return QCoreApplication.translate('Processing', string)
 
     def createInstance(self):
-        return spectralmatchAlgorithm()
+        return cls()
+
+    class_attrs.update(locals())
+    cls = type(class_name, (QgsProcessingAlgorithm,), class_attrs)
+    return cls
 
 
-class GlobalRegressionAlgorithm(QgsProcessingAlgorithm):
-
-    # Constants used to refer to parameters and outputs. They will be
-    # used when calling the algorithm from another algorithm, or when
-    # calling from the QGIS console.
-
-    OUTPUT = 'OUTPUT'
-    INPUT = 'INPUT'
-
-    def initAlgorithm(self, config):
-        """
-        Here we define the inputs and output of the algorithm, along
-        with some other properties.
-        """
-
-        # We add the input vector features source. It can have any kind of
-        # geometry.
-        self.addParameter(
-            QgsProcessingParameterFeatureSource(
-                self.INPUT,
-                self.tr('Input layer'),
-                [QgsProcessing.TypeVectorAnyGeometry]
-            )
+def _add_folder_select_param(algorithm_instance, name: str, display_name: str):
+    algorithm_instance.addParameter(
+        QgsProcessingParameterFile(
+            name,
+            algorithm_instance.tr(display_name),
+            behavior=QgsProcessingParameterFile.Folder
         )
+    )
 
-        # We add a feature sink in which to store our processed features (this
-        # usually takes the form of a newly created vector layer when the
-        # algorithm is run in QGIS).
-        self.addParameter(
-            QgsProcessingParameterFeatureSink(
-                self.OUTPUT,
-                self.tr('Output layer')
-            )
+
+def _add_string_param(algorithm_instance, name: str, display_name: str, default):
+    default_value = "None" if default in (None, 'None') else default.strip("'\"")
+    algorithm_instance.addParameter(
+        QgsProcessingParameterString(
+            name,
+            algorithm_instance.tr(display_name),
+            defaultValue=default_value
         )
+    )
 
-    def processAlgorithm(self, parameters, context, feedback):
-        """
-        Here is where the processing itself takes place.
-        """
 
-        # Retrieve the feature source and sink. The 'dest_id' variable is used
-        # to uniquely identify the feature sink, and must be included in the
-        # dictionary returned by the processAlgorithm function.
-        source = self.parameterAsSource(parameters, self.INPUT, context)
-        (sink, dest_id) = self.parameterAsSink(parameters, self.OUTPUT,
-                context, source.fields(), source.wkbType(), source.sourceCrs())
+def load_function_headers(target_function: str = None):
+    json_path = Path(os.path.dirname(__file__)) / "function_headers.json"
+    with open(json_path, "r", encoding="utf-8") as f:
+        all_funcs = json.load(f)
+    if target_function:
+        for entry in all_funcs:
+            if entry["function"] == target_function:
+                return entry
+        raise ValueError(f"Function {target_function} not found in function_headers.json")
+    return all_funcs
 
-        # Compute the number of steps to display within the progress bar and
-        # get features from source
-        total = 100.0 / source.featureCount() if source.featureCount() else 0
-        features = source.getFeatures()
 
-        for current, feature in enumerate(features):
-            # Stop the algorithm if cancel button has been clicked
-            if feedback.isCanceled():
-                break
+def normalize_cli_value(value: str) -> str:
+    """Converts QGIS string parameter to safe CLI string representation."""
+    stripped = value.strip()
 
-            # Add a feature in the sink
-            sink.addFeature(feature, QgsFeatureSink.FastInsert)
+    # Handle empty or null
+    if stripped.lower() in {"none", "", "null"}:
+        return "None"
 
-            # Update the progress bar
-            feedback.setProgress(int(current * total))
-
-        # Return the results of the algorithm. In this case our only result is
-        # the feature sink which contains the processed features, but some
-        # algorithms may return multiple feature sinks, calculated numeric
-        # statistics, etc. These should all be included in the returned
-        # dictionary, with keys matching the feature corresponding parameter
-        # or output names.
-        return {self.OUTPUT: dest_id}
-
-    def name(self):
-        """
-        Returns the algorithm name, used for identifying the algorithm. This
-        string should be fixed for the algorithm, and must not be localised.
-        The name should be unique within each provider. Names should contain
-        lowercase alphanumeric characters only and no spaces or other
-        formatting characters.
-        """
-        return 'Global Regression'
-
-    def displayName(self):
-        """
-        Returns the translated algorithm name, which should be used for any
-        user-visible display of the algorithm name.
-        """
-        return self.tr(self.name())
-
-    def group(self):
-        """
-        Returns the name of the group this algorithm belongs to. This string
-        should be localised.
-        """
-        return self.tr(self.groupId())
-
-    def groupId(self):
-        """
-        Returns the unique ID of the group this algorithm belongs to. This
-        string should be fixed for the algorithm, and must not be localised.
-        The group id should be unique within each provider. Group id should
-        contain lowercase alphanumeric characters only and no spaces or other
-        formatting characters.
-        """
-        return 'Match'
-
-    def tr(self, string):
-        return QCoreApplication.translate('Processing', string)
-
-    def createInstance(self):
-        return GlobalRegressionAlgorithm()
+    # Try to parse literals (bools, numbers, tuples, lists)
+    try:
+        parsed = ast.literal_eval(stripped)
+        return repr(parsed)
+    except (ValueError, SyntaxError):
+        return stripped

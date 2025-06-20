@@ -5,8 +5,8 @@ _UNSET = object()
 
 # Universal types
 class Universal:
-    SearchFolderOrListFiles = Tuple[str, str] | List[str]
-    CreateInFolderOrListFiles = Tuple[str, str] | List[str]
+    SearchFolderOrListFiles = str | List[str]
+    CreateInFolderOrListFiles = str | List[str]
     SaveAsCog = bool  # Default: True
     DebugLogs = bool  # Default: False
     VectorMask = Tuple[Literal["include", "exclude"], str, Optional[str]] | None
@@ -39,31 +39,19 @@ class Universal:
         output_dtype=_UNSET,
     ):
         if input_images is not _UNSET:
-            if not isinstance(input_images, (tuple, list)):
+            if not isinstance(input_images, (str, list)):
                 raise ValueError(
-                    "input_images must be a tuple (folder, pattern) or a list of strings."
+                    "input_images must be a string (path or glob pattern) or a list of strings."
                 )
-            if isinstance(input_images, tuple):
-                if len(input_images) != 2 or not all(
-                    isinstance(s, str) for s in input_images
-                ):
-                    raise ValueError(
-                        "If input_images is a tuple, it must be (folder_path, pattern)."
-                    )
-            elif not all(isinstance(p, str) for p in input_images):
+            if isinstance(input_images, list) and not all(isinstance(p, str) for p in input_images):
                 raise ValueError("All elements in input_images list must be strings.")
 
         if output_images is not _UNSET:
-            if not isinstance(output_images, (tuple, list)):
-                raise ValueError("output_images must be a tuple or a list of strings.")
-            if isinstance(output_images, tuple):
-                if len(output_images) != 2 or not all(
-                    isinstance(s, str) for s in output_images
-                ):
-                    raise ValueError(
-                        "If output_images is a tuple, it must be (output_folder, name_template)."
-                    )
-            elif not all(isinstance(p, str) for p in output_images):
+            if not isinstance(output_images, (str, list)):
+                raise ValueError(
+                    "output_images must be a string (path or template) or a list of strings."
+                )
+            if isinstance(output_images, list) and not all(isinstance(p, str) for p in output_images):
                 raise ValueError("All elements in output_images list must be strings.")
 
         if save_as_cog is not _UNSET:

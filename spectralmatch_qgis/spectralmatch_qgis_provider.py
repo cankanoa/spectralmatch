@@ -30,9 +30,10 @@ __copyright__ = '(C) 2025 by Kanoa Lindiwe LLC'
 
 __revision__ = '$Format:%H$'
 
+from qgis.PyQt.QtGui import QIcon
+import os
 from qgis.core import QgsProcessingProvider
-from .spectralmatch_qgis_algorithm import spectralmatchAlgorithm
-
+from .spectralmatch_qgis_algorithm import make_algorithm_class, load_function_headers
 
 class spectralmatchProvider(QgsProcessingProvider):
 
@@ -53,9 +54,9 @@ class spectralmatchProvider(QgsProcessingProvider):
         """
         Loads all algorithms belonging to this provider.
         """
-        self.addAlgorithm(spectralmatchAlgorithm())
-        self.addAlgorithm(GlobalRegressionAlgorithm())
-        # add additional algorithms here
+        for func in load_function_headers():
+            algo_cls = make_algorithm_class(func["function"])
+            self.addAlgorithm(algo_cls())
         # self.addAlgorithm(MyOtherAlgorithm())
 
     def id(self):
@@ -80,7 +81,8 @@ class spectralmatchProvider(QgsProcessingProvider):
         Should return a QIcon which is used for your provider inside
         the Processing toolbox.
         """
-        return QgsProcessingProvider.icon(self)
+        icon_path = os.path.join(os.path.dirname(__file__), "icon.png")
+        return QIcon(icon_path)
 
     def longName(self):
         """

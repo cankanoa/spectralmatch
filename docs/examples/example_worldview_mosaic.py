@@ -26,8 +26,8 @@ num_window_workers = 5
 # %% Global matching
 
 global_regression(
-    input_images=(input_folder, "*.tif"),
-    output_images=(global_folder, "$_Global.tif"),
+    input_images=input_folder, # Automatically searches for all *.tif files if passed this way
+    output_images=global_folder,
     debug_logs=True,
     window_size=window_size,
     image_parallel_workers=("process", num_image_workers),
@@ -42,15 +42,13 @@ global_regression(
 )
 
 # %% Local matching
-reference_map_path = os.path.join(
-    local_folder, "ReferenceBlockMap", "ReferenceBlockMap.tif"
-)
+reference_map_path = os.path.join(local_folder, "ReferenceBlockMap", "ReferenceBlockMap.tif")
 local_maps_path = os.path.join(local_folder, "LocalBlockMap", "$_LocalBlockMap.tif")
-searched_paths = search_paths(os.path.join(local_folder, "LocalBlockMap"), "*.tif")
+searched_paths = search_paths(os.path.join(local_folder, "LocalBlockMap", "*.tif"))
 
 local_block_adjustment(
-    input_images=(global_folder, "*.tif"),
-    output_images=(local_folder, "$_Local.tif"),
+    input_images=global_folder,
+    output_images=local_folder,
     debug_logs=True,
     window_size=window_size,
     image_parallel_workers=("process", num_image_workers),
@@ -64,8 +62,8 @@ local_block_adjustment(
 # %% Align rasters
 
 align_rasters(
-    input_images=(local_folder, "*.tif"),
-    output_images=(aligned_folder, "$_Aligned.tif"),
+    input_images=local_folder,
+    output_images=aligned_folder,
     tap=True,
     resolution="lowest",
     debug_logs=True,
@@ -77,7 +75,7 @@ align_rasters(
 # %% Generate voronoi center seamlines
 
 voronoi_center_seamline(
-    input_images=(aligned_folder, "*.tif"),
+    input_images=aligned_folder,
     output_mask=os.path.join(working_directory, "ImageMasks.gpkg"),
     image_field_name="image",
     debug_logs=True,
@@ -87,13 +85,9 @@ voronoi_center_seamline(
 # %% Clip
 
 mask_rasters(
-    input_images=(aligned_folder, "*.tif"),
-    output_images=(clipped_folder, "$_Clipped.tif"),
-    vector_mask=(
-        "include",
-        os.path.join(working_directory, "ImageMasks.gpkg"),
-        "image",
-    ),
+    input_images=aligned_folder,
+    output_images=clipped_folder,
+    vector_mask=("include", os.path.join(working_directory, "ImageMasks.gpkg"), "image"),
     debug_logs=True,
     window_size=window_size,
     image_parallel_workers=("process", num_image_workers),
@@ -103,7 +97,7 @@ mask_rasters(
 # %% Merge rasters
 
 merge_rasters(
-    input_images=(clipped_folder, "*.tif"),
+    input_images=clipped_folder,
     output_image_path=os.path.join(working_directory, "MergedImage.tif"),
     debug_logs=True,
     window_size=window_size,
@@ -117,7 +111,7 @@ merge_rasters(
 compare_image_spectral_profiles(
     input_image_dict={
         os.path.splitext(os.path.basename(p))[0]: p
-        for p in search_paths(local_folder, "*.tif")
+        for p in search_paths(os.path.join(local_folder, "*.tif"))
     },
     output_figure_path=os.path.join(
         stats_folder, "LocalMatch_CompareImageSpectralProfiles.png"
@@ -128,8 +122,8 @@ compare_image_spectral_profiles(
 )
 
 # Compare image spectral profiles pairs
-before_paths = search_paths(input_folder, "*.tif")
-after_paths = search_paths(local_folder, "*.tif")
+before_paths = search_paths(os.path.join(input_folder, "*.tif"))
+after_paths = search_paths(os.path.join(local_folder, "*.tif"))
 
 image_pairs = {
     os.path.splitext(os.path.basename(b))[0]: [b, a]
@@ -145,8 +139,8 @@ compare_image_spectral_profiles_pairs(
 )
 
 # Compare spatial spectral difference band average
-input_paths = search_paths(input_folder, "*.tif")
-local_paths = search_paths(local_folder, "*.tif")
+input_paths = search_paths(os.path.join(input_folder, "*.tif"))
+local_paths = search_paths(os.path.join(local_folder, "*.tif"))
 before_path, after_path = next(zip(sorted(input_paths), sorted(local_paths)))
 
 compare_spatial_spectral_difference_band_average(

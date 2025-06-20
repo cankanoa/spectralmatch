@@ -36,13 +36,9 @@ def threshold_raster(
     Applies a thresholding operation to input raster images using a mathematical expression string.
 
     Args:
-        input_images (SearchFolderOrListFiles): Input image paths or folder + pattern.
-        output_images (CreateInFolderOrListFiles): Output image paths or folder + pattern.
-        threshold_math (str): A logical expression string using bands (e.g., "b1 > 5", "b1 > 5 & b2 < 10").
-            Supports:
-                - Band references: b1, b2, ...
-                - Operators: >, <, >=, <=, ==, !=, &, |, ~, and parentheses
-                - Percentile-based thresholds: use e.g. "5%b1" to use the 5th percentile of band 1
+        input_images (str | List[str], required): Defines input files from a glob path, folder, or list of paths. Specify like: "/input/files/*.tif", "/input/folder" (assumes *.tif), ["/input/one.tif", "/input/two.tif"].
+        output_images (str | List[str], required): Defines output files from a template path, folder, or list of paths (with the same length as the input). Specify like: "/input/files/$.tif", "/input/folder" (assumes $_Threshold.tif), ["/input/one.tif", "/input/two.tif"].
+        threshold_math (str): A logical expression string using bands (e.g., "b1 > 5", "b1 > 5 & b2 < 10"). Supports: Band references: b1, b2, ...; Operators: >, <, >=, <=, ==, !=, &, |, ~, and (); Percentile-based thresholds: use e.g. "5%b1" to use the 5th percentile of band 1.
         debug_logs (bool, optional): If True, prints debug messages.
         custom_nodata_value (float | int | None, optional): Override the dataset's nodata value.
         image_parallel_workers (ImageParallelWorkers, optional): Parallelism config for image-level processing.
@@ -52,8 +48,18 @@ def threshold_raster(
         calculation_dtype (CalculationDtype, optional): Internal computation dtype.
     """
 
-    input_image_paths = _resolve_paths("search", input_images)
-    output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
+    Universal.validate(
+        input_images=input_images,
+        output_images=output_images,
+        debug_logs=debug_logs,
+        custom_nodata_value=custom_nodata_value,
+        image_parallel_workers=image_parallel_workers,
+        window_parallel_workers=window_parallel_workers,
+        window_size=window_size,
+        custom_output_dtype=custom_output_dtype,
+    )
+    input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern":"*.tif"})
+    output_image_paths = _resolve_paths("create", output_images, kwargs={"paths_or_bases":input_image_paths, "default_file_pattern":"$_Threshold.tif"})
     image_names = _resolve_paths("name", input_image_paths)
 
     with rasterio.open(input_image_paths[0]) as ds:
@@ -332,8 +338,8 @@ def process_raster_values_to_vector_polygons(
     Converts raster values into vector polygons based on an expression and optional filtering logic.
 
     Args:
-        input_images (Universal.SearchFolderOrListFiles): Either a (folder, pattern) tuple to search for rasters or a list of raster file paths.
-        output_vectors (Universal.CreateInFolderOrListFiles): Output folder or list of file paths where the vector polygons will be saved.
+        input_images (str | List[str], required): Defines input files from a glob path, folder, or list of paths. Specify like: "/input/files/*.tif", "/input/folder" (assumes *.tif), ["/input/one.tif", "/input/two.tif"].
+        output_vectors (str | List[str], required): Defines output files from a template path, folder, or list of paths (with the same length as the input). Specify like: "/input/files/$.gpkg", "/input/folder" (assumes $_Vectorized.gpkg), ["/input/one.gpkg", "/input/two.gpkg"].
         custom_nodata_value (Universal.CustomNodataValue, optional): Custom NoData value to override the default from the raster metadata.
         custom_output_dtype (Universal.CustomOutputDtype, optional): Desired output data type. If not set, defaults to raster’s dtype.
         image_parallel_workers (Universal.ImageParallelWorkers, optional): Controls parallelism across input images. Can be an integer, executor string, or boolean.
@@ -360,8 +366,8 @@ def process_raster_values_to_vector_polygons(
         debug_logs=debug_logs,
     )
 
-    input_image_paths = _resolve_paths("search", input_images)
-    output_image_paths = _resolve_paths("create", output_vectors, (input_image_paths,))
+    input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern":"*.tif"})
+    output_image_paths = _resolve_paths("create", output_vectors, kwargs={"paths_or_bases":input_image_paths, "default_file_pattern":"$_Vectorized.gpkg"})
 
     image_parallel, image_backend, image_max_workers = _resolve_parallel_config(
         image_parallel_workers
