@@ -86,7 +86,7 @@ default:
 	@echo A Python script, pb_tool provides platform independent management of
 	@echo your plugins and runs anywhere.
 	@echo You can install pb_tool using: pip install pb_tool
-	@echo See https://g-sherman.github.io/plugin_build_tool/ for info. 
+	@echo See https://g-sherman.github.io/plugin_build_tool/ for info.
 
 compile: headers $(COMPILED_RESOURCE_FILES)
 
@@ -247,4 +247,21 @@ pep8:
 
 headers:
 	@echo "Generating function_headers.json..."
-	@$(GENERATE_HEADERS)
+	PYTHONPATH=.. $(GENERATE_HEADERS)
+
+create: headers
+	@echo "---------------------------"
+	@echo "Temporarily committing function_headers.json..."
+	@echo "---------------------------"
+	git add -f function_headers.json
+	git commit -m "temp: include function_headers.json in archive" --no-verify
+
+	@echo "---------------------------"
+	@echo "Creating plugin zip with function_headers.json..."
+	@echo "---------------------------"
+	git archive --prefix=$(PLUGINNAME)/ -o $(PLUGINNAME).zip HEAD
+
+	@echo "---------------------------"
+	@echo "Cleaning up temp commit..."
+	@echo "---------------------------"
+	git reset --soft HEAD~1
