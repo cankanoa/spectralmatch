@@ -30,21 +30,21 @@ def create_cloud_mask_with_omnicloudmask(
     down_sample_m: float = None,
     debug_logs: Universal.DebugLogs = False,
     image_parallel_workers: Universal.ImageParallelWorkers = None,
-    **omnicloud_kwargs: Any,
+    omnicloud_kwargs: dict | None = None,
 ):
     """
     Generates cloud masks from input images using OmniCloudMask, with optional downsampling and multiprocessing.
 
     Args:
-        input_images (SearchFolderOrListFiles): Input folder and pattern or list of image paths.
-        output_images (CreateInFolderOrListFiles): Output folder and pattern or list of paths.
+        input_images (str | List[str], required): Defines input files from a glob path, folder, or list of paths. Specify like: "/input/files/*.tif", "/input/folder" (assumes *.tif), ["/input/one.tif", "/input/two.tif"].
+        output_images (str | List[str], required): Defines output files from a template path, folder, or list of paths (with the same length as the input). Specify like: "/input/files/$.tif", "/input/folder" (assumes $_CloudMask.tif), ["/input/one.tif", "/input/two.tif"].
         red_band_index (int): Index of red band in the image.
         green_band_index (int): Index of green band in the image.
         nir_band_index (int): Index of NIR band in the image.
         down_sample_m (float, optional): If set, resamples input to this resolution in meters.
         debug_logs (bool, optional): If True, prints progress and debug info.
         image_parallel_workers (ImageParallelWorkers, optional): Enables parallel execution. Note: "process" does not work on macOS due to PyTorch MPS limitations.
-        **omnicloud_kwargs: Additional arguments forwarded to predict_from_array.
+        omnicloud_kwargs (dict | None): Additional arguments forwarded to predict_from_array.
 
     Raises:
         Exception: Propagates any error from processing individual images.
@@ -55,11 +55,9 @@ def create_cloud_mask_with_omnicloudmask(
         input_images=input_images, output_images=output_images, debug_logs=debug_logs
     )
 
-    input_image_paths = _resolve_paths("search", input_images)
-    output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
-    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(
-        image_parallel_workers
-    )
+    input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern":"*.tif"})
+    output_image_paths = _resolve_paths("create", output_images, kwargs={"paths_or_bases":input_image_paths, "default_file_pattern":"$_CloudClip.tif"})
+    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
 
     if debug_logs:
         print(f"Input images: {input_image_paths}")
@@ -100,7 +98,7 @@ def _process_cloud_mask_image(
     nir_band_index: int,
     down_sample_m: float,
     debug_logs: bool,
-    omnicloud_kwargs: dict,
+    omnicloud_kwargs: dict | None,
 ):
     """
     Processes a single image to generate a cloud mask using OmniCloudMask.
@@ -113,11 +111,12 @@ def _process_cloud_mask_image(
         nir_band_index (int): Index of NIR band.
         down_sample_m (float): Target resolution (if resampling).
         debug_logs (bool): If True, print progress info.
-        omnicloud_kwargs (dict): Passed to predict_from_array.
+        omnicloud_kwargs (dict | None): Passed to predict_from_array.
 
     Raises:
         Exception: If any step in reading, prediction, or writing fails.
     """
+    if omnicloud_kwargs is None: omnicloud_kwargs = {}
 
     with rasterio.open(input_image_path) as src:
         if down_sample_m is not None:
@@ -186,8 +185,8 @@ def create_ndvi_raster(
     """Computes NDVI masks for one or more images and writes them to disk.
 
     Args:
-        input_images: Folder and pattern tuple or list of input image paths.
-        output_images: Output folder and template or list of output paths.
+        input_images (str | List[str], required): Defines input files from a glob path, folder, or list of paths. Specify like: "/input/files/*.tif", "/input/folder" (assumes *.tif), ["/input/one.tif", "/input/two.tif"].
+        output_images (str | List[str], required): Defines output files from a template path, folder, or list of paths (with the same length as the input). Specify like: "/input/files/$.tif", "/input/folder" (assumes $_Vegetation.tif), ["/input/one.tif", "/input/two.tif"].
         nir_band_index: Band index for NIR (1-based).
         red_band_index: Band index for Red (1-based).
         custom_output_dtype: Optional output data type (e.g., "float32").
@@ -211,9 +210,9 @@ def create_ndvi_raster(
         window_parallel_workers=window_parallel_workers,
     )
 
-    input_paths = _resolve_paths("search", input_images)
-    output_paths = _resolve_paths("create", output_images, (input_paths,))
-    image_names = _resolve_paths("name", input_paths)
+    input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern":"*.tif"})
+    output_image_paths = _resolve_paths("create", output_images, kwargs={"paths_or_bases":input_image_paths, "default_file_pattern":"$_Vegetation.tif"})
+    image_names = _resolve_paths("name", input_image_paths)
 
     image_parallel, image_backend, image_max_workers = _resolve_parallel_config(
         image_parallel_workers
@@ -231,7 +230,7 @@ def create_ndvi_raster(
             debug_logs,
             window_parallel_workers,
         )
-        for in_path, out_path, image_name in zip(input_paths, output_paths, image_names)
+        for in_path, out_path, image_name in zip(input_image_paths, output_image_paths, image_names)
     ]
 
     if image_parallel:
@@ -327,8 +326,8 @@ def band_math(
     Applies custom band math expression to a list of input images and writes the results.
 
     Args:
-        input_images (SearchFolderOrListFiles): Folder and pattern or list of input image paths.
-        output_images (CreateInFolderOrListFiles): Folder or list of output paths to write results.
+        input_images (str | List[str], required): Defines input files from a glob path, folder, or list of paths. Specify like: "/input/files/*.tif", "/input/folder" (assumes *.tif), ["/input/one.tif", "/input/two.tif"].
+        output_images (str | List[str], required): Defines output files from a template path, folder, or list of paths (with the same length as the input). Specify like: "/input/files/$.tif", "/input/folder" (assumes $_Math.tif), ["/input/one.tif", "/input/two.tif"].
         custom_math (str): Python-compatible math expression using bands (e.g., "b1 + b2 / 2").
         debug_logs (bool, optional): If True, prints debug messages.
         custom_nodata_value (Any, optional): Override nodata value in source image.
@@ -339,8 +338,8 @@ def band_math(
         calculation_dtype (str | None, optional): Computation data type (e.g., "float32").
     """
 
-    input_image_paths = _resolve_paths("search", input_images)
-    output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
+    input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern":"*.tif"})
+    output_image_paths = _resolve_paths("create", output_images, kwargs={"paths_or_bases":input_image_paths, "default_file_pattern":"$_Math.tif"})
     image_names = _resolve_paths("name", input_image_paths)
 
     with rasterio.open(input_image_paths[0]) as ds:

@@ -54,66 +54,73 @@ def _resolve_nodata_value(
 def _resolve_paths(
     mode: Literal["search", "create", "match", "name"],
     input: Universal.SearchFolderOrListFiles | Universal.CreateInFolderOrListFiles,
-    args: Tuple | None = None,
+    *,
+    kwargs: dict | None = None,
 ) -> List[str]:
     """
     Resolves a list of input based on the mode and input format.
 
     Args:
         mode (Literal["search", "create", "match", "name"]): Type of operation to perform.
-        input (Tuple[str, str] | List[str]): Either a list of file input or a tuple specifying folder/template info.
-        args (Tuple): Additional arguments passed to the called function.
+        input (str | List[str]): Either a list of file input or a folder/template string.
+        kwargs (dict, optional): Additional keyword arguments passed to the resolved function.
 
     Returns:
         List[str]: List of resolved input.
     """
-    if not isinstance(args, tuple) and args is not None:
-        raise ValueError(f"Args to pass must be a tuple")
+    kwargs = kwargs or {}
 
     if isinstance(input, list):
         resolved = input
     elif mode == "search":
-        resolved = search_paths(input[0], input[1], *(args or ()))
+        resolved = search_paths(input, **kwargs)
     elif mode == "create":
-        resolved = create_paths(input[0], input[1], *(args or ()))
+        resolved = create_paths(input, **kwargs)
     elif mode == "match":
-        resolved = match_paths(*(args or ()))
+        resolved = match_paths(**kwargs)
     elif mode == "name":
         resolved = [os.path.splitext(os.path.basename(p))[0] for p in input]
     else:
         raise ValueError(f"Invalid mode: {mode}")
 
     if len(resolved) == 0:
-        warnings.warn(f"No results found for paths.", RuntimeWarning)
+        warnings.warn("No results found for paths.", RuntimeWarning)
 
     return resolved
 
 
 def search_paths(
-    folder_path: str,
-    pattern: str,
+    search_pattern: str,
+    *,
+    default_file_pattern: str | None = None,
     recursive: bool = False,
     match_to_paths: Tuple[List[str], str] | None = None,
     debug_logs: bool = False,
 ) -> List[str]:
     """
-    Search for files in a folder using a glob pattern.
+    Search for files using a glob pattern, or a folder with a default file pattern.
 
     Args:
-        folder_path (str): The root folder to search in.
-        pattern (str): A glob pattern (e.g., "*.tif", "**/*.jpg").
-        recursive (bool, optional): Whether to search for files recursively.
-        match_to_paths (Tuple[List[str], str], optional): If provided, match `reference_paths` to `input_match_paths` using a regex applied to the basenames of `input_match_paths`. The extracted key must be a substring of the reference filename.
-            - reference_paths (List[str]): List of reference paths to align to.
-            - match_regex (str): Regex applied to basenames of input_match_paths to extract a key to match via *inclusion* in reference_paths (e.g. "(.*)_LocalMatch.gpkg$").
-        debug_logs (bool, optional): Whether to print the matched file paths.
+        search_pattern (str, required): Defines input files from a glob path or folder. Specify like: "/input/files/*.tif" or "/input/folder" (while passing default_file_pattern like: '*.tif')
+        default_file_pattern (str, optional): Used when `pattern` is a directory. If not set and `pattern` is a folder, raises an error.
+        recursive (bool, optional): Whether to search recursively.
+        match_to_paths (Tuple[List[str], str], optional): Matches input files to a reference list using a regex.
+        debug_logs (bool, optional): Whether to print matched paths.
 
     Returns:
         List[str]: Sorted list of matched file paths.
+
+    Raises:
+        ValueError: If `search_pattern` is a directory and `default_file_pattern` is not provided.
     """
-    input_paths = sorted(
-        glob.glob(os.path.join(folder_path, pattern), recursive=recursive)
-    )
+    if not os.path.basename(search_pattern).count("."):
+        if not default_file_pattern:
+            raise ValueError("Pattern is a directory, but no default_file_pattern was provided.")
+        search_pattern = os.path.join(search_pattern, default_file_pattern)
+
+    input_paths = sorted(glob.glob(search_pattern, recursive=recursive))
+
+    if debug_logs: print(f"Found {len(input_paths)} file(s) matching: {search_pattern}")
 
     if match_to_paths:
         input_paths = match_paths(input_paths, *match_to_paths)
@@ -122,27 +129,36 @@ def search_paths(
 
 
 def create_paths(
-    output_folder: str,
-    template: str,
+    template_pattern: str,
     paths_or_bases: List[str],
+    *,
+    default_file_pattern: str | None = None,
     debug_logs: bool = False,
     replace_symbol: str = "$",
     create_folders: bool = True,
-) -> List[str]:
+    ) -> List[str]:
     """
-    Create output paths using a filename template and a list of reference paths or names.
+    Create output paths using a filename template_pattern and a list of reference paths or names.
 
     Args:
-        output_folder (str): Directory to store output files.
-        template (str): Filename template using replace_symbol as placeholder (e.g., "$_processed.tif").
-        paths_or_bases (List[str]): List of full paths or bare names to derive replace_symbol from. Inclusion of '/' or '\' indicates a path.
+        template_pattern (str, required): Defines output files from a glob path or folder to match input paths or names. Specify like: "/input/files/$.tif" or "/input/folder" (while passing default_file_pattern like: '$.tif')
+        paths_or_bases (List[str]): List of full paths or base names to derive the replace_symbol from.
+        default_file_pattern (str, optional): Used if `template_pattern` is a directory.
         debug_logs (bool): Whether to print the created paths.
-        replace_symbol (str): Symbol to replace in the template.
-        create_folders (bool): Whether to create output folders if they don't exist.'
+        replace_symbol (str): Placeholder symbol in the template to replace with base names.
+        create_folders (bool): Whether to create output folders if they don't exist.
 
     Returns:
         List[str]: List of constructed file paths.
+
+    Raises:
+        ValueError: If `template_pattern` is a directory and `default_file_pattern` is not provided.
     """
+    if not os.path.basename(template_pattern).count("."):
+        if not default_file_pattern:
+            raise ValueError("Template is a directory, but no default_file_pattern was provided.")
+        template_pattern = os.path.join(template_pattern, default_file_pattern)
+
     output_paths = []
     for ref in paths_or_bases:
         base = (
@@ -150,13 +166,18 @@ def create_paths(
             if ("/" in ref or "\\" in ref)
             else os.path.splitext(ref)[0]
         )
-        filename = template.replace(replace_symbol, base)
-        path = os.path.join(output_folder, filename)
-        output_paths.append(path)
+        filename = template_pattern.replace(replace_symbol, base)
+        output_paths.append(filename)
 
     if create_folders:
         for path in output_paths:
             os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    if debug_logs:
+        print(f"Created {len(output_paths)} paths:")
+        for p in output_paths:
+            print(f"  {p}")
+
     return output_paths
 
 

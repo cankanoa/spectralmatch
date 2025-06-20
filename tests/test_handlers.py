@@ -19,7 +19,7 @@ def dummy_files(tmp_path):
 # search_paths
 def test_search_paths_glob(dummy_files):
     folder, all_files = dummy_files
-    result = search_paths(str(folder), "*_GlobalMatch.tif")
+    result = search_paths(os.path.join(str(folder), "*_GlobalMatch.tif"))
     assert len(result) == 2
     assert all("_GlobalMatch" in os.path.basename(p) for p in result)
 
@@ -29,7 +29,7 @@ def test_search_paths_match_to_paths(dummy_files):
     reference_paths = ["A", "B"]
     match_regex = r"(.*)_GlobalMatch\.tif$"
     result = search_paths(
-        str(folder), "*_GlobalMatch.tif", match_to_paths=(reference_paths, match_regex)
+        os.path.join(str(folder), "*_GlobalMatch.tif"), match_to_paths=(reference_paths, match_regex)
     )
     assert len(result) == 2
     assert all(any(r in p for r in reference_paths) for p in result)
@@ -47,7 +47,7 @@ def test_create_paths_from_paths(tmp_path):
     output_folder = tmp_path / "out"
     template = "$_processed.tif"
 
-    result = create_paths(str(output_folder), template, input_paths)
+    result = create_paths(os.path.join(str(output_folder), template), input_paths)
     assert len(result) == 2
     assert all(p.endswith("_processed.tif") for p in result)
     assert all(os.path.exists(os.path.dirname(p)) for p in result)
@@ -58,7 +58,7 @@ def test_create_paths_from_basenames(tmp_path):
     output_folder = tmp_path / "out"
     template = "$_done.tif"
 
-    result = create_paths(str(output_folder), template, basenames)
+    result = create_paths(os.path.join(str(output_folder), template), basenames)
     expected = [str(output_folder / f"{name}_done.tif") for name in basenames]
 
     assert result == expected
@@ -70,7 +70,7 @@ def test_create_paths_disable_folder_creation(tmp_path):
     output_folder = tmp_path / "subdir"
     template = "$.tif"
 
-    result = create_paths(str(output_folder), template, basenames, create_folders=False)
+    result = create_paths(os.path.join(str(output_folder), template), basenames, create_folders=False)
     assert all(str(output_folder) in p for p in result)
     assert not output_folder.exists()  # folder should not exist
 

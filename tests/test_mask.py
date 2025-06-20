@@ -26,7 +26,7 @@ def dummy_multiband_raster(tmp_path):
 @pytest.fixture
 def dummy_rgbn_raster(tmp_path):
     path = tmp_path / "rgbn.tif"
-    create_dummy_raster(path, width=64, height=64, count=3, fill_value=100)
+    create_dummy_raster(path, width=128, height=128, count=3, fill_value=100)
     return path
 
 
@@ -152,11 +152,12 @@ def test_create_cloud_mask(dummy_rgbn_raster, tmp_path):
         green_band_index=2,
         nir_band_index=3,
         debug_logs=True,
+        omnicloud_kwargs={"patch_size": 50, "patch_overlap": 20}
     )
 
     assert os.path.exists(output_path)
     with rasterio.open(output_path) as out:
-        assert out.read(1).shape == (64, 64)
+        assert out.read(1).shape == (128, 128)
 
 
 # create_ndvi_raster

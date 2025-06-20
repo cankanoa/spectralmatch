@@ -58,20 +58,33 @@ Used to determine optimal boundaries between overlapping image regions. These fu
 Reusable types are organized into the types and validation module. Use these types directly as the types of params inside functions where applicable. Use the appropriate _resolve... function to resolve these inputs into usable variables.
 
 ### Input/Output
-The input_images parameter accepts either a tuple or a list. If given as a tuple, it should contain a folder path and a glob pattern to search for files (e.g., ("/input/folder", "*.tif")). Alternatively, it can be a list of full file paths to individual input images. The output_images parameter defines how output filenames are determined. It can also be a tuple, consisting of an output folder and a filename template where "\$" is replaced with each input image’s basename (e.g., ("/output/folder", "$_GlobalMatch.tif")). Alternatively, it may be a list of full output paths, which must match the number of input images. The _resolve_paths function handles creating folders for output files.
+The input_name parameter defines how the input files are determined and accepts either a str or a list. If given as a str, it should contain either a folder glob pattern path and default_file_pattern must be set or a whole glob pattern file path. Functions should default to searching for all appropriately formated files in the input folder (for example "*.tif"). Alternatively, it can be a list of full file paths to individual input images. For example:
+
+- input_images="/input/files/*.tif" (does not require default_file_pattern)
+- input_images="/input/folder" (requires default_file_pattern to be set), 
+- input_images=["/input/one.tif", "/input/two.tif", ...] (does not require default_file_pattern)
+
+ The output_name parameter defines how output filenames are determined and accepts either a str or a list. If given as a str, it should contain either a folder template pattern path and default_file_pattern must be set or a whole template pattern file path. Functions should default to templating with basename, underscore, processing step (for example "$_Global"). Alternatively, it may be a list of full output paths, which must match the number of input images. For example:
+ 
+- output_images="/output/files/$.tif" (does not require default_file_pattern)
+- output_images="/output/folder" (requires default_file_pattern to be set), 
+- output_images=["/output/one.tif", "/output/two.tif", ...] (does not require default_file_pattern)
+
+The _resolve_paths function handles creating folders for output files. Folders and files are distinguished by the presence of a "." in the basename.
 ```python
 # Params
-input_images
-output_images
+input_name # For example: input_images
+input_name # For example: output_images
 
 # Types
-SearchFolderOrListFiles = Tuple[str, str] | List[str] # Required
-CreateInFolderOrListFiles = Tuple[str, str] | List[str] # Required
+SearchFolderOrListFiles = str | List[str] # Required
+CreateInFolderOrListFiles = str | List[str] # Required
 
 # Resolve
-input_image_paths = _resolve_paths("search", input_images)
-output_image_paths = _resolve_paths("create", output_images, (input_image_paths,))
+input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern":"*.tif"})
+output_image_paths = _resolve_paths("create", output_images, kwargs={"paths_or_bases":input_image_paths, "default_file_pattern":"$_Global.tif"})
 image_names = _resolve_paths("name", input_image_paths)
+# This pattern can also be used with other input types like vectors
 ```
 
 ### Output dtype

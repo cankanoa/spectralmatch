@@ -1,3 +1,6 @@
+# QGIS stuff
+spectralmatch_qgis/function_headers.json
+
 # Example image
 docs/examples/data_worldview/*
 docs/examples/data_landsat/*

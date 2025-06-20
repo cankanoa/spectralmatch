@@ -20,7 +20,7 @@ from shapely.ops import split, voronoi_diagram
 from itertools import combinations
 from typing import List, Tuple
 
-from ..handlers import search_paths
+from ..handlers import search_paths, _resolve_paths
 from ..types_and_validation import Universal
 
 
@@ -38,10 +38,7 @@ def voronoi_center_seamline(
     Generates a Voronoi-based seamline mask from edge-matching polygons (EMPs) and writes the result to a vector file.
 
     Args:
-        input_images (Tuple[str, str] | List[str]):
-            Specifies the input images either as:
-            - A tuple with a folder path and glob pattern to search for files (e.g., ("/input/folder", "*.tif")).
-            - A list of full file paths to individual input images.
+        input_images (str | List[str], required): Defines input files from a glob path, folder, or list of paths. Specify like: "/input/files/*.tif", "/input/folder" (assumes *.tif), ["/input/one.tif", "/input/two.tif"].
         output_mask (str): Output path for the final seamline polygon vector file.
         min_point_spacing (float, optional): Minimum spacing between Voronoi seed points; default is 10.
         min_cut_length (float, optional): Minimum cutline segment length to retain; default is 0.
@@ -54,12 +51,15 @@ def voronoi_center_seamline(
     """
 
     print("Start voronoi center seamline")
-    if isinstance(input_images, tuple):
-        input_images = search_paths(*input_images)
+
+    Universal.validate(
+        input_images=input_images,
+    )
+    input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern": "*.tif"})
 
     emps = []
     crs = None
-    for p in input_images:
+    for p in input_image_paths:
         mask, transform = _read_mask(p, debug_logs)
         emp = _seamline_mask(mask, transform, debug_logs)
         emps.append(emp)
@@ -123,7 +123,7 @@ def voronoi_center_seamline(
     with fiona.open(
         output_mask, "w", driver="GPKG", crs=crs, schema=schema, layer="seamlines"
     ) as dst:
-        for img, poly in zip(input_images, segmented):
+        for img, poly in zip(input_image_paths, segmented):
             dst.write(
                 {
                     "geometry": mapping(poly),
