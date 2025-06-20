@@ -70,7 +70,7 @@ The input_name parameter defines how the input files are determined and accepts 
 - output_images="/output/folder" (requires default_file_pattern to be set), 
 - output_images=["/output/one.tif", "/output/two.tif", ...] (does not require default_file_pattern)
 
-The _resolve_paths function handles creating folders for output files.
+The _resolve_paths function handles creating folders for output files. Folders and files are distinguished by the presence of a "." in the basename.
 ```python
 # Params
 input_name # For example: input_images

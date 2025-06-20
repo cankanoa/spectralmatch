@@ -113,7 +113,7 @@ def search_paths(
     Raises:
         ValueError: If `search_pattern` is a directory and `default_file_pattern` is not provided.
     """
-    if "*" not in search_pattern:
+    if not os.path.basename(search_pattern).count("."):
         if not default_file_pattern:
             raise ValueError("Pattern is a directory, but no default_file_pattern was provided.")
         search_pattern = os.path.join(search_pattern, default_file_pattern)
@@ -154,7 +154,7 @@ def create_paths(
     Raises:
         ValueError: If `template_pattern` is a directory and `default_file_pattern` is not provided.
     """
-    if replace_symbol not in template_pattern:
+    if not os.path.basename(template_pattern).count("."):
         if not default_file_pattern:
             raise ValueError("Template is a directory, but no default_file_pattern was provided.")
         template_pattern = os.path.join(template_pattern, default_file_pattern)
