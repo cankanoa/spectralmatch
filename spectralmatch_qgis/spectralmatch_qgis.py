@@ -35,7 +35,6 @@ import sys
 import inspect
 import subprocess
 
-from qgis.PyQt.QtWidgets import QMessageBox
 from qgis.core import QgsProcessingAlgorithm, QgsApplication
 from .spectralmatch_qgis_provider import spectralmatchProvider
 
@@ -60,17 +59,3 @@ class spectralmatchPlugin(object):
 
     def unload(self):
         QgsApplication.processingRegistry().removeProvider(self.provider)
-
-    def _ensure_spectralmatch_installed(self):
-        try:
-            import spectralmatch
-        except ImportError:
-            reply = QMessageBox.question(
-                None,
-                "Install Required Package",
-                "'spectralmatch' is required. Install it now?",
-                QMessageBox.Yes | QMessageBox.No
-            )
-
-            if reply == QMessageBox.Yes:
-                subprocess.check_call([sys.executable, "-m", "pip", "install", "spectralmatch"])

@@ -1,5 +1,7 @@
 MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 ENV_NAME = spectralmatch
+GENERATE_HEADERS=python spectralmatch_qgis/generate_function_headers.py
+QGISPLUGINNAME = spectralmatch_qgis
 
 # Install
 install:
@@ -77,6 +79,32 @@ clean:
 	       $(MAKEFILE_DIR)__pycache__ \
 	       $(MAKEFILE_DIR).pytest_cache \
 	       $(MAKEFILE_DIR)site \
-	       $(MAKEFILE_DIR)spectralmatch_qgis/help/build
+	       $(MAKEFILE_DIR)spectralmatch_qgis/help/build \
+	       $(MAKEFILE_DIR)spectralmatch_qgis/function_headers.json \
+		   $(MAKEFILE_DIR)spectralmatch_qgis.zip
 	find $(MAKEFILE_DIR)docs/examples/data_landsat -mindepth 1 ! -path "*/Input*" -exec rm -rf {} +
 	find $(MAKEFILE_DIR)docs/examples/data_worldview -mindepth 1 ! -path "*/Input*" -exec rm -rf {} +
+
+
+# QGIS
+
+qgis-headers:
+	@echo "Generating function_headers.json..."
+	PYTHONPATH=. $(GENERATE_HEADERS)
+
+qgis-build: qgis-headers
+	@echo "---------------------------"
+	@echo "Temporarily committing function_headers.json..."
+	@echo "---------------------------"
+	git add -f spectralmatch_qgis/function_headers.json
+	git commit -m "temp: include function_headers.json in archive" --no-verify
+
+	@echo "---------------------------"
+	@echo "Creating plugin zip with function_headers.json..."
+	@echo "---------------------------"
+	git archive --prefix=$(QGISPLUGINNAME)/ -o $(QGISPLUGINNAME).zip HEAD:spectralmatch_qgis
+
+	@echo "---------------------------"
+	@echo "Cleaning up temp commit..."
+	@echo "---------------------------"
+	git reset --soft HEAD~1

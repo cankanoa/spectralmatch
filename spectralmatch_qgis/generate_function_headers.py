@@ -7,7 +7,7 @@ from typing import List
 
 def generate_function_headers(
     package_name="spectralmatch",
-    output_file="function_headers.json",
+    output_file="spectralmatch_qgis/function_headers.json",
     exclude_functions: List[str] = None,
     exclude_modules: List[str] = None,
     exclude_internal_functions: bool = True
@@ -69,7 +69,7 @@ def generate_function_headers(
 
     pkg = importlib.import_module(package_name)
     walk_module(pkg, package_name)
-
+    if not output: raise RuntimeError(f"No function headers found in package '{package_name}'. Check exclusions, installation, or package contents.")
     Path(output_file).write_text(json.dumps(output, indent=2), encoding="utf-8")
     return output_file
 
