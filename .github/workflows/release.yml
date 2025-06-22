@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version tag to create release for (e.g., v1.2.3)"
+        description: "Full version tag to create release for (e.g. 'v1.2.3')"
         required: false
 
 jobs:
