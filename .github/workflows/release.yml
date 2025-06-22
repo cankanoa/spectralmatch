@@ -35,7 +35,9 @@ jobs:
           pip install git-changelog
 
       - name: Generate changelog
-        run: git-changelog --template keepachangelog > TEMP_CHANGELOG.md
+        run: |
+          git-changelog --tag ${{ github.event.inputs.version || github.ref_name }} --template keepachangelog > TEMP_VERSION_CHANGELOG.md
+          git-changelog --template keepachangelog > TEMP_CHANGELOG.md
 
       - name: Switch to main and commit CHANGELOG.md
         run: |
@@ -52,6 +54,6 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.event.inputs.version || github.ref_name }}
-          body_path: CHANGELOG.md
+          body_path: TEMP_VERSION_CHANGELOG.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
