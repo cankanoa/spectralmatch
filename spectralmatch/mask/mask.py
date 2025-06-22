@@ -55,9 +55,20 @@ def create_cloud_mask_with_omnicloudmask(
         input_images=input_images, output_images=output_images, debug_logs=debug_logs
     )
 
-    input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern":"*.tif"})
-    output_image_paths = _resolve_paths("create", output_images, kwargs={"paths_or_bases":input_image_paths, "default_file_pattern":"$_CloudClip.tif"})
-    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(image_parallel_workers)
+    input_image_paths = _resolve_paths(
+        "search", input_images, kwargs={"default_file_pattern": "*.tif"}
+    )
+    output_image_paths = _resolve_paths(
+        "create",
+        output_images,
+        kwargs={
+            "paths_or_bases": input_image_paths,
+            "default_file_pattern": "$_CloudClip.tif",
+        },
+    )
+    image_parallel, image_backend, image_max_workers = _resolve_parallel_config(
+        image_parallel_workers
+    )
 
     if debug_logs:
         print(f"Input images: {input_image_paths}")
@@ -116,7 +127,8 @@ def _process_cloud_mask_image(
     Raises:
         Exception: If any step in reading, prediction, or writing fails.
     """
-    if omnicloud_kwargs is None: omnicloud_kwargs = {}
+    if omnicloud_kwargs is None:
+        omnicloud_kwargs = {}
 
     with rasterio.open(input_image_path) as src:
         if down_sample_m is not None:
@@ -210,8 +222,17 @@ def create_ndvi_raster(
         window_parallel_workers=window_parallel_workers,
     )
 
-    input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern":"*.tif"})
-    output_image_paths = _resolve_paths("create", output_images, kwargs={"paths_or_bases":input_image_paths, "default_file_pattern":"$_Vegetation.tif"})
+    input_image_paths = _resolve_paths(
+        "search", input_images, kwargs={"default_file_pattern": "*.tif"}
+    )
+    output_image_paths = _resolve_paths(
+        "create",
+        output_images,
+        kwargs={
+            "paths_or_bases": input_image_paths,
+            "default_file_pattern": "$_Vegetation.tif",
+        },
+    )
     image_names = _resolve_paths("name", input_image_paths)
 
     image_parallel, image_backend, image_max_workers = _resolve_parallel_config(
@@ -230,7 +251,9 @@ def create_ndvi_raster(
             debug_logs,
             window_parallel_workers,
         )
-        for in_path, out_path, image_name in zip(input_image_paths, output_image_paths, image_names)
+        for in_path, out_path, image_name in zip(
+            input_image_paths, output_image_paths, image_names
+        )
     ]
 
     if image_parallel:
@@ -338,8 +361,17 @@ def band_math(
         calculation_dtype (str | None, optional): Computation data type (e.g., "float32").
     """
 
-    input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern":"*.tif"})
-    output_image_paths = _resolve_paths("create", output_images, kwargs={"paths_or_bases":input_image_paths, "default_file_pattern":"$_Math.tif"})
+    input_image_paths = _resolve_paths(
+        "search", input_images, kwargs={"default_file_pattern": "*.tif"}
+    )
+    output_image_paths = _resolve_paths(
+        "create",
+        output_images,
+        kwargs={
+            "paths_or_bases": input_image_paths,
+            "default_file_pattern": "$_Math.tif",
+        },
+    )
     image_names = _resolve_paths("name", input_image_paths)
 
     with rasterio.open(input_image_paths[0]) as ds:

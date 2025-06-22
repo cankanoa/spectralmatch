@@ -47,7 +47,9 @@ def merge_vectors(
     print("Start vector merge")
 
     os.makedirs(os.path.dirname(merged_vector_path), exist_ok=True)
-    input_vector_paths = _resolve_paths("search", input_vectors, kwargs={"default_file_pattern":"*.gpkg"})
+    input_vector_paths = _resolve_paths(
+        "search", input_vectors, kwargs={"default_file_pattern": "*.gpkg"}
+    )
 
     geoms = []
     input_names = []
@@ -138,8 +140,17 @@ def align_rasters(
         window_parallel_workers=window_parallel_workers,
     )
 
-    input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern": "*.tif"})
-    output_image_paths = _resolve_paths("create", output_images, kwargs={"paths_or_bases": input_image_paths, "default_file_pattern": "$_Align.tif"})
+    input_image_paths = _resolve_paths(
+        "search", input_images, kwargs={"default_file_pattern": "*.tif"}
+    )
+    output_image_paths = _resolve_paths(
+        "create",
+        output_images,
+        kwargs={
+            "paths_or_bases": input_image_paths,
+            "default_file_pattern": "$_Align.tif",
+        },
+    )
     image_names = _resolve_paths("name", input_image_paths)
 
     if debug_logs:
@@ -395,7 +406,9 @@ def merge_rasters(
         window_parallel_workers=window_parallel_workers,
     )
 
-    input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern": "*.tif"})
+    input_image_paths = _resolve_paths(
+        "search", input_images, kwargs={"default_file_pattern": "*.tif"}
+    )
 
     _check_raster_requirements(
         input_image_paths,
@@ -612,8 +625,17 @@ def mask_rasters(
         custom_nodata_value=custom_nodata_value,
     )
 
-    input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern": "*.tif"})
-    output_image_paths = _resolve_paths("create", output_images, kwargs={"paths_or_bases": input_image_paths, "default_file_pattern": "$_Clip.tif"})
+    input_image_paths = _resolve_paths(
+        "search", input_images, kwargs={"default_file_pattern": "*.tif"}
+    )
+    output_image_paths = _resolve_paths(
+        "create",
+        output_images,
+        kwargs={
+            "paths_or_bases": input_image_paths,
+            "default_file_pattern": "$_Clip.tif",
+        },
+    )
 
     if debug_logs:
         print(f"Input images: {input_image_paths}")

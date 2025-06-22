@@ -4,11 +4,13 @@ import inspect
 from importlib.metadata import version as get_version, PackageNotFoundError
 import sys
 
+
 def _cli_version():
     try:
         print(get_version("spectralmatch"))
     except PackageNotFoundError:
         print("Spectralmatch (version unknown)")
+
 
 def _build_cli():
     class CLI:
@@ -21,6 +23,7 @@ def _build_cli():
             setattr(CLI, name, staticmethod(func))
 
     return CLI
+
 
 def main():
     # Ensure print() is flushed immediately (line-buffered)

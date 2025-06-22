@@ -134,7 +134,9 @@ def compare_spatial_spectral_difference_band_average(
 
         ax.set_title(title, fontsize=14, pad=12)
         if subtitle:
-            ax.text(0.5, -0.1, subtitle, fontsize=10, ha="center", transform=ax.transAxes)
+            ax.text(
+                0.5, -0.1, subtitle, fontsize=10, ha="center", transform=ax.transAxes
+            )
 
         ax.axis("off")
         plt.savefig(output_figure_path, dpi=300, bbox_inches="tight")
@@ -151,7 +153,7 @@ def compare_before_after_all_images(
     ylabel_1: str,
     ylabel_2: str,
     image_names: list = None,
-    ):
+):
     """
     Creates a 2-row grid comparing before and after images with per-band contrast stretch and nodata transparency.
 
@@ -171,9 +173,13 @@ def compare_before_after_all_images(
         A PNG figure with transparent nodata and matched image pairs.
     """
 
-    assert len(input_images_1) == len(input_images_2), "Image lists must be the same length."
+    assert len(input_images_1) == len(
+        input_images_2
+    ), "Image lists must be the same length."
     if image_names:
-        assert len(image_names) == len(input_images_1), "image_names must match image count."
+        assert len(image_names) == len(
+            input_images_1
+        ), "image_names must match image count."
 
     os.makedirs(os.path.dirname(output_figure_path), exist_ok=True)
     num_images = len(input_images_1)
@@ -186,7 +192,11 @@ def compare_before_after_all_images(
 
             with rasterio.open(path) as src:
                 nodata = src.nodata
-                img = src.read([1, 2, 3]) if src.count >= 3 else np.repeat(src.read(1)[np.newaxis, ...], 3, axis=0)
+                img = (
+                    src.read([1, 2, 3])
+                    if src.count >= 3
+                    else np.repeat(src.read(1)[np.newaxis, ...], 3, axis=0)
+                )
                 img = img.astype("float32")
 
                 mask = np.full(img.shape[1:], False)
@@ -214,7 +224,7 @@ def compare_before_after_all_images(
     # Add vertical row labels
     for i, label in enumerate([ylabel_1, ylabel_2]):
         ax = fig.add_subplot(gs[i, 0])
-        ax.set_ylabel(label, fontsize=12, rotation=90, labelpad=10, va='center')
+        ax.set_ylabel(label, fontsize=12, rotation=90, labelpad=10, va="center")
         ax.tick_params(left=False, labelleft=False)
         ax.set_xticks([])
         ax.set_yticks([])

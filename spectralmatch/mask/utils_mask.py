@@ -58,8 +58,17 @@ def threshold_raster(
         window_size=window_size,
         custom_output_dtype=custom_output_dtype,
     )
-    input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern":"*.tif"})
-    output_image_paths = _resolve_paths("create", output_images, kwargs={"paths_or_bases":input_image_paths, "default_file_pattern":"$_Threshold.tif"})
+    input_image_paths = _resolve_paths(
+        "search", input_images, kwargs={"default_file_pattern": "*.tif"}
+    )
+    output_image_paths = _resolve_paths(
+        "create",
+        output_images,
+        kwargs={
+            "paths_or_bases": input_image_paths,
+            "default_file_pattern": "$_Threshold.tif",
+        },
+    )
     image_names = _resolve_paths("name", input_image_paths)
 
     with rasterio.open(input_image_paths[0]) as ds:
@@ -366,8 +375,17 @@ def process_raster_values_to_vector_polygons(
         debug_logs=debug_logs,
     )
 
-    input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern":"*.tif"})
-    output_image_paths = _resolve_paths("create", output_vectors, kwargs={"paths_or_bases":input_image_paths, "default_file_pattern":"$_Vectorized.gpkg"})
+    input_image_paths = _resolve_paths(
+        "search", input_images, kwargs={"default_file_pattern": "*.tif"}
+    )
+    output_image_paths = _resolve_paths(
+        "create",
+        output_vectors,
+        kwargs={
+            "paths_or_bases": input_image_paths,
+            "default_file_pattern": "$_Vectorized.gpkg",
+        },
+    )
 
     image_parallel, image_backend, image_max_workers = _resolve_parallel_config(
         image_parallel_workers

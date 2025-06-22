@@ -43,7 +43,9 @@ class Universal:
                 raise ValueError(
                     "input_images must be a string (path or glob pattern) or a list of strings."
                 )
-            if isinstance(input_images, list) and not all(isinstance(p, str) for p in input_images):
+            if isinstance(input_images, list) and not all(
+                isinstance(p, str) for p in input_images
+            ):
                 raise ValueError("All elements in input_images list must be strings.")
 
         if output_images is not _UNSET:
@@ -51,7 +53,9 @@ class Universal:
                 raise ValueError(
                     "output_images must be a string (path or template) or a list of strings."
                 )
-            if isinstance(output_images, list) and not all(isinstance(p, str) for p in output_images):
+            if isinstance(output_images, list) and not all(
+                isinstance(p, str) for p in output_images
+            ):
                 raise ValueError("All elements in output_images list must be strings.")
 
         if save_as_cog is not _UNSET:

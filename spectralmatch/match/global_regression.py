@@ -98,8 +98,17 @@ def global_regression(
     )
 
     # Input and output paths
-    input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern":"*.tif"})
-    output_image_paths = _resolve_paths("create", output_images, kwargs={"paths_or_bases":input_image_paths, "default_file_pattern":"$_Global.tif"})
+    input_image_paths = _resolve_paths(
+        "search", input_images, kwargs={"default_file_pattern": "*.tif"}
+    )
+    output_image_paths = _resolve_paths(
+        "create",
+        output_images,
+        kwargs={
+            "paths_or_bases": input_image_paths,
+            "default_file_pattern": "$_Global.tif",
+        },
+    )
 
     if debug_logs:
         print(f"Input images: {input_image_paths}")

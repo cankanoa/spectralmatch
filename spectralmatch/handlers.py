@@ -115,12 +115,15 @@ def search_paths(
     """
     if not os.path.basename(search_pattern).count("."):
         if not default_file_pattern:
-            raise ValueError("Pattern is a directory, but no default_file_pattern was provided.")
+            raise ValueError(
+                "Pattern is a directory, but no default_file_pattern was provided."
+            )
         search_pattern = os.path.join(search_pattern, default_file_pattern)
 
     input_paths = sorted(glob.glob(search_pattern, recursive=recursive))
 
-    if debug_logs: print(f"Found {len(input_paths)} file(s) matching: {search_pattern}")
+    if debug_logs:
+        print(f"Found {len(input_paths)} file(s) matching: {search_pattern}")
 
     if match_to_paths:
         input_paths = match_paths(input_paths, *match_to_paths)
@@ -136,7 +139,7 @@ def create_paths(
     debug_logs: bool = False,
     replace_symbol: str = "$",
     create_folders: bool = True,
-    ) -> List[str]:
+) -> List[str]:
     """
     Create output paths using a filename template_pattern and a list of reference paths or names.
 
@@ -156,7 +159,9 @@ def create_paths(
     """
     if not os.path.basename(template_pattern).count("."):
         if not default_file_pattern:
-            raise ValueError("Template is a directory, but no default_file_pattern was provided.")
+            raise ValueError(
+                "Template is a directory, but no default_file_pattern was provided."
+            )
         template_pattern = os.path.join(template_pattern, default_file_pattern)
 
     output_paths = []

@@ -43,7 +43,9 @@ def local_block_adjustment(
     alpha: float = 1.0,
     correction_method: Literal["gamma", "linear"] = "gamma",
     save_block_maps: Tuple[str, str] | None = None,
-    load_block_maps: (Tuple[str, List[str]] | Tuple[str, None] | Tuple[None, List[str]] | None) = None,
+    load_block_maps: (
+        Tuple[str, List[str]] | Tuple[str, None] | Tuple[None, List[str]] | None
+    ) = None,
     override_bounds_canvas_coords: Tuple[float, float, float, float] | None = None,
     block_valid_pixel_threshold: float = 0.001,
 ) -> list:
@@ -121,8 +123,17 @@ def local_block_adjustment(
         window_parallel_workers
     )
 
-    input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern":"*.tif"})
-    output_image_paths = _resolve_paths("create", output_images, kwargs={"paths_or_bases": input_image_paths, "default_file_pattern": "$_Local.tif"})
+    input_image_paths = _resolve_paths(
+        "search", input_images, kwargs={"default_file_pattern": "*.tif"}
+    )
+    output_image_paths = _resolve_paths(
+        "create",
+        output_images,
+        kwargs={
+            "paths_or_bases": input_image_paths,
+            "default_file_pattern": "$_Local.tif",
+        },
+    )
 
     if debug_logs:
         print(f"Input images: {input_image_paths}")
@@ -1061,7 +1072,7 @@ def _compute_mosaic_coefficient_of_variation(
     base_block_size: Tuple[int, int] = (10, 10),
     band_index: int = 1,
     calculation_dtype="float32",
-    debug_logs: bool = False
+    debug_logs: bool = False,
 ) -> Tuple[int, int]:
     """
     Estimates block size for local adjustment using the coefficient of variation across input images.
@@ -1102,7 +1113,8 @@ def _compute_mosaic_coefficient_of_variation(
         return base_block_size
 
     catar = std_val / mean_val
-    if debug_logs: print(f"Mosaic coefficient of variation (CAtar) = {catar:.4f}")
+    if debug_logs:
+        print(f"Mosaic coefficient of variation (CAtar) = {catar:.4f}")
 
     caref = reference_std / reference_mean
     r = catar / caref if caref != 0 else 1.0

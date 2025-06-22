@@ -55,7 +55,9 @@ def voronoi_center_seamline(
     Universal.validate(
         input_images=input_images,
     )
-    input_image_paths = _resolve_paths("search", input_images, kwargs={"default_file_pattern": "*.tif"})
+    input_image_paths = _resolve_paths(
+        "search", input_images, kwargs={"default_file_pattern": "*.tif"}
+    )
 
     emps = []
     crs = None
