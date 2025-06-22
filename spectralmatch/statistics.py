@@ -72,12 +72,12 @@ def compare_image_spectral_profiles_pairs(
     plt.grid(True)
     plt.savefig(output_figure_path, dpi=300)
     plt.close()
-    print(f"Saved: {output_figure_path}")
+    print(f"Saved: {os.path.splitext(os.path.basename(output_figure_path))[0]}")
 
 
 def compare_spatial_spectral_difference_band_average(
     input_images: list,
-    output_image_path: str,
+    output_figure_path: str,
     title: str,
     diff_label: str,
     subtitle: str,
@@ -88,7 +88,7 @@ def compare_spatial_spectral_difference_band_average(
 
     Args:
         input_images (list): List of two image file paths [before, after].
-        output_image_path (str): Path to save the resulting difference image (PNG).
+        output_figure_path (str): Path to save the resulting difference image (PNG).
         title (str): Title for the plot.
         diff_label (str): Label for the colorbar.
         subtitle (str): Subtitle text shown below the image.
@@ -137,10 +137,10 @@ def compare_spatial_spectral_difference_band_average(
             ax.text(0.5, -0.1, subtitle, fontsize=10, ha="center", transform=ax.transAxes)
 
         ax.axis("off")
-        plt.savefig(output_image_path, dpi=300, bbox_inches="tight")
+        plt.savefig(output_figure_path, dpi=300, bbox_inches="tight")
         plt.close()
 
-        print(f"Saved: {output_image_path}")
+        print(f"Saved: {os.path.splitext(os.path.basename(output_figure_path))[0]}")
 
 
 def compare_before_after_all_images(
@@ -174,12 +174,6 @@ def compare_before_after_all_images(
     assert len(input_images_1) == len(input_images_2), "Image lists must be the same length."
     if image_names:
         assert len(image_names) == len(input_images_1), "image_names must match image count."
-
-    import matplotlib.pyplot as plt
-    import matplotlib.gridspec as gridspec
-    import numpy as np
-    import os
-    import rasterio
 
     os.makedirs(os.path.dirname(output_figure_path), exist_ok=True)
     num_images = len(input_images_1)
@@ -230,4 +224,4 @@ def compare_before_after_all_images(
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     plt.savefig(output_figure_path, dpi=300)
     plt.close()
-    print(f"Saved: {output_figure_path}")
+    print(f"Saved: {os.path.splitext(os.path.basename(output_figure_path))[0]}")

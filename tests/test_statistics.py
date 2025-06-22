@@ -65,7 +65,7 @@ def test_compare_spatial_spectral_difference_band_average(spectral_test_rasters)
 
     compare_spatial_spectral_difference_band_average(
         input_images=[images[0], images[1]],
-        output_image_path=output_path,
+        output_figure_path=output_path,
         title="Difference Map",
         diff_label="Mean Band Abs Diff",
         subtitle="Test difference between A and B",

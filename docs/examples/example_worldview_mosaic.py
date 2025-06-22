@@ -22,13 +22,14 @@ stats_folder = os.path.join(working_directory, "Stats")
 window_size = 128
 num_image_workers = 3
 num_window_workers = 5
+debug_mode = False
 
 # %% Global matching
 
 global_regression(
     input_images=input_folder, # Automatically searches for all *.tif files if passed this way
     output_images=global_folder,
-    debug_logs=True,
+    debug_logs=debug_mode,
     window_size=window_size,
     image_parallel_workers=("process", num_image_workers),
     window_parallel_workers=("process", num_window_workers),
@@ -49,7 +50,7 @@ searched_paths = search_paths(os.path.join(local_folder, "LocalBlockMap", "*.tif
 local_block_adjustment(
     input_images=global_folder,
     output_images=local_folder,
-    debug_logs=True,
+    debug_logs=debug_mode,
     window_size=window_size,
     image_parallel_workers=("process", num_image_workers),
     window_parallel_workers=("process", num_window_workers),
@@ -66,7 +67,7 @@ align_rasters(
     output_images=aligned_folder,
     tap=True,
     resolution="lowest",
-    debug_logs=True,
+    debug_logs=debug_mode,
     window_size=window_size,
     image_parallel_workers=("process", num_image_workers),
     window_parallel_workers=("process", num_window_workers),
@@ -78,7 +79,7 @@ voronoi_center_seamline(
     input_images=aligned_folder,
     output_mask=os.path.join(working_directory, "ImageMasks.gpkg"),
     image_field_name="image",
-    debug_logs=True,
+    debug_logs=debug_mode,
     debug_vectors_path=os.path.join(working_directory, "DebugVectors.gpkg"),
 )
 
@@ -88,7 +89,7 @@ mask_rasters(
     input_images=aligned_folder,
     output_images=clipped_folder,
     vector_mask=("include", os.path.join(working_directory, "ImageMasks.gpkg"), "image"),
-    debug_logs=True,
+    debug_logs=debug_mode,
     window_size=window_size,
     image_parallel_workers=("process", num_image_workers),
     window_parallel_workers=("process", num_window_workers),
@@ -99,7 +100,7 @@ mask_rasters(
 merge_rasters(
     input_images=clipped_folder,
     output_image_path=os.path.join(working_directory, "MergedImage.tif"),
-    debug_logs=True,
+    debug_logs=debug_mode,
     window_size=window_size,
     image_parallel_workers=("process", num_image_workers),
     window_parallel_workers=("process", num_window_workers),
@@ -107,48 +108,43 @@ merge_rasters(
 
 # %% Pre-coded quick Statistics
 
-# Compare image spectral profiles
-compare_image_spectral_profiles(
-    input_image_dict={
-        os.path.splitext(os.path.basename(p))[0]: p
-        for p in search_paths(os.path.join(local_folder, "*.tif"))
-    },
-    output_figure_path=os.path.join(
-        stats_folder, "LocalMatch_CompareImageSpectralProfiles.png"
-    ),
-    title="Global to Local Match Comparison of Image Spectral Profiles",
-    xlabel="Band",
-    ylabel="Reflectance(0-10,000)",
-)
 
 # Compare image spectral profiles pairs
-before_paths = search_paths(os.path.join(input_folder, "*.tif"))
-after_paths = search_paths(os.path.join(local_folder, "*.tif"))
-
 image_pairs = {
     os.path.splitext(os.path.basename(b))[0]: [b, a]
-    for b, a in zip(sorted(before_paths), sorted(after_paths))
+    for b, a in zip(search_paths(os.path.join(input_folder, "*.tif")), search_paths(os.path.join(local_folder, "*.tif")))
 }
 
 compare_image_spectral_profiles_pairs(
     image_pairs,
-    os.path.join(stats_folder, "LocalMatch_CompareImageSpectralProfilesPairs.png"),
-    title="Global to Local Match Comparison of Image Spectral Profiles Pairs",
+    os.path.join(stats_folder, "ImageSpectralProfilesPairs.png"),
+    title="Comparison of Image Spectral Profile Pairs",
     xlabel="Band",
-    ylabel="Reflectance(0-10,000)",
+    ylabel="Reflectance",
 )
 
 # Compare spatial spectral difference band average
-input_paths = search_paths(os.path.join(input_folder, "*.tif"))
-local_paths = search_paths(os.path.join(local_folder, "*.tif"))
-before_path, after_path = next(zip(sorted(input_paths), sorted(local_paths)))
+before_paths, after_paths = zip(*zip(search_paths(os.path.join(input_folder, "*.tif")), search_paths(os.path.join(local_folder, "*.tif"))))
 
-compare_spatial_spectral_difference_band_average(
-    input_images=[before_path, after_path],
-    output_image_path=os.path.join(
-        stats_folder, "LocalMatch_CompareSpatialSpectralDifferenceBandAverage.png"
-    ),
-    title="Global to Local Match Comparison of Spatial Spectral Difference Band Average",
-    diff_label="Reflectance Difference (0–10,000)",
-    subtitle=f"Image: {os.path.splitext(os.path.basename(before_path))[0]}",
+for before_path, after_path in zip(before_paths, after_paths):
+    compare_spatial_spectral_difference_band_average(
+        input_images=[before_path, after_path],
+        output_figure_path=os.path.join(
+            stats_folder,
+            f"PixelChange_{os.path.splitext(os.path.basename(before_path))[0]}.png"
+        ),
+        title="Input to Output Comparison of Pixel Change",
+        diff_label="Pixel Difference",
+        subtitle=f"Image: {os.path.splitext(os.path.basename(before_path))[0]}",
+    )
+
+# Compare before after all images
+compare_before_after_all_images(
+    input_images_1=search_paths(os.path.join(input_folder, "*.tif")),
+    input_images_2=search_paths(os.path.join(local_folder, "*.tif")),
+    output_figure_path=os.path.join(stats_folder, "CompareBeforeAfterAllImages.png"),
+    image_names=[os.path.splitext(os.path.basename(p))[0] for p in search_paths(os.path.join(input_folder, "*.tif"))],
+    title="Comparison of Before to After of all Images",
+    ylabel_1="Before",
+    ylabel_2="After",
 )

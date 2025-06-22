@@ -238,7 +238,7 @@ def local_block_adjustment(
             num_row, num_col = number_of_blocks
         elif isinstance(number_of_blocks, str):
             num_row, num_col = _compute_mosaic_coefficient_of_variation(
-                input_image_paths, nodata_val
+                input_image_paths, nodata_val, debug_logs
             )  # This is the approach from the paper to compute bock size
     else:
         num_row, num_col = loaded_num_row, loaded_num_col
@@ -1061,6 +1061,7 @@ def _compute_mosaic_coefficient_of_variation(
     base_block_size: Tuple[int, int] = (10, 10),
     band_index: int = 1,
     calculation_dtype="float32",
+    debug_logs: bool = False
 ) -> Tuple[int, int]:
     """
     Estimates block size for local adjustment using the coefficient of variation across input images.
@@ -1101,7 +1102,7 @@ def _compute_mosaic_coefficient_of_variation(
         return base_block_size
 
     catar = std_val / mean_val
-    print(f"Mosaic coefficient of variation (CAtar) = {catar:.4f}")
+    if debug_logs: print(f"Mosaic coefficient of variation (CAtar) = {catar:.4f}")
 
     caref = reference_std / reference_mean
     r = catar / caref if caref != 0 else 1.0
