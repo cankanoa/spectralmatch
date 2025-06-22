@@ -35,12 +35,13 @@ jobs:
           pip install git-changelog
 
       - name: Generate changelog
-        run: git-changelog --template keepachangelog > CHANGELOG.md
+        run: git-changelog --template keepachangelog > TEMP_CHANGELOG.md
 
       - name: Switch to main and commit CHANGELOG.md
         run: |
           git fetch origin main
           git checkout main
+          mv TEMP_CHANGELOG.md CHANGELOG.md
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add CHANGELOG.md
