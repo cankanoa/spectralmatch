@@ -152,7 +152,7 @@ def test_create_cloud_mask(dummy_rgbn_raster, tmp_path):
         green_band_index=2,
         nir_band_index=3,
         debug_logs=True,
-        omnicloud_kwargs={"patch_size": 50, "patch_overlap": 20}
+        omnicloud_kwargs={"patch_size": 50, "patch_overlap": 20},
     )
 
     assert os.path.exists(output_path)

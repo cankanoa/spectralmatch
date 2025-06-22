@@ -29,7 +29,8 @@ def test_search_paths_match_to_paths(dummy_files):
     reference_paths = ["A", "B"]
     match_regex = r"(.*)_GlobalMatch\.tif$"
     result = search_paths(
-        os.path.join(str(folder), "*_GlobalMatch.tif"), match_to_paths=(reference_paths, match_regex)
+        os.path.join(str(folder), "*_GlobalMatch.tif"),
+        match_to_paths=(reference_paths, match_regex),
     )
     assert len(result) == 2
     assert all(any(r in p for r in reference_paths) for p in result)
@@ -70,7 +71,9 @@ def test_create_paths_disable_folder_creation(tmp_path):
     output_folder = tmp_path / "subdir"
     template = "$.tif"
 
-    result = create_paths(os.path.join(str(output_folder), template), basenames, create_folders=False)
+    result = create_paths(
+        os.path.join(str(output_folder), template), basenames, create_folders=False
+    )
     assert all(str(output_folder) in p for p in result)
     assert not output_folder.exists()  # folder should not exist
 

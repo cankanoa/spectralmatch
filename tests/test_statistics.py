@@ -95,7 +95,7 @@ def test_compare_before_after_all_images(spectral_test_rasters):
         output_figure_path=output_path,
         title="Before vs After Grid",
         ylabel_1="Original",
-        ylabel_2="Processed"
+        ylabel_2="Processed",
     )
 
     assert os.path.exists(output_path)

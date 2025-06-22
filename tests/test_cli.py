@@ -2,6 +2,7 @@ import subprocess
 import re
 from .utils_test import create_dummy_raster
 
+
 def test_cli_general_help():
     cli_function_names = [
         "align_rasters",
@@ -32,15 +33,21 @@ def test_cli_general_help():
 
 
 def test_cli_command_help():
-    result = subprocess.run(["spectralmatch", "global_regression", "--help"], capture_output=True, text=True)
+    result = subprocess.run(
+        ["spectralmatch", "global_regression", "--help"], capture_output=True, text=True
+    )
     assert result.returncode == 0
     assert "global_regression" in (result.stdout + result.stderr)
 
 
 def test_cli_version():
-    result = subprocess.run(["spectralmatch", "--version"], capture_output=True, text=True)
+    result = subprocess.run(
+        ["spectralmatch", "--version"], capture_output=True, text=True
+    )
     assert result.returncode == 0
-    assert re.search(r"\b\d+\.\d+\.\d+\b", result.stdout), "Version number not found in output"
+    assert re.search(
+        r"\b\d+\.\d+\.\d+\b", result.stdout
+    ), "Version number not found in output"
 
 
 def test_cli_commands_run(tmp_path):
@@ -57,22 +64,31 @@ def test_cli_commands_run(tmp_path):
 
     commands = {
         "create_ndvi_raster": [
-            "spectralmatch", "create_ndvi_raster",
+            "spectralmatch",
+            "create_ndvi_raster",
             str(input_path),
             str(output_path_ndvi),
-            "3", "1"
+            "3",
+            "1",
         ],
         "threshold_raster": [
-            "spectralmatch", "threshold_raster",
-            "--input_images", str(input_path),
-            "--output_images", str(output_path_thresh),
-            "--threshold_math", "b1 > 0"
+            "spectralmatch",
+            "threshold_raster",
+            "--input_images",
+            str(input_path),
+            "--output_images",
+            str(output_path_thresh),
+            "--threshold_math",
+            "b1 > 0",
         ],
         "global_regression": [
-            "spectralmatch", "global_regression",
-            "--input_images", str(input_path),
-            "--output_images", str(output_path_global),
-        ]
+            "spectralmatch",
+            "global_regression",
+            "--input_images",
+            str(input_path),
+            "--output_images",
+            str(output_path_global),
+        ],
     }
 
     for name, (cmd, out_path) in {
