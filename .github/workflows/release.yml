@@ -36,7 +36,18 @@ jobs:
 
       - name: Generate changelog
         run: |
-          git-changelog --tag ${{ github.event.inputs.version || github.ref_name }} --template keepachangelog > TEMP_VERSION_CHANGELOG.md
+          CURRENT_TAG="${{ github.event.inputs.version || github.ref_name }}"
+          PREVIOUS_TAG=$(git tag --sort=-creatordate | grep -v "$CURRENT_TAG" | head -n 1 || true)
+
+          if [ -z "$PREVIOUS_TAG" ]; then
+            echo "No previous tag found. Using initial commit."
+            FROM_COMMIT=$(git rev-list --max-parents=0 HEAD)
+            git-changelog --from "$FROM_COMMIT" --to-tag "$CURRENT_TAG" --template keepachangelog > TEMP_VERSION_CHANGELOG.md
+          else
+            echo "Generating changelog from $PREVIOUS_TAG to $CURRENT_TAG"
+            git-changelog --from-tag "$PREVIOUS_TAG" --to-tag "$CURRENT_TAG" --template keepachangelog > TEMP_VERSION_CHANGELOG.md
+          fi
+
           git-changelog --template keepachangelog > TEMP_CHANGELOG.md
 
       - name: Switch to main and commit CHANGELOG.md
