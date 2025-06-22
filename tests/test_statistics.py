@@ -2,7 +2,7 @@ import pytest
 import os
 
 from spectralmatch import (
-    compare_image_spectral_profiles,
+    compare_before_after_all_images,
     compare_image_spectral_profiles_pairs,
     compare_spatial_spectral_difference_band_average,
 )
@@ -29,22 +29,6 @@ def spectral_test_rasters(tmp_path):
         image_dict[label] = str(raster_path)
 
     return image_dict, str(output_dir)
-
-
-# compare_image_spectral_profiles_pairs
-def test_compare_image_spectral_profiles(spectral_test_rasters):
-    image_dict, output_dir = spectral_test_rasters
-    output_path = os.path.join(output_dir, "spectral_profiles.png")
-
-    compare_image_spectral_profiles(
-        input_image_dict=image_dict,
-        output_figure_path=output_path,
-        title="Spectral Comparison",
-        xlabel="Bands",
-        ylabel="Median Value",
-    )
-
-    assert os.path.exists(output_path)
 
 
 # compare_image_spectral_profiles
@@ -85,6 +69,33 @@ def test_compare_spatial_spectral_difference_band_average(spectral_test_rasters)
         title="Difference Map",
         diff_label="Mean Band Abs Diff",
         subtitle="Test difference between A and B",
+    )
+
+    assert os.path.exists(output_path)
+
+
+def test_compare_before_after_all_images(spectral_test_rasters):
+    image_dict, output_dir = spectral_test_rasters
+    input_images_1 = list(image_dict.values())
+    input_images_2 = []
+
+    for before_path in input_images_1:
+        after_filename = os.path.basename(before_path).replace(".tif", "_after.tif")
+        after_path = os.path.join(os.path.dirname(before_path), after_filename)
+        create_dummy_raster(after_path, width=16, height=16, count=3, fill_value=180)
+        input_images_2.append(after_path)
+
+    image_names = [os.path.splitext(os.path.basename(p))[0] for p in input_images_1]
+    output_path = os.path.join(output_dir, "compare_before_after_all_images.png")
+
+    compare_before_after_all_images(
+        input_images_1=input_images_1,
+        input_images_2=input_images_2,
+        image_names=image_names,
+        output_figure_path=output_path,
+        title="Before vs After Grid",
+        ylabel_1="Original",
+        ylabel_2="Processed"
     )
 
     assert os.path.exists(output_path)
