@@ -10,7 +10,7 @@ from .mask.mask import (
 from .mask.utils_mask import threshold_raster, process_raster_values_to_vector_polygons
 from .statistics import (
     compare_image_spectral_profiles_pairs,
-    compare_image_spectral_profiles,
+    compare_before_after_all_images,
     compare_spatial_spectral_difference_band_average,
 )
 from .seamline.voronoi_center_seamline import voronoi_center_seamline
@@ -38,6 +38,6 @@ __all__ = [
     "align_rasters",
     # Statistics
     "compare_image_spectral_profiles_pairs",
-    "compare_image_spectral_profiles",
+    "compare_before_after_all_images",
     "compare_spatial_spectral_difference_band_average",
 ]

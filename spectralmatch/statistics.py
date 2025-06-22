@@ -3,67 +3,7 @@ import os
 import numpy as np
 import rasterio
 import matplotlib.pyplot as plt
-
-
-def compare_image_spectral_profiles(
-    input_image_dict,
-    output_figure_path,
-    title,
-    xlabel,
-    ylabel,
-):
-    """
-    Compares spectral profiles of multiple images by plotting median and interquartile ranges.
-
-    Args:
-        input_image_dict (dict): Mapping of labels to image file paths:
-            {
-            'Image A': '/image/a.tif',
-            'Image B': '/image/b.tif'
-            }
-        output_figure_path (str): Path to save the output plot.
-        title (str): Title of the plot.
-        xlabel (str): Label for the x-axis.
-        ylabel (str): Label for the y-axis.
-
-    Outputs:
-        Saves a spectral profile comparison figure to the specified path.
-    """
-    os.makedirs(os.path.dirname(output_figure_path), exist_ok=True)
-    plt.figure(figsize=(10, 6))
-    colors = itertools.cycle(plt.cm.tab10.colors)
-    spectral_profiles = []
-    labels = []
-
-    for label, image_path in input_image_dict.items():
-        try:
-            with rasterio.open(image_path) as src:
-                image_data = src.read()  # shape: (bands, height, width)
-        except Exception as e:
-            print(f"Failed to open {image_path}: {e}")
-            continue
-
-        bands, height, width = image_data.shape
-        reshaped = image_data.reshape(bands, -1)
-        median = np.median(reshaped, axis=1)
-        q25, q75 = np.percentile(reshaped, [25, 75], axis=1)
-        spectral_profiles.append((median, q25, q75))
-        labels.append(label)
-
-    for i, (median, q25, q75) in enumerate(spectral_profiles):
-        color = next(colors)
-        x = range(1, len(median) + 1)
-        plt.plot(x, median, color=color, label=labels[i])
-        plt.fill_between(x, q25, q75, color=color, alpha=0.3)
-
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
-    plt.title(title)
-    plt.legend()
-    plt.grid(True)
-    plt.savefig(output_figure_path, dpi=300)
-    plt.close()
-    print(f"Saved: {output_figure_path}")
+import matplotlib.gridspec as gridspec
 
 
 def compare_image_spectral_profiles_pairs(
@@ -141,40 +81,41 @@ def compare_spatial_spectral_difference_band_average(
     title: str,
     diff_label: str,
     subtitle: str,
+    scale: tuple = None,
 ):
     """
-    Computes and visualizes the average per-band spectral difference between two coregistered, equal size images.
+    Computes and visualizes the mean per-pixel spectral difference between two coregistered, equal-size images.
 
     Args:
-        input_images (list): List of two image file paths to compare.
+        input_images (list): List of two image file paths [before, after].
         output_image_path (str): Path to save the resulting difference image (PNG).
         title (str): Title for the plot.
-        diff_label (str): Label for the colorbar indicating the difference metric.
-        subtitle (str): Optional subtitle to display below the plot.
-    """
+        diff_label (str): Label for the colorbar.
+        subtitle (str): Subtitle text shown below the image.
+        scale (tuple, optional): Tuple (vmin, vmax) to fix the color scale. Centered at 0.
 
+    Raises:
+        ValueError: If the input list doesn't contain exactly two image paths, or shapes mismatch.
+    """
     if len(input_images) != 2:
         raise ValueError("input_images must be a list of exactly two image paths.")
 
     path1, path2 = input_images
-    name1 = os.path.splitext(os.path.basename(path1))[0]
-    name2 = os.path.splitext(os.path.basename(path2))[0]
 
     with rasterio.open(path1) as src1, rasterio.open(path2) as src2:
-        img1 = src1.read()
-        img2 = src2.read()
+        img1 = src1.read().astype("float32")
+        img2 = src2.read().astype("float32")
         nodata = src1.nodata
 
         if img1.shape != img2.shape:
             raise ValueError("Images must have the same dimensions.")
 
-        diff = np.abs(img2 - img1).astype("float32")
+        diff = img2 - img1
 
         if nodata is not None:
-            mask = img1[0] != nodata
-            for b in range(1, img1.shape[0]):
-                mask &= img1[b] != nodata
-                mask &= img2[b] != nodata
+            mask = np.full(diff.shape[1:], True)
+            for b in range(diff.shape[0]):
+                mask &= (img1[b] != nodata) & (img2[b] != nodata)
             diff[:, ~mask] = np.nan
 
         with np.errstate(invalid="ignore"):
@@ -183,19 +124,110 @@ def compare_spatial_spectral_difference_band_average(
             mean_diff[valid_mask] = np.nanmean(diff[:, valid_mask], axis=0)
 
         fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
-        im = ax.imshow(mean_diff, cmap="coolwarm", interpolation="nearest")
+
+        vmin, vmax = scale if scale else (np.nanmin(mean_diff), np.nanmax(mean_diff))
+        max_abs = max(abs(vmin), abs(vmax))
+        im = ax.imshow(mean_diff, cmap="coolwarm", vmin=-max_abs, vmax=max_abs)
 
         cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
         cbar.set_label(diff_label)
 
         ax.set_title(title, fontsize=14, pad=12)
         if subtitle:
-            ax.text(
-                0.5, -0.1, subtitle, fontsize=10, ha="center", transform=ax.transAxes
-            )
+            ax.text(0.5, -0.1, subtitle, fontsize=10, ha="center", transform=ax.transAxes)
 
         ax.axis("off")
         plt.savefig(output_image_path, dpi=300, bbox_inches="tight")
         plt.close()
 
         print(f"Saved: {output_image_path}")
+
+
+def compare_before_after_all_images(
+    input_images_1: list,
+    input_images_2: list,
+    output_figure_path: str,
+    title: str,
+    ylabel_1: str,
+    ylabel_2: str,
+    image_names: list = None,
+    ):
+    """
+    Creates a 2-row grid comparing before and after images with per-band contrast stretch and nodata transparency.
+
+    Args:
+        input_images_1 (list): Paths to "before" images (top row).
+        input_images_2 (list): Paths to "after" images (bottom row).
+        output_figure_path (str): File path to save the output figure.
+        image_names (list, optional): Column titles. Must match image count if provided.
+        title (str): Figure title.
+        ylabel_1 (str): Label for the top row.
+        ylabel_2 (str): Label for the bottom row.
+
+    Raises:
+        AssertionError: If input lengths mismatch or if image_names is invalid.
+
+    Saves:
+        A PNG figure with transparent nodata and matched image pairs.
+    """
+
+    assert len(input_images_1) == len(input_images_2), "Image lists must be the same length."
+    if image_names:
+        assert len(image_names) == len(input_images_1), "image_names must match image count."
+
+    import matplotlib.pyplot as plt
+    import matplotlib.gridspec as gridspec
+    import numpy as np
+    import os
+    import rasterio
+
+    os.makedirs(os.path.dirname(output_figure_path), exist_ok=True)
+    num_images = len(input_images_1)
+    fig = plt.figure(figsize=(5 * num_images, 10))
+    gs = gridspec.GridSpec(2, num_images + 1, width_ratios=[0.05] + [1] * num_images)
+
+    for col_idx, (path1, path2) in enumerate(zip(input_images_1, input_images_2)):
+        for row_idx, path in enumerate([path1, path2]):
+            ax = fig.add_subplot(gs[row_idx, col_idx + 1])  # shift right by 1 column
+
+            with rasterio.open(path) as src:
+                nodata = src.nodata
+                img = src.read([1, 2, 3]) if src.count >= 3 else np.repeat(src.read(1)[np.newaxis, ...], 3, axis=0)
+                img = img.astype("float32")
+
+                mask = np.full(img.shape[1:], False)
+                if nodata is not None:
+                    for b in range(img.shape[0]):
+                        mask |= img[b] == nodata
+
+                for b in range(img.shape[0]):
+                    valid = img[b][~mask]
+                    if valid.size > 0:
+                        vmin, vmax = np.percentile(valid, (2, 98))
+                        img[b] = np.clip((img[b] - vmin) / (vmax - vmin), 0, 1)
+                    else:
+                        img[b] = 0
+
+                img = img.transpose(1, 2, 0)
+                alpha = (~mask).astype("float32")
+                rgba = np.dstack((img, alpha))
+
+                ax.imshow(rgba)
+                if row_idx == 0 and image_names:
+                    ax.set_title(image_names[col_idx])
+                ax.axis("off")
+
+    # Add vertical row labels
+    for i, label in enumerate([ylabel_1, ylabel_2]):
+        ax = fig.add_subplot(gs[i, 0])
+        ax.set_ylabel(label, fontsize=12, rotation=90, labelpad=10, va='center')
+        ax.tick_params(left=False, labelleft=False)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_frame_on(False)
+
+    fig.suptitle(title, fontsize=16)
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.savefig(output_figure_path, dpi=300)
+    plt.close()
+    print(f"Saved: {output_figure_path}")
