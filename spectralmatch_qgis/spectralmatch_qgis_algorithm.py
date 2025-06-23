@@ -364,7 +364,7 @@ class InstallSpectralmatchAlgorithm(QgsProcessingAlgorithm):
         return 'install_spectralmatch'
 
     def displayName(self):
-        return self.tr('Install spectralmatch python library')
+        return self.tr('Attempt auto install of spectralmatch python library (shell)')
 
     def group(self):
         return self.tr('Setup')
@@ -413,7 +413,7 @@ class UninstallSpectralmatchAlgorithm(QgsProcessingAlgorithm):
         return 'uninstall_spectralmatch'
 
     def displayName(self):
-        return self.tr('Uninstall spectralmatch python library')
+        return self.tr('Attempt auto uninstall of spectralmatch python library (shell)')
 
     def group(self):
         return self.tr('Setup')
@@ -429,3 +429,69 @@ class UninstallSpectralmatchAlgorithm(QgsProcessingAlgorithm):
 
     def createInstance(self):
         return UninstallSpectralmatchAlgorithm()
+
+class ManualPipCommand(QgsProcessingAlgorithm):
+    PYTHON_EXEC = "PYTHON_EXEC"
+    COMMAND = "COMMAND"
+
+    def initAlgorithm(self, config=None):
+        self.addParameter(
+            QgsProcessingParameterString(
+                self.PYTHON_EXEC,
+                "Python interpreter path (may need to change to the python interpreter e.g. '/absolute/location/of/qgis/lib/python')",
+                defaultValue=sys.executable
+            )
+        )
+        self.addParameter(
+            QgsProcessingParameterString(
+                self.COMMAND,
+                "Command (e.g. -m pip install spectralmatch)",
+                defaultValue="-m pip install spectralmatch"
+            )
+        )
+
+    def processAlgorithm(self, parameters, context, feedback):
+        python_path = parameters[self.PYTHON_EXEC]
+        command_args = parameters[self.COMMAND]
+
+        cmd = f'"{python_path}" {command_args}'
+        feedback.pushInfo(f"Running: {cmd}")
+
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                shell=True,
+                text=True,
+            )
+            for line in process.stdout:
+                feedback.pushInfo(line.strip())
+            process.wait()
+            if process.returncode != 0:
+                raise QgsProcessingException(f"Command failed with code {process.returncode}")
+        except Exception as e:
+            raise QgsProcessingException(f"Execution error: {e}")
+
+        return {}
+
+    def name(self):
+        return "manual_pip_command"
+
+    def displayName(self):
+        return self.tr("Manual Install/Uninstall via pip python command")
+
+    def group(self):
+        return self.tr("Setup")
+
+    def groupId(self):
+        return "setup"
+
+    def shortHelpString(self):
+        return "Manually run a pip install/uninstall command using a specified Python interpreter."
+
+    def createInstance(self):
+        return ManualPipCommand()
+
+    def tr(self, string):
+        return QCoreApplication.translate("Processing", string)
