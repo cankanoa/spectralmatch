@@ -95,7 +95,8 @@ qgis-headers:
 
 qgis-build: qgis-headers
 	@echo "Creating plugin zip..."
-	zip -r spectralmatch_qgis.zip spectralmatch_qgis/ -x "*.DS_Store" "*__MACOSX*"
+	zip -r spectralmatch_qgis.zip spectralmatch_qgis/ \
+	  -x "*.DS_Store" "*__MACOSX*" "*/__pycache__/*" "*/__pycache__"
 
 qgis-deploy:
 	python spectralmatch_qgis/plugin_upload.py spectralmatch_qgis.zip

@@ -10,7 +10,7 @@ version=0.1
 author=Kanoa Lindiwe LLC
 email=cankanoa@gmail.com
 
-about=spectralmatch provides a Python library and QGIS plugin with multiple algorythms to perform Relative Radiometric Normalization (RRN). It also includes utilities for generating seamlines, cloud masks, Pseudo-Invariant Features, statistics, preprocessing, and more.
+about=spectralmatch provides a Python library, command line interface, and QGIS plugin with multiple algorithms to perform Relative Radiometric Normalization (RRN). It also includes utilities for generating seamlines, cloud masks, Pseudo-Invariant Features, statistics, preprocessing, and more. Explore this toolkit’s features at https://spectralmatch.github.io/spectralmatch/. To install in QGIS, the spectralmatch Python library is required, for installation instructions, see https://spectralmatch.github.io/spectralmatch/installation/.
 
 tracker=https://github.com/spectralmatch/spectralmatch/issues
 repository=https://github.com/spectralmatch/spectralmatch
