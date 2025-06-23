@@ -2,17 +2,18 @@
 
 ---
 
-## Installation as QGIS Plugin for Easy GUI Interface
-
-### 1. [Download](https://qgis.org/download/) and install QGIS
-### 2.	Open QGIS
-### 3.	Go to Plugins → Manage and Install Plugins…
-### 4.	Find spectralmatch in the list, install, and enable it
-### 5.	Find the plugin in the Processing Toolbox
+## Installation as a QGIS Plugin
+### 1. Get QGIS
+[Download](https://qgis.org/download/) and install QGIS.
+> This plugin requires python>=3.10. QGIS ships with different versions of Python, to check, in the QGIS menu, go to QGIS>About gis. If your version is out of date you can use `conda install qgis` to create a containerized version of QGIS and then `qgis` to start the program.
+### 2. Install spactalmatch plugin
+- Go to Plugins → Manage and Install Plugins…
+- Find spectralmatch in the list, install, and enable it
+- Find the plugin in the Processing Toolbox
 
 ---
 
-## Installation as a Python Library for use in Code (Recommended)
+## Installation as a Python Library and CLI
 
 ### 1. System requirements
 Before installing, ensure you have the following system-level prerequisites:
@@ -36,13 +37,9 @@ You can automatically install the library via [PyPI](https://pypi.org/). (this m
 pip install spectralmatch
 ```
 
-### 3. Run an example and modify for your use (optional)
-
-Example scripts are provided to verify a successful installation and help you get started quickly in the repository at [`/docs/examples`](https://github.com/spectralmatch/spectralmatch/blob/main/docs/examples/) and downloadable via this [`link`](https://download-directory.github.io/?url=https://github.com/spectralmatch/spectralmatch/tree/main/docs/examples&filename=spectralmatch_examples).
-
 ---
 
-## Installation as Python Code for Development and Customization
+## Installation from Source
 
 ### 1. Clone the Repository
 ```bash
@@ -65,7 +62,7 @@ conda create -n spectralmatch python=3.10 "gdal=3.10.2" "proj>=9.3" -c conda-for
 conda activate spectralmatch
 ```
 
-### 3. Install Dependancies (Optional Dev and Docs Dependancies)
+### 3. Install Dependancies
 The `pyproject.toml` defines **core** dependancies to run the library and optional **dev**, and **docs** dependancies.
 
 ```bash

@@ -4,6 +4,7 @@
 [![codecov](https://codecov.io/gh/spectralmatch/spectralmatch/graph/badge.svg?token=03JTHNK76C)](https://codecov.io/gh/spectralmatch/spectralmatch)
 [![Open in Cloud Shell](https://img.shields.io/badge/Launch-Google_Cloud_Shell-blue?logo=googlecloud)](https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/spectralmatch/spectralmatch&cloudshell_working_dir=.)
 [![📋 Copy LLM Prompt](https://img.shields.io/badge/📋_Copy-LLM_Prompt-brightgreen)](https://spectralmatch.github.io/spectralmatch/llm_prompt)
+[![PyPI version](https://img.shields.io/pypi/v/spectralmatch.svg)](https://pypi.org/project/spectralmatch/)
 
 ## Overview
 
@@ -59,20 +60,69 @@ However, global correction alone cannot capture intra-image variability so a sec
 - **Local Adjustments:** Block-level color differences result from the global application of adjustments.
 
 ---
-## Quick Installation ([Other methods](https://spectralmatch.github.io/spectralmatch/installation/))
+## Installation [(Detailed methods)](https://spectralmatch.github.io/spectralmatch/installation/)
 
 ### Installation as a QGIS Plugin
-Install the spectralmatch plugin in [QGIS](https://qgis.org/download/) and use it in the Processing Toolbox.
+Install the spectralmatch plugin in QGIS and use it in the Processing Toolbox.
 
 ### Installation as a Python Library and CLI
 
-Before installing, ensure you have the following system-level prerequisites: `Python ≥ 3.10`, `pip`, `PROJ ≥ 9.3`, and `GDAL = 3.10.2`. Use this command to install the library:
+Ensure you have the following system-level prerequisites: `Python ≥ 3.10`, `pip`, `PROJ ≥ 9.3`, and `GDAL = 3.10.2`. Use this command to install the library:
 
 
 ```bash
 pip install spectralmatch
 ```
 
+---
+
+## Usage
+
+Example scripts and sample data are provided to verify a successful installation and help you get started quickly in the repository at [`/docs/examples`](https://github.com/spectralmatch/spectralmatch/blob/main/docs/examples/) and downloadable [here](https://download-directory.github.io/?url=https://github.com/spectralmatch/spectralmatch/tree/main/docs/examples&filename=spectralmatch_examples).
+
+This is an example mosaic workflow using folders for each step:
+
+```python
+working_directory = "/path/to/working/directory"
+input_folder = os.path.join(working_directory, "Input")
+global_folder = os.path.join(working_directory, "GlobalMatch")
+local_folder = os.path.join(working_directory, "LocalMatch")
+aligned_folder = os.path.join(working_directory, "Aligned")
+clipped_folder = os.path.join(working_directory, "Clipped")
+
+global_regression(
+    input_images=input_folder,
+    output_images=global_folder,
+)
+
+local_block_adjustment(
+    input_images=global_folder,
+    output_images=local_folder,
+)
+
+align_rasters(
+    input_images=local_folder,
+    output_images=aligned_folder,
+    tap=True,
+)
+
+voronoi_center_seamline(
+    input_images=aligned_folder,
+    output_mask=os.path.join(working_directory, "ImageMasks.gpkg"),
+    image_field_name="image",
+)
+
+mask_rasters(
+    input_images=aligned_folder,
+    output_images=clipped_folder,
+    vector_mask=("include", os.path.join(working_directory, "ImageMasks.gpkg"), "image"),
+)
+
+merge_rasters(
+    input_images=clipped_folder,
+    output_image_path=os.path.join(working_directory, "MergedImage.tif"),
+)
+```
 ---
 
 ## Documentation
