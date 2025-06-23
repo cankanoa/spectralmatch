@@ -81,7 +81,8 @@ clean:
 	       $(MAKEFILE_DIR)site \
 	       $(MAKEFILE_DIR)spectralmatch_qgis/help/build \
 	       $(MAKEFILE_DIR)spectralmatch_qgis/function_headers.json \
-		   $(MAKEFILE_DIR)spectralmatch_qgis.zip
+		   $(MAKEFILE_DIR)spectralmatch_qgis.zip \
+		   $(MAKEFILE_DIR)docs/images/Icon.afdesign
 	find $(MAKEFILE_DIR)docs/examples/data_landsat -mindepth 1 ! -path "*/Input*" -exec rm -rf {} +
 	find $(MAKEFILE_DIR)docs/examples/data_worldview -mindepth 1 ! -path "*/Input*" -exec rm -rf {} +
 
