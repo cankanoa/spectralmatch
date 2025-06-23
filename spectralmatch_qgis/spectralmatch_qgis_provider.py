@@ -33,7 +33,7 @@ __revision__ = '$Format:%H$'
 from qgis.PyQt.QtGui import QIcon
 import os
 from qgis.core import QgsProcessingProvider
-from .spectralmatch_qgis_algorithm import make_algorithm_class, load_function_headers
+from .spectralmatch_qgis_algorithm import make_algorithm_class, load_function_headers, InstallSpectralmatchAlgorithm, UninstallSpectralmatchAlgorithm
 
 class spectralmatchProvider(QgsProcessingProvider):
 
@@ -58,6 +58,8 @@ class spectralmatchProvider(QgsProcessingProvider):
             algo_cls = make_algorithm_class(func["function"])
             self.addAlgorithm(algo_cls())
         # self.addAlgorithm(MyOtherAlgorithm())
+        self.addAlgorithm(InstallSpectralmatchAlgorithm())
+        self.addAlgorithm(UninstallSpectralmatchAlgorithm())
 
     def id(self):
         """

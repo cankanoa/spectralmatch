@@ -93,18 +93,5 @@ qgis-headers:
 	PYTHONPATH=. $(GENERATE_HEADERS)
 
 qgis-build: qgis-headers
-	@echo "---------------------------"
-	@echo "Temporarily committing function_headers.json..."
-	@echo "---------------------------"
-	git add -f spectralmatch_qgis/function_headers.json
-	git commit -m "temp: include function_headers.json in archive" --no-verify
-
-	@echo "---------------------------"
-	@echo "Creating plugin zip with function_headers.json..."
-	@echo "---------------------------"
-	git archive --prefix=$(QGISPLUGINNAME)/ -o $(QGISPLUGINNAME).zip HEAD:spectralmatch_qgis
-
-	@echo "---------------------------"
-	@echo "Cleaning up temp commit..."
-	@echo "---------------------------"
-	git reset --soft HEAD~1
+	@echo "Creating plugin zip..."
+	zip -r spectralmatch_qgis.zip spectralmatch_qgis/ -x "*.DS_Store" "*__MACOSX*"

@@ -32,6 +32,7 @@ __revision__ = '$Format:%H$'
 
 import ast
 import os
+import sys
 from pathlib import Path
 import json
 import subprocess
@@ -44,6 +45,7 @@ from qgis.core import (
     QgsProcessingParameterFeatureSink,
     QgsProcessingParameterString,
     QgsProcessingParameterFile,
+    QgsProcessingException,
    )
 
 
@@ -324,9 +326,106 @@ def normalize_cli_value(value: str) -> str:
     if stripped.lower() in {"none", "", "null"}:
         return "None"
 
-    # Try to parse literals (bools, numbers, tuples, lists)
     try:
         parsed = ast.literal_eval(stripped)
         return repr(parsed)
     except (ValueError, SyntaxError):
         return stripped
+
+
+class InstallSpectralmatchAlgorithm(QgsProcessingAlgorithm):
+    def initAlgorithm(self, config=None):
+        pass  # No user input needed
+
+    def processAlgorithm(self, parameters, context, feedback):
+        cmd = "pip install spectralmatch"
+        feedback.pushInfo(f"Running: {cmd}")
+
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                shell=True,
+                text=True
+            )
+            for line in process.stdout:
+                feedback.pushConsoleInfo(line.strip())
+            process.stdout.close()
+            return_code = process.wait()
+            if return_code != 0:
+                raise QgsProcessingException(f"Command failed with return code {return_code}")
+        except Exception as e:
+            raise QgsProcessingException(str(e))
+
+        return {}
+
+    def name(self):
+        return 'install_spectralmatch'
+
+    def displayName(self):
+        return self.tr('Install spectralmatch python library')
+
+    def group(self):
+        return self.tr('Setup')
+
+    def groupId(self):
+        return 'setup'
+
+    def shortHelpString(self):
+        return 'Installs the spectralmatch library into the QGIS environment using pip.'
+
+    def tr(self, string):
+        return QCoreApplication.translate('Processing', string)
+
+    def createInstance(self):
+        return InstallSpectralmatchAlgorithm()
+
+
+class UninstallSpectralmatchAlgorithm(QgsProcessingAlgorithm):
+    def initAlgorithm(self, config=None):
+        pass  # No user input needed
+
+    def processAlgorithm(self, parameters, context, feedback):
+        cmd = "pip uninstall -y spectralmatch"
+        feedback.pushInfo(f"Running: {cmd}")
+
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                shell=True,
+                text=True
+            )
+            for line in process.stdout:
+                feedback.pushConsoleInfo(line.strip())
+            process.stdout.close()
+            return_code = process.wait()
+            if return_code != 0:
+                raise QgsProcessingException(f"Command failed with return code {return_code}")
+        except Exception as e:
+            raise QgsProcessingException(str(e))
+
+        return {}
+
+    def name(self):
+        return 'uninstall_spectralmatch'
+
+    def displayName(self):
+        return self.tr('Uninstall spectralmatch python library')
+
+    def group(self):
+        return self.tr('Setup')
+
+    def groupId(self):
+        return 'setup'
+
+    def shortHelpString(self):
+        return 'Uninstalls the spectralmatch library from the QGIS environment using pip.'
+
+    def tr(self, string):
+        return QCoreApplication.translate('Processing', string)
+
+    def createInstance(self):
+        return UninstallSpectralmatchAlgorithm()
