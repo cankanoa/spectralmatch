@@ -29,16 +29,16 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Install git-changelog
+      - name: Install pip tools
         run: |
           python -m pip install --upgrade pip
-          pip install git-changelog
+          pip install build git-changelog
 
       - name: Generate changelog
         run: |
           CURRENT_TAG="${{ github.event.inputs.version || github.ref_name }}"
           PREVIOUS_TAG=$(git tag --sort=creatordate | grep -B9999 "$CURRENT_TAG" | head -n 1 || true)
-          
+
           if [ -z "$PREVIOUS_TAG" ] || [ "$PREVIOUS_TAG" = "$CURRENT_TAG" ]; then
             echo "No previous tag found. Using initial commit."
             FROM_COMMIT=$(git rev-list --max-parents=0 HEAD)
@@ -61,10 +61,21 @@ jobs:
           git commit -m "chore: update changelog for ${{ github.event.inputs.version || github.ref_name }}" || echo "No changes to commit"
           git push origin main
 
-      - name: Create GitHub Release
+      - name: Build Python package
+        run: |
+          python -m build --sdist --wheel --outdir dist/
+
+      - name: Build QGIS plugin
+        run: make qgis-build
+
+      - name: Create GitHub Release with assets
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.event.inputs.version || github.ref_name }}
           body_path: TEMP_VERSION_CHANGELOG.md
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            spectralmatch_qgis.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
