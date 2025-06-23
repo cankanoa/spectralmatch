@@ -6,10 +6,13 @@
 ### 1. Get QGIS
 [Download](https://qgis.org/download/) and install QGIS.
 > This plugin requires python>=3.10. QGIS ships with different versions of Python, to check, in the QGIS menu, go to QGIS>About gis. If your version is out of date you can use `conda install qgis` to create a containerized version of QGIS and then `qgis` to start the program.
-### 2. Install spactalmatch plugin
+### 2. Install spactalmatch QGIS plugin
 - Go to Plugins → Manage and Install Plugins…
 - Find spectralmatch in the list, install, and enable it
 - Find the plugin in the Processing Toolbox
+
+### 3. Install spectralmatch Python library
+Use the tools in the `setup` toolbox to install the spectralmatch Python library or manually do it. You must install the Python library into the QGIS Python interpreter for the tool to work.
 
 ---
 
@@ -70,5 +73,3 @@ pip install . # normal dependencies
 pip install -e ".[dev]"   # developer dependencies
 pip install -e ".[docs]"  # documentation dependencies
 ```
-
-### 4. Read the [Contributing Guide](https://spectralmatch.github.io/spectralmatch/contributing/) if you aim to contribute
