@@ -6,7 +6,7 @@
 name=spectralmatch
 qgisMinimumVersion=3.0
 description=Performant Relative Radiometric Normalization toolkit with Pseudo-Invariant Features, seamlines, and other utilities for mosaics and time series
-version=0.1
+version=1.0.2
 author=Kanoa Lindiwe LLC
 email=cankanoa@gmail.com
 

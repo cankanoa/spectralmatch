@@ -94,9 +94,11 @@ qgis-headers:
 	PYTHONPATH=. $(GENERATE_HEADERS)
 
 qgis-build: qgis-headers
+	@echo "Removing __pycache__..."
+	rm -rf spectralmatch_qgis/__pycache__ spectralmatch_qgis/test/__pycache__
 	@echo "Creating plugin zip..."
 	zip -r spectralmatch_qgis.zip spectralmatch_qgis/ \
-	  -x "*.DS_Store" "*__MACOSX*" "*/__pycache__/*" "*/__pycache__"
+	  -x "*.DS_Store" "*__MACOSX*"
 
 qgis-deploy:
 	python spectralmatch_qgis/plugin_upload.py spectralmatch_qgis.zip
