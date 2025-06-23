@@ -1,7 +1,7 @@
 import inspect
 import json
 import importlib
-from pathlib import Path
+import os
 from types import FunctionType
 from typing import List
 
@@ -70,7 +70,9 @@ def generate_function_headers(
     pkg = importlib.import_module(package_name)
     walk_module(pkg, package_name)
     if not output: raise RuntimeError(f"No function headers found in package '{package_name}'. Check exclusions, installation, or package contents.")
-    Path(output_file).write_text(json.dumps(output, indent=2), encoding="utf-8")
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(output, f, indent=2)
     return output_file
 
 

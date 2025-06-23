@@ -29,10 +29,11 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Install pip tools
+      - name: Install pip tools and library
         run: |
           python -m pip install --upgrade pip
           pip install build git-changelog
+          pip install .
 
       - name: Generate changelog
         run: |
