@@ -6,20 +6,6 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
 <!-- insertion marker -->
-## [v1.0.2](https://github.com/spectralmatch/spectralmatch/releases/tag/v1.0.2) - 2025-06-23
-
-<small>[Compare with v1.0.1](https://github.com/spectralmatch/spectralmatch/compare/v1.0.1...v1.0.2)</small>
-
-### Added
-
-- Add Icon.afdesign to Makefile clean targets ([b34cd34](https://github.com/spectralmatch/spectralmatch/commit/b34cd3412713b8def6b4fa65f69976d70c7a94e2) by cankanoa).
-- Add ManualPipCommand algorithm for custom pip commands ([de0bb66](https://github.com/spectralmatch/spectralmatch/commit/de0bb6632c757b8ff719663ef9eb32d5eb2cf57a) by cankanoa).
-- Add install/uninstall actions for spectralmatch in QGIS plugin ([0deabc1](https://github.com/spectralmatch/spectralmatch/commit/0deabc16bb93cdfdb74e7e40e55eb62396bc1d59) by cankanoa).
-
-### Removed
-
-- Remove unused files, update version, and add license ([88791a2](https://github.com/spectralmatch/spectralmatch/commit/88791a2949655e620a1096d4586188dfca2b8f2e) by cankanoa).
-
 ## [v1.0.1](https://github.com/spectralmatch/spectralmatch/releases/tag/v1.0.1) - 2025-06-23
 
 <small>[Compare with v1.0.0](https://github.com/spectralmatch/spectralmatch/compare/v1.0.0...v1.0.1)</small>
