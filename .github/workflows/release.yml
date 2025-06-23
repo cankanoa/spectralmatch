@@ -21,8 +21,14 @@ jobs:
       - name: Check out the repository at the tag
         uses: actions/checkout@v4
         with:
-          ref: refs/tags/${{ github.event.inputs.version || github.ref_name }}
           fetch-depth: 0
+          ref: ${{ github.event.inputs.version || github.ref_name }}
+
+      - name: Ensure correct commit is checked out
+        shell: bash -l {0}
+        run: |
+          git fetch --tags
+          git checkout ${{ github.event.inputs.version || github.ref_name }}
 
       - name: Install Miniconda
         uses: conda-incubator/setup-miniconda@v3
@@ -47,19 +53,9 @@ jobs:
         run: |
           conda activate spectralmatch_env
           CURRENT_TAG="${{ github.event.inputs.version || github.ref_name }}"
+          PREVIOUS_TAG=$(git tag --sort=creatordate | grep -B9999 "$CURRENT_TAG" | head -n 1 || true)
 
-          # Get all tags sorted by semantic version (newest first)
-          ALL_TAGS=($(git tag --sort=-v:refname))
-          PREVIOUS_TAG=""
-
-          for i in "${!ALL_TAGS[@]}"; do
-            if [[ "${ALL_TAGS[$i]}" == "$CURRENT_TAG" ]] && [[ $((i+1)) -lt ${#ALL_TAGS[@]} ]]; then
-              PREVIOUS_TAG="${ALL_TAGS[$((i+1))]}"
-              break
-            fi
-          done
-
-          if [ -z "$PREVIOUS_TAG" ]; then
+          if [ -z "$PREVIOUS_TAG" ] || [ "$PREVIOUS_TAG" = "$CURRENT_TAG" ]; then
             echo "No previous tag found. Using initial commit."
             FROM_COMMIT=$(git rev-list --max-parents=0 HEAD)
             git-changelog -F "$FROM_COMMIT..$CURRENT_TAG" --template keepachangelog > TEMP_VERSION_CHANGELOG.md
