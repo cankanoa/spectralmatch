@@ -41,7 +41,7 @@ However, global correction alone cannot capture intra-image variability so a sec
 
 
 ![Histogram matching graph](./images/matching_histogram.png)
-*Shows the average spectral profile of two WorldView 3 images before and after global to local matching.*
+*Mean spectral profiles of five cloud masked Landsat images before and after applying Normalized Difference Vegetation Index masking, global regression, and local block adjustment with spectralmatch.*
 
 #### Assumptions
 
