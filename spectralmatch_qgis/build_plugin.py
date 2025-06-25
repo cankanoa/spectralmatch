@@ -9,7 +9,7 @@ def generate_function_headers(
     package_name="spectralmatch",
     output_file="spectralmatch_qgis/function_headers.json",
     exclude_functions: List[str] = None,
-    exclude_modules: List[str] = None,
+    exclude_modules: List[str] = ["spectralmatch.handlers"],
     exclude_internal_functions: bool = True
 ):
     exclude_functions = set(exclude_functions or [])
@@ -76,7 +76,43 @@ def generate_function_headers(
     return output_file
 
 
+def generate_requirements_txt(
+    input_toml_path="pyproject.toml",
+    output_txt_path="spectralmatch_qgis/requirements.txt",
+):
+    with open(input_toml_path, "r") as f:
+        lines = f.readlines()
+
+    in_project_section = False
+    in_dependencies_list = False
+    deps = []
+
+    for line in lines:
+        stripped = line.strip()
+
+        if stripped.startswith("[project]"):
+            in_project_section = True
+            continue
+        elif stripped.startswith("[") and not stripped.startswith("[project."):
+            in_project_section = False
+            in_dependencies_list = False
+            continue
+
+        if in_project_section and stripped.startswith("dependencies"):
+            in_dependencies_list = True
+            continue
+
+        if in_dependencies_list:
+            if stripped.startswith("]") or stripped.startswith("["):
+                break
+            if stripped:
+                dep = stripped.strip().rstrip(",").strip('"').strip("'")
+                deps.append(dep)
+
+    with open(output_txt_path, "w") as f:
+        for dep in deps:
+            f.write(dep + "\n")
+
 if __name__ == "__main__":
-    generate_function_headers(
-        exclude_modules=["spectralmatch.handlers"]
-    )
+    generate_function_headers()
+    generate_requirements_txt()

@@ -25,17 +25,10 @@
 __author__ = 'Kanoa Lindiwe LLC'
 __date__ = '2025-06-15'
 __copyright__ = '(C) 2025 by Kanoa Lindiwe LLC'
-
-# This will get replaced with a git SHA1 when you do a git archive
-
 __revision__ = '$Format:%H$'
 
-import ast
-import os
-import sys
-from pathlib import Path
-import json
 import subprocess
+import os
 from qgis.PyQt.QtCore import QCoreApplication
 from qgis.core import (
     QgsProcessing,
@@ -47,126 +40,7 @@ from qgis.core import (
     QgsProcessingParameterFile,
     QgsProcessingException,
    )
-
-
-# class spectralmatchAlgorithm(QgsProcessingAlgorithm):
-#     """
-#     This is an example algorithm that takes a vector layer and
-#     creates a new identical one.
-#
-#     It is meant to be used as an example of how to create your own
-#     algorithms and explain methods and variables used to do it. An
-#     algorithm like this will be available in all elements, and there
-#     is not need for additional work.
-#
-#     All Processing algorithms should extend the QgsProcessingAlgorithm
-#     class.
-#     """
-#
-#     # Constants used to refer to parameters and outputs. They will be
-#     # used when calling the algorithm from another algorithm, or when
-#     # calling from the QGIS console.
-#
-#     OUTPUT = 'OUTPUT'
-#     INPUT = 'INPUT'
-#
-#     def initAlgorithm(self, config):
-#         """
-#         Here we define the inputs and output of the algorithm, along
-#         with some other properties.
-#         """
-#
-#         self.addParameter(
-#             QgsProcessingParameterFeatureSource(
-#                 self.INPUT,
-#                 self.tr('Input layer'),
-#                 [QgsProcessing.TypeVectorAnyGeometry]
-#             )
-#         )
-#
-#         self.addParameter(
-#             QgsProcessingParameterFeatureSink(
-#                 self.OUTPUT,
-#                 self.tr('Output layer')
-#             )
-#         )
-#
-#     def processAlgorithm(self, parameters, context, feedback):
-#         """
-#         Here is where the processing itself takes place.
-#         """
-#
-#         # Retrieve the feature source and sink. The 'dest_id' variable is used
-#         # to uniquely identify the feature sink, and must be included in the
-#         # dictionary returned by the processAlgorithm function.
-#         source = self.parameterAsSource(parameters, self.INPUT, context)
-#         (sink, dest_id) = self.parameterAsSink(parameters, self.OUTPUT,
-#                 context, source.fields(), source.wkbType(), source.sourceCrs())
-#
-#         # Compute the number of steps to display within the progress bar and
-#         # get features from source
-#         total = 100.0 / source.featureCount() if source.featureCount() else 0
-#         features = source.getFeatures()
-#
-#         for current, feature in enumerate(features):
-#             # Stop the algorithm if cancel button has been clicked
-#             if feedback.isCanceled():
-#                 break
-#
-#             # Add a feature in the sink
-#             sink.addFeature(feature, QgsFeatureSink.FastInsert)
-#
-#             # Update the progress bar
-#             feedback.setProgress(int(current * total))
-#
-#         # Return the results of the algorithm. In this case our only result is
-#         # the feature sink which contains the processed features, but some
-#         # algorithms may return multiple feature sinks, calculated numeric
-#         # statistics, etc. These should all be included in the returned
-#         # dictionary, with keys matching the feature corresponding parameter
-#         # or output names.
-#         return {self.OUTPUT: dest_id}
-#
-#     def name(self):
-#         """
-#         Returns the algorithm name, used for identifying the algorithm. This
-#         string should be fixed for the algorithm, and must not be localised.
-#         The name should be unique within each provider. Names should contain
-#         lowercase alphanumeric characters only and no spaces or other
-#         formatting characters.
-#         """
-#         return 'Template'
-#
-#     def displayName(self):
-#         """
-#         Returns the translated algorithm name, which should be used for any
-#         user-visible display of the algorithm name.
-#         """
-#         return self.tr(self.name())
-#
-#     def group(self):
-#         """
-#         Returns the name of the group this algorithm belongs to. This string
-#         should be localised.
-#         """
-#         return self.tr(self.groupId())
-#
-#     def groupId(self):
-#         """
-#         Returns the unique ID of the group this algorithm belongs to. This
-#         string should be fixed for the algorithm, and must not be localised.
-#         The group id should be unique within each provider. Group id should
-#         contain lowercase alphanumeric characters only and no spaces or other
-#         formatting characters.
-#         """
-#         return 'Match'
-#
-#     def tr(self, string):
-#         return QCoreApplication.translate('Processing', string)
-#
-#     def createInstance(self):
-#         return spectralmatchAlgorithm()
-
+from .utils import get_interpreter, normalize_cli_value, load_function_headers, _add_string_param, _add_folder_select_param, get_python_dependency_folder
 
 def loadAlgorithms(self):
     for func in load_function_headers():
@@ -181,20 +55,21 @@ def make_algorithm_class(full_function_path: str):
     Args:
         full_function_path (str): e.g. 'spectralmatch.match.global_regression.global_regression'
     """
-
     parts = full_function_path.split(".")
+    class_attrs = {}
     function = parts[-1]
+    class_name = function.replace("_", "").title() + "Algorithm"
     submodule = parts[-2]
     group_id = parts[-3] if len(parts) >= 4 else parts[-2]  # folder if present, else module
-    class_name = function.replace("_", "").title() + "Algorithm"
-    display_name = function.replace("_", " ").title()
-
-    class_attrs = {}
-    func_info = load_function_headers(full_function_path)
 
     def initAlgorithm(self, config):
+        self.python_interpreter = get_interpreter()
+        self.func_info = load_function_headers(full_function_path)
+        python_dependencies = get_python_dependency_folder()
+        self.env = os.environ.copy()
+        self.env["PYTHONPATH"] = python_dependencies + os.pathsep + self.env.get("PYTHONPATH", "")
 
-        for param in func_info.get("parameters", []):
+        for param in self.func_info.get("parameters", []):
             name = param["name"]
             display_name = param["display_name"]
             param_type = param.get("param_type", "string")
@@ -208,11 +83,11 @@ def make_algorithm_class(full_function_path: str):
                 _add_string_param(self, name, display_name, default)
 
     def processAlgorithm(self, parameters, context, feedback):
-        cmd = ["spectralmatch", function]
+        cmd = [self.python_interpreter, "-m", "spectralmatch", function]
 
         feedback.pushInfo("Processed parameters:")
 
-        for param in func_info.get("parameters", []):
+        for param in self.func_info.get("parameters", []):
             name = param["name"]
             if name in parameters:
                 value = self.parameterAsString(parameters, name, context)
@@ -222,7 +97,7 @@ def make_algorithm_class(full_function_path: str):
 
         feedback.pushInfo("\nRunning: " + " ".join(cmd) + "\n")
 
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=self.env)
         for line in process.stdout:
             feedback.pushInfo(line.rstrip())
         process.stdout.close()
@@ -241,37 +116,15 @@ def make_algorithm_class(full_function_path: str):
         return "https://spectralmatch.github.io/spectralmatch/"
 
     def name(self):
-        """
-        Returns the algorithm name, used for identifying the algorithm. This
-        string should be fixed for the algorithm, and must not be localised.
-        The name should be unique within each provider. Names should contain
-        lowercase alphanumeric characters only and no spaces or other
-        formatting characters.
-        """
         return function.replace("_", " ").capitalize()
 
     def displayName(self):
-        """
-        Returns the translated algorithm name, which should be used for any
-        user-visible display of the algorithm name.
-        """
         return self.tr(self.name())
 
     def group(self):
-        """
-        Returns the name of the group this algorithm belongs to. This string
-        should be localised.
-        """
         return self.tr(self.groupId())
 
     def groupId(self):
-        """
-        Returns the unique ID of the group this algorithm belongs to. This
-        string should be fixed for the algorithm, and must not be localised.
-        The group id should be unique within each provider. Group id should
-        contain lowercase alphanumeric characters only and no spaces or other
-        formatting characters.
-        """
         return group_id.capitalize()
 
     def tr(self, string):
@@ -283,215 +136,3 @@ def make_algorithm_class(full_function_path: str):
     class_attrs.update(locals())
     cls = type(class_name, (QgsProcessingAlgorithm,), class_attrs)
     return cls
-
-
-def _add_folder_select_param(algorithm_instance, name: str, display_name: str):
-    algorithm_instance.addParameter(
-        QgsProcessingParameterFile(
-            name,
-            algorithm_instance.tr(display_name),
-            behavior=QgsProcessingParameterFile.Folder
-        )
-    )
-
-
-def _add_string_param(algorithm_instance, name: str, display_name: str, default):
-    default_value = "None" if default in (None, 'None') else default.strip("'\"")
-    algorithm_instance.addParameter(
-        QgsProcessingParameterString(
-            name,
-            algorithm_instance.tr(display_name),
-            defaultValue=default_value
-        )
-    )
-
-
-def load_function_headers(target_function: str = None):
-    json_path = Path(os.path.dirname(__file__)) / "function_headers.json"
-    with open(json_path, "r", encoding="utf-8") as f:
-        all_funcs = json.load(f)
-    if target_function:
-        for entry in all_funcs:
-            if entry["function"] == target_function:
-                return entry
-        raise ValueError(f"Function {target_function} not found in function_headers.json")
-    return all_funcs
-
-
-def normalize_cli_value(value: str) -> str:
-    """Converts QGIS string parameter to safe CLI string representation."""
-    stripped = value.strip()
-
-    # Handle empty or null
-    if stripped.lower() in {"none", "", "null"}:
-        return "None"
-
-    try:
-        parsed = ast.literal_eval(stripped)
-        return repr(parsed)
-    except (ValueError, SyntaxError):
-        return stripped
-
-
-class InstallSpectralmatchAlgorithm(QgsProcessingAlgorithm):
-    def initAlgorithm(self, config=None):
-        pass  # No user input needed
-
-    def processAlgorithm(self, parameters, context, feedback):
-        cmd = "pip install spectralmatch"
-        feedback.pushInfo(f"Running: {cmd}")
-
-        try:
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                shell=True,
-                text=True
-            )
-            for line in process.stdout:
-                feedback.pushConsoleInfo(line.strip())
-            process.stdout.close()
-            return_code = process.wait()
-            if return_code != 0:
-                raise QgsProcessingException(f"Command failed with return code {return_code}")
-        except Exception as e:
-            raise QgsProcessingException(str(e))
-
-        return {}
-
-    def name(self):
-        return 'install_spectralmatch'
-
-    def displayName(self):
-        return self.tr('Attempt auto install of spectralmatch python library (shell)')
-
-    def group(self):
-        return self.tr('Setup')
-
-    def groupId(self):
-        return 'setup'
-
-    def shortHelpString(self):
-        return 'Installs the spectralmatch library into the QGIS environment using pip.'
-
-    def tr(self, string):
-        return QCoreApplication.translate('Processing', string)
-
-    def createInstance(self):
-        return InstallSpectralmatchAlgorithm()
-
-
-class UninstallSpectralmatchAlgorithm(QgsProcessingAlgorithm):
-    def initAlgorithm(self, config=None):
-        pass  # No user input needed
-
-    def processAlgorithm(self, parameters, context, feedback):
-        cmd = "pip uninstall -y spectralmatch"
-        feedback.pushInfo(f"Running: {cmd}")
-
-        try:
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                shell=True,
-                text=True
-            )
-            for line in process.stdout:
-                feedback.pushConsoleInfo(line.strip())
-            process.stdout.close()
-            return_code = process.wait()
-            if return_code != 0:
-                raise QgsProcessingException(f"Command failed with return code {return_code}")
-        except Exception as e:
-            raise QgsProcessingException(str(e))
-
-        return {}
-
-    def name(self):
-        return 'uninstall_spectralmatch'
-
-    def displayName(self):
-        return self.tr('Attempt auto uninstall of spectralmatch python library (shell)')
-
-    def group(self):
-        return self.tr('Setup')
-
-    def groupId(self):
-        return 'setup'
-
-    def shortHelpString(self):
-        return 'Uninstalls the spectralmatch library from the QGIS environment using pip.'
-
-    def tr(self, string):
-        return QCoreApplication.translate('Processing', string)
-
-    def createInstance(self):
-        return UninstallSpectralmatchAlgorithm()
-
-class ManualPipCommand(QgsProcessingAlgorithm):
-    PYTHON_EXEC = "PYTHON_EXEC"
-    COMMAND = "COMMAND"
-
-    def initAlgorithm(self, config=None):
-        self.addParameter(
-            QgsProcessingParameterString(
-                self.PYTHON_EXEC,
-                "Python interpreter path (may need to change to the python interpreter e.g. '/absolute/location/of/qgis/lib/python')",
-                defaultValue=sys.executable
-            )
-        )
-        self.addParameter(
-            QgsProcessingParameterString(
-                self.COMMAND,
-                "Command (e.g. -m pip install spectralmatch)",
-                defaultValue="-m pip install spectralmatch"
-            )
-        )
-
-    def processAlgorithm(self, parameters, context, feedback):
-        python_path = parameters[self.PYTHON_EXEC]
-        command_args = parameters[self.COMMAND]
-
-        cmd = f'"{python_path}" {command_args}'
-        feedback.pushInfo(f"Running: {cmd}")
-
-        try:
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                shell=True,
-                text=True,
-            )
-            for line in process.stdout:
-                feedback.pushInfo(line.strip())
-            process.wait()
-            if process.returncode != 0:
-                raise QgsProcessingException(f"Command failed with code {process.returncode}")
-        except Exception as e:
-            raise QgsProcessingException(f"Execution error: {e}")
-
-        return {}
-
-    def name(self):
-        return "manual_pip_command"
-
-    def displayName(self):
-        return self.tr("Manual Install/Uninstall via pip python command")
-
-    def group(self):
-        return self.tr("Setup")
-
-    def groupId(self):
-        return "setup"
-
-    def shortHelpString(self):
-        return "Manually run a pip install/uninstall command using a specified Python interpreter."
-
-    def createInstance(self):
-        return ManualPipCommand()
-
-    def tr(self, string):
-        return QCoreApplication.translate("Processing", string)

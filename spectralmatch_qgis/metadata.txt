@@ -5,12 +5,12 @@
 [general]
 name=spectralmatch
 qgisMinimumVersion=3.0
-description=Performant Relative Radiometric Normalization toolkit with Pseudo-Invariant Features, seamlines, and other utilities for mosaics and time series
+description=relative radiometric normalization toolkit for raster mosaics and time series
 version=1.0.2
 author=Kanoa Lindiwe LLC
 email=cankanoa@gmail.com
 
-about=spectralmatch provides a Python library, command line interface, and QGIS plugin with multiple algorithms to perform Relative Radiometric Normalization (RRN). It also includes utilities for generating seamlines, cloud masks, Pseudo-Invariant Features, statistics, preprocessing, and more. Explore this toolkit’s features at https://spectralmatch.github.io/spectralmatch/. To install in QGIS, the spectralmatch Python library is required, for installation instructions, see https://spectralmatch.github.io/spectralmatch/installation/.
+about=Spectralmatch provides algorithms to perform relative radiometric normalization (RRN) to enhance spectral consistency across raster mosaics and time series. It is built for geoscientific use, with a sensor- and unit-agnostic design, optimized for automation and efficiency on arbitrarily many images and bands, and works well with Very High Resolution Imagery (VHRI) as it does not require pixel co-registration. Its current matching algorithms are inspired by @Yu:2017, which include global regression and local block adjustment that minimize inter-image variability without relying on ancillary data. The software supports cloud and vegetation masking, pseudo invariant feature (PIF) based exclusion, seamline network generation, raster merging, and plotting statistics. The toolkit is available as an open-source Python library, command line interface, and QGIS plugin. Explore this toolkit’s features at https://spectralmatch.github.io/spectralmatch/. To install in QGIS, the spectralmatch Python library is required, for installation instructions, see https://spectralmatch.github.io/spectralmatch/installation/.
 
 tracker=https://github.com/spectralmatch/spectralmatch/issues
 repository=https://github.com/spectralmatch/spectralmatch
@@ -23,7 +23,7 @@ hasProcessingProvider=yes
 # changelog=
 
 # Tags are comma separated with spaces allowed
-tags=time-series, gis, qgis-plugin, remote-sensing, satellite-imagery, mosaic, histogram-matching, rrn, radiometric-correction, spectral-matching, relative-radiometric-normalization, seamlines
+tags=Relative radiometric normalization, Python, Time series, Mosaic, QGIS plugin, Cloud masking, Pseudo invariant features, Remote sensing, Histogram matching, Seamline
 
 homepage=https://spectralmatch.github.io/spectralmatch/
 category=Analysis

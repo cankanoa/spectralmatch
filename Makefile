@@ -1,6 +1,6 @@
 MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 ENV_NAME = spectralmatch
-GENERATE_HEADERS=python spectralmatch_qgis/generate_function_headers.py
+BUILD_PLUGIN=python spectralmatch_qgis/build_plugin.py
 QGISPLUGINNAME = spectralmatch_qgis
 
 # Install
@@ -82,18 +82,21 @@ clean:
 	       $(MAKEFILE_DIR)spectralmatch_qgis/help/build \
 	       $(MAKEFILE_DIR)spectralmatch_qgis/function_headers.json \
 		   $(MAKEFILE_DIR)spectralmatch_qgis.zip \
-		   $(MAKEFILE_DIR)docs/images
+		   $(MAKEFILE_DIR)docs/images \
+		   $(MAKEFILE_DIR)spectralmatch_qgis/requirements.txt \
+		   $(MAKEFILE_DIR)/spectralmatch_qgis/*.whl
 	find $(MAKEFILE_DIR)docs/examples/data_landsat -mindepth 1 ! -path "*/Input*" -exec rm -rf {} +
 	find $(MAKEFILE_DIR)docs/examples/data_worldview -mindepth 1 ! -path "*/Input*" -exec rm -rf {} +
 
+# Python
+python-build:
+	@echo "Building Python wheel..."
+	python -m build --wheel
 
 # QGIS
-
-qgis-headers:
-	@echo "Generating function_headers.json..."
-	PYTHONPATH=. $(GENERATE_HEADERS)
-
-qgis-build: qgis-headers
+qgis-build: python-build
+	@mv dist/*.whl spectralmatch_qgis
+	PYTHONPATH=. $(BUILD_PLUGIN)
 	@echo "Removing __pycache__..."
 	rm -rf spectralmatch_qgis/__pycache__ spectralmatch_qgis/test/__pycache__
 	@echo "Creating plugin zip..."

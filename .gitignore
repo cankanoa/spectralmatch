@@ -4,6 +4,8 @@ docs/images
 # QGIS stuff
 spectralmatch_qgis/function_headers.json
 spectralmatch_qgis.zip
+spectralmatch_qgis/*.whl
+spectralmatch_qgis/requirements.txt
 
 # Example image
 docs/examples/data_worldview/*
