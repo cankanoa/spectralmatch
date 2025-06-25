@@ -12,6 +12,7 @@ def compare_image_spectral_profiles_pairs(
     title: str,
     xlabel: str,
     ylabel: str,
+    line_width: float = 1,
 ):
     """
     Plots paired spectral profiles for before-and-after image comparisons.
@@ -30,6 +31,7 @@ def compare_image_spectral_profiles_pairs(
         title (str): Title of the plot.
         xlabel (str): X-axis label.
         ylabel (str): Y-axis label.
+        line_width (float, optional): Width of the spectral profiles lines. Default is 1.
 
     Outputs:
         Saves a spectral comparison plot showing pre- and post-processing profiles.
@@ -62,6 +64,7 @@ def compare_image_spectral_profiles_pairs(
                         mean_spectral,
                         linestyle=linestyle,
                         color=color,
+                        linewidth=line_width,
                         label=f"{label} - {'Before' if i == 0 else 'After'}",
                     )
 
@@ -70,6 +73,8 @@ def compare_image_spectral_profiles_pairs(
     plt.title(title)
     plt.legend()
     plt.grid(True)
+    plt.xticks(np.arange(1, num_bands + 1, 1))
+    plt.legend(frameon=True, facecolor='white', edgecolor='black', framealpha=1)
     plt.savefig(output_figure_path, dpi=300)
     plt.close()
     print(f"Saved: {os.path.splitext(os.path.basename(output_figure_path))[0]}")
@@ -154,42 +159,15 @@ def compare_before_after_all_images(
     ylabel_2: str,
     image_names: list = None,
 ):
-    """
-    Creates a 2-row grid comparing before and after images with per-band contrast stretch and nodata transparency.
+    import os
+    import numpy as np
+    import rasterio
+    import matplotlib.pyplot as plt
+    from matplotlib import gridspec
 
-    Args:
-        input_images_1 (list): Paths to "before" images (top row).
-        input_images_2 (list): Paths to "after" images (bottom row).
-        output_figure_path (str): File path to save the output figure.
-        image_names (list, optional): Column titles. Must match image count if provided.
-        title (str): Figure title.
-        ylabel_1 (str): Label for the top row.
-        ylabel_2 (str): Label for the bottom row.
-
-    Raises:
-        AssertionError: If input lengths mismatch or if image_names is invalid.
-
-    Saves:
-        A PNG figure with transparent nodata and matched image pairs.
-    """
-
-    assert len(input_images_1) == len(
-        input_images_2
-    ), "Image lists must be the same length."
-    if image_names:
-        assert len(image_names) == len(
-            input_images_1
-        ), "image_names must match image count."
-
-    os.makedirs(os.path.dirname(output_figure_path), exist_ok=True)
-    num_images = len(input_images_1)
-    fig = plt.figure(figsize=(5 * num_images, 10))
-    gs = gridspec.GridSpec(2, num_images + 1, width_ratios=[0.05] + [1] * num_images)
-
-    for col_idx, (path1, path2) in enumerate(zip(input_images_1, input_images_2)):
-        for row_idx, path in enumerate([path1, path2]):
-            ax = fig.add_subplot(gs[row_idx, col_idx + 1])  # shift right by 1 column
-
+    def compute_row_stretch(paths):
+        all_valid = [[] for _ in range(3)]
+        for path in paths:
             with rasterio.open(path) as src:
                 nodata = src.nodata
                 img = (
@@ -198,30 +176,58 @@ def compare_before_after_all_images(
                     else np.repeat(src.read(1)[np.newaxis, ...], 3, axis=0)
                 )
                 img = img.astype("float32")
-
                 mask = np.full(img.shape[1:], False)
                 if nodata is not None:
                     for b in range(img.shape[0]):
                         mask |= img[b] == nodata
-
                 for b in range(img.shape[0]):
-                    valid = img[b][~mask]
-                    if valid.size > 0:
-                        vmin, vmax = np.percentile(valid, (2, 98))
-                        img[b] = np.clip((img[b] - vmin) / (vmax - vmin), 0, 1)
-                    else:
-                        img[b] = 0
+                    all_valid[b].append(img[b][~mask])
+        return [
+            np.percentile(np.concatenate(valid), (2, 98))
+            if valid else (0, 1)
+            for valid in all_valid
+        ]
 
+    assert len(input_images_1) == len(input_images_2)
+    if image_names:
+        assert len(image_names) == len(input_images_1)
+
+    os.makedirs(os.path.dirname(output_figure_path), exist_ok=True)
+    num_images = len(input_images_1)
+    fig = plt.figure(figsize=(5 * num_images, 10))
+    gs = gridspec.GridSpec(2, num_images + 1, width_ratios=[0.05] + [1] * num_images)
+
+    stretch_1 = compute_row_stretch(input_images_1)
+    stretch_2 = compute_row_stretch(input_images_2)
+
+    for col_idx, (path1, path2) in enumerate(zip(input_images_1, input_images_2)):
+        for row_idx, (path, stretch) in enumerate(
+            [(path1, stretch_1), (path2, stretch_2)]
+        ):
+            ax = fig.add_subplot(gs[row_idx, col_idx + 1])
+            with rasterio.open(path) as src:
+                nodata = src.nodata
+                img = (
+                    src.read([1, 2, 3])
+                    if src.count >= 3
+                    else np.repeat(src.read(1)[np.newaxis, ...], 3, axis=0)
+                )
+                img = img.astype("float32")
+                mask = np.full(img.shape[1:], False)
+                if nodata is not None:
+                    for b in range(img.shape[0]):
+                        mask |= img[b] == nodata
+                for b in range(img.shape[0]):
+                    vmin, vmax = stretch[b]
+                    img[b] = np.clip((img[b] - vmin) / (vmax - vmin), 0, 1)
                 img = img.transpose(1, 2, 0)
                 alpha = (~mask).astype("float32")
                 rgba = np.dstack((img, alpha))
-
                 ax.imshow(rgba)
                 if row_idx == 0 and image_names:
                     ax.set_title(image_names[col_idx])
                 ax.axis("off")
 
-    # Add vertical row labels
     for i, label in enumerate([ylabel_1, ylabel_2]):
         ax = fig.add_subplot(gs[i, 0])
         ax.set_ylabel(label, fontsize=12, rotation=90, labelpad=10, va="center")
