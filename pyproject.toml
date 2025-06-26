@@ -62,6 +62,10 @@ docs = [
     "mkdocs-gen-files>=0.5.0",
 ]
 
+qgis-build = [
+    "build"
+]
+
 [project.urls]
 "Bug Tracker" = "https://github.com/cankanoa/spectralmatch"
 "Source" = "https://github.com/cankanoa/spectralmatch"

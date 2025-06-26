@@ -69,7 +69,8 @@ conda activate spectralmatch
 The `pyproject.toml` defines **core** dependancies to run the library and optional **dev**, and **docs** dependancies.
 
 ```bash
-pip install . # normal dependencies
-pip install -e ".[dev]"   # developer dependencies
-pip install -e ".[docs]"  # documentation dependencies
+pip install . # Normal dependencies
+pip install -e ".[dev]"   # Developer dependencies
+pip install -e ".[docs]"  # Documentation dependencies
+pip install -e ".[qgis-build]" # Build qgis plugin
 ```
