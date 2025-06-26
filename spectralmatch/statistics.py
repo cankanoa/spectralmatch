@@ -159,12 +159,24 @@ def compare_before_after_all_images(
     ylabel_2: str,
     image_names: list = None,
 ):
-    import os
-    import numpy as np
-    import rasterio
-    import matplotlib.pyplot as plt
-    from matplotlib import gridspec
+    """
+    Creates a two-row image grid to compare before-and-after raster pairs with consistent per-row contrast stretching. Each column shows a pair of aligned images with transparent nodata. Supports 1- and 3-band rasters.
 
+    Args:
+        input_images_1 (list): List of file paths to the "before" images (top row).
+        input_images_2 (list): List of file paths to the "after" images (bottom row).
+        output_figure_path (str): Destination path to save the output PNG figure.
+        title (str): Title of the entire figure.
+        ylabel_1 (str): Y-axis label for the top row.
+        ylabel_2 (str): Y-axis label for the bottom row.
+        image_names (list, optional): List of image names to use as column titles. Must match the number of image pairs.
+
+    Raises:
+        AssertionError: If input lists have mismatched lengths or if `image_names` does not match image count.
+
+    Output:
+        Saves a PNG file with the comparison figure.
+    """
     def compute_row_stretch(paths):
         all_valid = [[] for _ in range(3)]
         for path in paths:
