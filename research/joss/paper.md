@@ -14,19 +14,19 @@ tags:
 authors:
   - name: Kanoa Lindiwe
     orcid: 0009-0009-5520-1911
-    affiliation: 1, 2
+    affiliation: 1
   - name: Joseph Emile Honour Percival
     orcid: 0000-0001-5941-4601
-    affiliation: 1, 2
+    affiliation: 1
   - name: Ryan Perroy
     orcid: 0000-0002-4210-3281
     affiliation: 1, 2
 affiliations:
- - name: Dept of Geography & Environmental Science, University of Hawaii at Hilo, United States
-   index: 1
-   ror: 02mp2av58
  - name: Spatial Data Analysis & Visualization Research Lab, University of Hawaii at Hilo, United States
+   index: 1
+ - name: Dept of Geography & Environmental Science, University of Hawaii at Hilo, United States
    index: 2
+   ror: 02mp2av58
 date: 8 May 2025
 bibliography: paper.bib
 ---
@@ -46,6 +46,9 @@ The local block adjustment algorithm applies block-wise radiometric correction t
 Various helper functions support the creation of cloud masks, non-vegetation PIFs, generating seamline networks, merging images, and basic figures. Cloud masking utilities enable the generation of binary masks using [OmniCloudMask](https://github.com/DPIRD-DMA/OmniCloudMask) by @Wright:2025, followed by post-processing and vectorization. Vegetation masking utilities use NDVI-based thresholds, followed by post-processing and vectorization. The created masks can be used to mask input images or withhold pixels from analysis. Seamline generation utilities use Voronoi-based centerlines, following the methodology of @Yuan:2023. Statistical utilities can generate basic figures comparing image spectral profiles before and after matching to evaluate radiometric changes. Raster merging utilities combine the final images into a seamless mosaic.
 
 # Figures
-![Mean spectral profiles of five cloud masked Landsat images before and after applying Normalized Difference Vegetation Index masking, global regression, and local block adjustment with spectralmatch.\label{fig:1}](https://raw.githubusercontent.com/spectralmatch/spectralmatch/main/images/matching_histogram.png)
+![Mean spectral profiles of five cloud masked Landsat images located in Kohala, Hawaii before and after applying Normalized Difference Vegetation Index masking, global regression, and local block adjustment with spectralmatch.\label{fig:1}](https://raw.githubusercontent.com/spectralmatch/spectralmatch/main/images/matching_histogram.png)
+
+# Acknowledgements
+This work was primarily funded by the National Science Foundation EPSCoR grant 2149133, Change Hawaii: Harnessing the Data Revolution for Island Resilience. The University of Hawaii at Hilo Spatial Data Analysis and Visualization Lab (SDAV) provided computational and lab resources.
 
 # References
