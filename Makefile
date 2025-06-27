@@ -52,6 +52,19 @@ tag:
 	git tag -a v$(version) -m "Version $(version)"
 	git push origin v$(version)
 
+version:
+	@if [ -z "$(version)" ]; then \
+		echo "Usage: make version version=1.2.3"; \
+		exit 1; \
+	fi
+	@echo "Updating versions to $(version)..."
+	sed -i.bak "s/^version = .*/version = \"$(version)\"/" pyproject.toml && rm pyproject.toml.bak
+	sed -i.bak "s/^version=.*/version=$(version)/" spectralmatch_qgis/metadata.txt && rm spectralmatch_qgis/metadata.txt.bak
+	git add pyproject.toml spectralmatch_qgis/metadata.txt
+	git commit -m "Release new Pypi library, Github release, and QGIS plugin version: $(version)"
+	git push origin HEAD
+	$(MAKE) tag version=$(version)
+
 
 # Code formatting
 format:
@@ -104,4 +117,5 @@ qgis-build: python-build
 	  -x "*.DS_Store" "*__MACOSX*"
 
 qgis-deploy:
-	python spectralmatch_qgis/plugin_upload.py spectralmatch_qgis.zip
+	python spectralmatch_qgis/plugin_upload.py spectralmatch_qgis.zip \
+		--username your_username --password your_password

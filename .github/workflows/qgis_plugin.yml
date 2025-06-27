@@ -1,0 +1,62 @@
+name: Upload QGIS Plugin
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag to trigger upload (e.g., v1.2.3)"
+        required: false
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repository at the tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.version || github.ref_name }}
+
+      - name: Ensure correct commit is checked out
+        shell: bash -l {0}
+        run: |
+          git fetch --tags
+          git checkout ${{ github.event.inputs.version || github.ref_name }}
+
+      - name: Install Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: "3.12"
+          channels: conda-forge
+          conda-remove-defaults: true
+
+      - name: Create Conda environment
+        run: |
+          conda create --name spectralmatch_env python=3.12 "gdal=3.10.2" "proj>=9.3" --override-channels -c conda-forge -v
+
+      - name: Activate Conda and install project
+        shell: bash -l {0}
+        run: |
+          conda activate spectralmatch_env
+          pip install -e ".[qgis-build]"
+
+      - name: Build QGIS plugin
+        shell: bash -l {0}
+        run: |
+          conda activate spectralmatch_env
+          make qgis-build
+
+      - name: Upload plugin to QGIS repository
+        shell: bash -l {0}
+        env:
+          QGIS_USER: ${{ secrets.QGIS_USER }}
+          QGIS_PASS: ${{ secrets.QGIS_PASS }}
+        run: |
+          conda activate spectralmatch_env
+          python spectralmatch_qgis/plugin_upload.py spectralmatch_qgis.zip \
+            --username "$QGIS_USER" --password "$QGIS_PASS"
