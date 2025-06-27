@@ -272,7 +272,7 @@ make docs-deploy
 ---
 
 ## Versioning
-Automatically create a GitHub release, Pypi library, and QGIS plugin with each version. All three distributions are on the same versioning and deployed with GitHub actions. New versions will be released when sufficient new functionality and bug fixes have been added. 
+Automatically create a GitHub release, Pypi library, and QGIS plugin with each version. All three distributions are on the same versioning and deployed with GitHub actions. New versions will be released when sufficient new functionality or bug fixes have been added. 
 ```bash
 make version version=1.2.3
 ```
