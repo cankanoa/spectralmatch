@@ -63,11 +63,11 @@ However, global correction alone cannot capture intra-image variability so a sec
 ## Installation [(Detailed methods)](https://spectralmatch.github.io/spectralmatch/installation/)
 
 ### Installation as a QGIS Plugin
-Install the spectralmatch plugin in QGIS and find the tools in the Processing Toolbox. Install the spectralmatch Python library with the tools in the `setup` toolbox or manually.
+Install the spectralmatch plugin in QGIS and find the tools in the Processing Toolbox under 'spectralmatch'.
 
 ### Installation as a Python Library and CLI
 
-Ensure you have the following system-level prerequisites: `Python ≥ 3.10`, `pip`, `PROJ ≥ 9.3`, and `GDAL = 3.10.2`. Use this command to install the library:
+Ensure you have the following system-level prerequisites: `Python ≥ 3.10`, `pip`, `PROJ ≥ 9.3`, and `GDAL ≥ 3.10.2`. Use this command to install the library:
 
 
 ```bash
