@@ -53,7 +53,7 @@ jobs:
         run: |
           conda activate spectralmatch_env
           CURRENT_TAG="${{ github.event.inputs.version || github.ref_name }}"
-          PREVIOUS_TAG=$(git tag --sort=creatordate | grep -B9999 "$CURRENT_TAG" | head -n 1 || true)
+          PREVIOUS_TAG=$(git tag --sort=-creatordate | grep -A1 "$CURRENT_TAG" | tail -n1 || true)
 
           if [ -z "$PREVIOUS_TAG" ] || [ "$PREVIOUS_TAG" = "$CURRENT_TAG" ]; then
             echo "No previous tag found. Using initial commit."
