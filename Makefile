@@ -61,7 +61,7 @@ version:
 	sed -i.bak "s/^version = .*/version = \"$(version)\"/" pyproject.toml && rm pyproject.toml.bak
 	sed -i.bak "s/^version=.*/version=$(version)/" spectralmatch_qgis/metadata.txt && rm spectralmatch_qgis/metadata.txt.bak
 	git add pyproject.toml spectralmatch_qgis/metadata.txt
-	git commit -m "Release new Pypi library, Github release, and QGIS plugin version: $(version)"
+	git commit -m "Version $(version) released"
 	git push origin HEAD
 	$(MAKE) tag version=$(version)
 
@@ -108,7 +108,7 @@ python-build:
 
 # QGIS
 qgis-build: python-build
-	@mv dist/*.whl spectralmatch_qgis
+	@cp dist/*.whl spectralmatch_qgis
 	PYTHONPATH=. $(BUILD_PLUGIN)
 	@echo "Removing __pycache__..."
 	rm -rf spectralmatch_qgis/__pycache__ spectralmatch_qgis/test/__pycache__

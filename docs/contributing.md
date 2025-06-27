@@ -249,6 +249,7 @@ make clean
 ---
 
 ## Docs
+Docs are deployed on push or merge at the main branch, or use the following commands:
 
 ### Serve docs locally
 Runs a local dev server at http://localhost:8000.
@@ -271,9 +272,9 @@ make docs-deploy
 ---
 
 ## Versioning
-Uses git tag to create annotated version tags and push them. This also syncs to Pypi. New versions will be released when the maintainer determines sufficient new functionality has been added.
+Automatically create a GitHub release, Pypi library, and QGIS plugin with each version. All three distributions are on the same versioning and deployed with GitHub actions. New versions will be released when sufficient new functionality and bug fixes have been added. 
 ```bash
-make tag version=1.2.3
+make version version=1.2.3
 ```
 
 ---
@@ -318,4 +319,11 @@ make test
 To test a individual folder or file:
 ```bash
 make test-file path=path/to/folder_or_file
+```
+
+## Building Python Library and QGIS Plugin Locally
+Use these commands to build packages locally:
+```shell
+make qgis-build # Build QGIS plugin
+make python-build # Build python library
 ```
