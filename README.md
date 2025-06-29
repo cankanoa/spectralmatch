@@ -42,7 +42,7 @@ However, global correction alone cannot capture intra-image variability so a sec
 
 
 ![Histogram matching graph](./images/matching_histogram.png)
-*Mean spectral profiles of five cloud masked Landsat images before and after applying Normalized Difference Vegetation Index masking, global regression, and local block adjustment with spectralmatch.*
+*Mean spectral profiles of five cloud masked Landsat 8 OLI L2 images located in Kohala, Hawaii before and after applying Normalized Difference Vegetation Index masking, global regression, and local block adjustment with spectralmatch.*
 
 #### Assumptions
 
