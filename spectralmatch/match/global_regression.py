@@ -14,6 +14,7 @@ from rasterio.windows import Window
 from rasterio.transform import rowcol
 from rasterio.features import geometry_mask
 from rasterio.coords import BoundingBox
+from tqdm import tqdm
 
 from ..handlers import _resolve_paths, _get_nodata_value, _check_raster_requirements
 from ..utils_multiprocessing import (
@@ -580,46 +581,50 @@ def _apply_adjustments_process_image(
 
         if os.path.exists(output_image_path):
             os.remove(output_image_path)
+        windows = _resolve_windows(src, window_size)
+        args = [
+            (
+                window,
+                band,
+                scale[band],
+                offset[band],
+                nodata_val,
+                calculation_dtype,
+                debug_logs,
+                image_name,
+            )
+            for window in windows
+            for band in range(num_bands)
+        ]
         with rasterio.open(output_image_path, "w", **meta) as dst:
-
-            for band in range(num_bands):
-                windows = _resolve_windows(src, window_size)
-                args = [
-                    (
-                        window,
-                        band,
-                        scale[band],
-                        offset[band],
-                        nodata_val,
-                        calculation_dtype,
-                        debug_logs,
-                        image_name,
-                    )
-                    for window in windows
-                ]
-
-                if window_parallel:
-                    with _get_executor(
+            if window_parallel:
+                with _get_executor(
                         window_backend,
                         window_max_workers,
                         initializer=WorkerContext.init,
                         initargs=({image_name: ("raster", input_image_path)},),
-                    ) as executor:
-                        futures = [
-                            executor.submit(_apply_adjustments_process_window, *arg)
-                            for arg in args
-                        ]
-                        for future in as_completed(futures):
-                            band, window, buf = future.result()
-                            dst.write(
-                                buf.astype(meta["dtype"]), band + 1, window=window
-                            )
-                else:
-                    WorkerContext.init({image_name: ("raster", input_image_path)})
-                    for arg in args:
-                        band, window, buf = _apply_adjustments_process_window(*arg)
+                ) as executor:
+                    future_to_params = {
+                        executor.submit(_apply_adjustments_process_window, *arg): (arg[0], arg[1])  # window, band
+                        for arg in args
+                    }
+                    future_iter = tqdm(
+                        as_completed(future_to_params),
+                        total=len(future_to_params),
+                        desc="Apply Adjustments"
+                    ) if debug_logs else as_completed(future_to_params)
+
+                    for future in future_iter:
+                        band, window, buf = future.result()
                         dst.write(buf.astype(meta["dtype"]), band + 1, window=window)
-                    WorkerContext.close()
+            else:
+                WorkerContext.init({image_name: ("raster", input_image_path)})
+                arg_iter = tqdm(args, desc="Apply Adjustments") if debug_logs else args
+                for arg in arg_iter:
+                    window, band, _, _, _, _, _, _ = arg
+                    _, _, buf = _apply_adjustments_process_window(*arg)
+                    dst.write(buf.astype(meta["dtype"]), band + 1, window=window)
+                WorkerContext.close()
 
 
 def _save_adjustments(
@@ -1025,67 +1030,75 @@ def _overlap_stats_process_image(
             col_min_i,
         )
 
-        for band in range(num_bands):
-            combined_pixels_i, combined_pixels_j = [], []
+        # Initialize stats structure
+        stats = {name_i: {name_j: {}}, name_j: {name_i: {}}}
+        completed = []
 
-            args = [
-                (
-                    win,
-                    band,
-                    col_min_i,
-                    row_min_i,
-                    name_i,
-                    name_j,
-                    nodata_i,
-                    nodata_j,
-                    geoms_i,
-                    geoms_j,
-                    invert,
-                )
-                for win in fit_windows_image_i
-            ]
+        # Generate all (window, band) combinations
+        args = [
+            (
+                win,
+                band,
+                col_min_i,
+                row_min_i,
+                name_i,
+                name_j,
+                nodata_i,
+                nodata_j,
+                geoms_i,
+                geoms_j,
+                invert,
+            )
+            for win in fit_windows_image_i
+            for band in range(num_bands)
+        ]
 
-            if parallel:
-                with _get_executor(
+        if parallel:
+            with _get_executor(
                     backend,
                     max_workers,
                     initializer=WorkerContext.init,
                     initargs=(
-                        {
-                            name_i: ("raster", input_image_path_i),
-                            name_j: ("raster", input_image_path_j),
-                        },
+                            {
+                                name_i: ("raster", input_image_path_i),
+                                name_j: ("raster", input_image_path_j),
+                            },
                     ),
-                ) as executor:
-                    futures = [
-                        executor.submit(_overlap_stats_process_window, *arg)
-                        for arg in args
-                    ]
-                    for future in as_completed(futures):
-                        result = future.result()
-                        if result is not None:
-                            combined_pixels_i.append(result[0])
-                            combined_pixels_j.append(result[1])
-            else:
-                WorkerContext.init(
-                    {
-                        name_i: ("raster", input_image_path_i),
-                        name_j: ("raster", input_image_path_j),
-                    }
-                )
-                for arg in args:
-                    result = _overlap_stats_process_window(*arg)
-                    if result is not None:
-                        combined_pixels_i.append(result[0])
-                        combined_pixels_j.append(result[1])
-                WorkerContext.close()
+            ) as executor:
+                future_to_params = {
+                    executor.submit(_overlap_stats_process_window, *arg): arg[1]
+                    for arg in args
+                }
+                future_iter = tqdm(
+                    as_completed(future_to_params),
+                    total=len(future_to_params),
+                    desc="Overlap Stats"
+                ) if debug_logs else as_completed(future_to_params)
 
-            v_i = (
-                np.concatenate(combined_pixels_i) if combined_pixels_i else np.array([])
+                for future in future_iter:
+                    result = future.result()
+                    band = future_to_params[future]
+                    if result is not None:
+                        completed.append((band, result[0], result[1]))
+        else:
+            WorkerContext.init(
+                {
+                    name_i: ("raster", input_image_path_i),
+                    name_j: ("raster", input_image_path_j),
+                }
             )
-            v_j = (
-                np.concatenate(combined_pixels_j) if combined_pixels_j else np.array([])
-            )
+            arg_iter = tqdm(args, desc="Overlap Stats") if debug_logs else args
+            for arg in arg_iter:
+                result = _overlap_stats_process_window(*arg)
+                if result is not None:
+                    band = arg[1]
+                    completed.append((band, result[0], result[1]))
+            WorkerContext.close()
+
+        # Aggregate per-band statistics
+        for band in range(num_bands):
+            v_i = np.concatenate([arr_i for b, arr_i, _ in completed if b == band]) if completed else np.array([])
+            v_j = np.concatenate([arr_j for b, _, arr_j in completed if b == band]) if completed else np.array([])
 
             stats[name_i][name_j][band] = {
                 "mean": float(np.mean(v_i)) if v_i.size else 0,
@@ -1097,8 +1110,7 @@ def _overlap_stats_process_image(
                 "std": float(np.std(v_j)) if v_j.size else 0,
                 "size": int(v_j.size),
             }
-    return stats
-
+        return stats
 
 def _overlap_stats_process_window(
     win: Window,
